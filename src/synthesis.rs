@@ -93,9 +93,9 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
                     pairs_checked += 1;
                     pairs_in_input += 1;
 
-                    let report_interval = (total_pairs / 20).max(1).min(100);
+                    let report_interval = (total_pairs / 20).clamp(1, 100);
                     if pairs_in_input == 1
-                        || pairs_in_input % report_interval == 0
+                        || pairs_in_input.is_multiple_of(report_interval)
                         || pairs_in_input == total_pairs
                     {
                         report_progress(&format!(

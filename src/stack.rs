@@ -87,10 +87,6 @@ pub fn format_wasm_block(ops: &[WasmOp]) -> String {
         .join("; ")
 }
 
-pub fn sem_ops_to_wasm(ops: &[SemOp]) -> Vec<WasmOp> {
-    ops.iter().map(WasmOp::from).collect()
-}
-
 /// Stack emulator: values on the stack are `Id`s into a growing `RecExpr`.
 pub struct StackToDag {
     expr: RecExpr<WasmLang>,
@@ -200,13 +196,6 @@ impl StackToDag {
     pub fn build(mut self, ops: &[WasmOp]) -> RecExpr<WasmLang> {
         for op in ops {
             self.apply(op);
-        }
-        self.expr
-    }
-
-    pub fn build_sem(mut self, ops: &[SemOp]) -> RecExpr<WasmLang> {
-        for op in ops {
-            self.apply_sem(op);
         }
         self.expr
     }

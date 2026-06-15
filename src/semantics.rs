@@ -802,18 +802,6 @@ pub fn enumerate_sequences_by_output(
     by_output
 }
 
-pub fn enumerate_sequences(
-    input: &[StackTy],
-    ops: &[SemOp],
-    max_len: usize,
-) -> Vec<Vec<SemOp>> {
-    let catalog = OpCatalog::from_ops(ops);
-    enumerate_sequences_by_output(input, &catalog, max_len)
-        .into_values()
-        .flatten()
-        .collect()
-}
-
 pub fn exploration_inputs() -> Vec<Vec<StackTy>> {
     let mut inputs = vec![vec![]];
     for h in 1..=3 {
@@ -832,8 +820,8 @@ pub fn z3_context() -> Context {
 pub fn print_semantics_table() {
     println!("=== Wasm instruction semantics ===");
     println!(
-        "{:<12} {:<6} {:<6} {:<6} {:<20} {}",
-        "opcode", "pop", "push", "state?", "trap (Z3)", "Z3 op"
+        "{:<12} {:<6} {:<6} {:<6} {:<20} Z3 op",
+        "opcode", "pop", "push", "state?", "trap (Z3)"
     );
     for op in concrete_ops() {
         let spec = spec_for(&op);
