@@ -5,6 +5,7 @@
 
 mod binop_defs;
 mod concrete;
+mod eval;
 mod derive;
 mod env;
 mod instantiate;

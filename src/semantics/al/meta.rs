@@ -5,28 +5,103 @@
 
 use super::ir::{BinOpKind, NumType, Sign, WasmBinOp};
 
+/// Wasm value type for `$size` (binop.al L17–34).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ValType {
+    I32,
+    I64,
+    F32,
+    F64,
+    V128,
+}
+
 /// Argument to a meta-level `$fn(...)` call.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // Nat, Sign used when more binop.al defs are wired in
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AlMetaArg {
     NumType(NumType),
+    ValType(ValType),
     BinOp(WasmBinOp),
     Var(&'static str),
     Nat(u32),
     Sign(Sign),
+    Expr(Box<AlMetaExpr>),
 }
 
-/// Meta-level expression.
+/// Meta-level expression (steps and `$fn` bodies).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AlMetaExpr {
     /// `$name(args...)`
     Call(&'static str, Vec<AlMetaArg>),
     /// `|expr| <= 0` — optional/list is empty (ε).
     OptionalLen(Box<AlMetaExpr>),
-    /// `choose(expr)` — extract value from singleton optional.
+    /// `choose(expr)` — extract value from singleton optional/list.
     Choose(Box<AlMetaExpr>),
     /// `top_value(nt)` — stack type assertion.
     TopValue(NumType),
+    /// Formal parameter reference.
+    Param(&'static str),
+    NatLit(u32),
+    IntLit(i32),
+    ValTypeLit(ValType),
+    SignLit(Sign),
+    BinOpLit(WasmBinOp),
+    /// `?()` — empty optional.
+    EmptyOpt,
+    /// `?(expr)` — singleton optional.
+    SomeOpt(Box<AlMetaExpr>),
+    /// `[]` — empty list.
+    EmptyList,
+    /// `[expr]` — singleton list.
+    SingletonList(Box<AlMetaExpr>),
+    /// `$int$(e)`
+    IntCoerce(Box<AlMetaExpr>),
+    /// `$nat$(e)`
+    NatCoerce(Box<AlMetaExpr>),
+    /// `$rat$(e)`
+    RatCoerce(Box<AlMetaExpr>),
+    /// `$truncz$(e)`
+    TruncZ(Box<AlMetaExpr>),
+    Add(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    Sub(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    Mul(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    Div(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    /// `a \ b` — natural modulus.
+    Mod(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    /// `a % b` — natural remainder (bit-width mask for shifts).
+    Rem(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    /// `a << b` — natural left shift.
+    Shl(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    Pow(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    Neg(Box<AlMetaExpr>),
+    /// Extract `sx` from `(DIV sx)` / `(REM sx)` / `(SHR sx)`.
+    BinOpSignOf(Box<AlMetaExpr>),
+}
+
+/// Meta-level predicate in `If` / `Assert`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AlMetaPred {
+    Eq(AlMetaExpr, AlMetaExpr),
+    Lt(AlMetaExpr, AlMetaExpr),
+    Le(AlMetaExpr, AlMetaExpr),
+    And(Box<AlMetaPred>, Box<AlMetaPred>),
+    /// `~(expr != None)` — optional is empty.
+    OptIsNone(AlMetaExpr),
+    /// `type(param) == Inn`
+    TypeIsInn(AlMetaExpr),
+    /// `type(param) == Fnn`
+    TypeIsFnn(AlMetaExpr),
+    /// `param = ADD` etc.
+    BinOpEq(AlMetaExpr, WasmBinOp),
+    /// `case(param) == DIV|REM|SHR`
+    BinOpCaseIs(AlMetaExpr, BinOpCase),
+}
+
+/// `case(binop_)` variants used in binop.al.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinOpCase {
+    Div,
+    Rem,
+    Shr,
 }
 
 /// Typed pop pattern (`numtype_0.CONST name` in AL).
@@ -51,6 +126,37 @@ pub enum AlMetaStep {
     },
     Push(AlMetaExpr),
     Trap,
+}
+
+/// Meta-level step in a `$fn` body (binop.al L17+).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AlMetaFnStep {
+    If {
+        cond: AlMetaPred,
+        then_steps: Vec<AlMetaFnStep>,
+        else_steps: Vec<AlMetaFnStep>,
+    },
+    Assert(AlMetaPred),
+    Let {
+        name: &'static str,
+        expr: AlMetaExpr,
+    },
+    /// `Let (DIV sx) = binop_` — bind sign from a case binop.
+    LetBinOpCase {
+        case: BinOpCase,
+        sx_name: &'static str,
+        binop: AlMetaExpr,
+    },
+    Return(AlMetaExpr),
+    Fail,
+}
+
+/// SpecTec AL function definition (`name params { ... }`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AlMetaFnDef {
+    pub name: &'static str,
+    pub params: &'static [&'static str],
+    pub body: Vec<AlMetaFnStep>,
 }
 
 /// Result of partially evaluating `$binop_(nt, binop, c_1, c_2)` for fixed `nt`/`binop`.
