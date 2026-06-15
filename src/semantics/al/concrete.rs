@@ -1,10 +1,10 @@
 //! Concrete (i32) interpreter for AL specs.
 
+use super::super::ConcreteState;
 use super::env::AlEnv;
 use super::ir::{AlCond, AlExpr, AlSpec, AlStep, BinOpKind};
 use super::policy::EmbeddingPolicy;
 use super::util::{else_push_expr, is_trap_else_push};
-use super::super::ConcreteState;
 
 fn eval_cond(cond: &AlCond, env: &AlEnv<i32>) -> bool {
     match cond {

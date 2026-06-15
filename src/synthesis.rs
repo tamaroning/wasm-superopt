@@ -121,10 +121,7 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
                     if !seen.insert(key) {
                         continue;
                     }
-                    let name = format!(
-                        "syn-{}",
-                        proven.len()
-                    );
+                    let name = format!("syn-{}", proven.len());
                     proven.push(SynthesizedRule {
                         name,
                         lhs: lhs_pat,
@@ -163,7 +160,9 @@ fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
     }
 }
 
-pub fn synthesized_to_rewrites(rules: &[SynthesizedRule]) -> Vec<Rewrite<WasmLang, ConstantFolding>> {
+pub fn synthesized_to_rewrites(
+    rules: &[SynthesizedRule],
+) -> Vec<Rewrite<WasmLang, ConstantFolding>> {
     rules
         .iter()
         .filter_map(|r| parse_rewrite(&r.name, &r.lhs, &r.rhs).ok())

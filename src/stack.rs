@@ -182,9 +182,7 @@ impl StackToDag {
             SemOp::I32Store => {
                 let value = self.stack.pop().expect("i32.store");
                 let addr = self.stack.pop().expect("i32.store");
-                self.state = self
-                    .expr
-                    .add(WasmLang::I32Store([addr, value, self.state]));
+                self.state = self.expr.add(WasmLang::I32Store([addr, value, self.state]));
             }
             SemOp::Drop => {
                 let value = self.stack.pop().expect("drop");
@@ -266,7 +264,6 @@ pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<Strin
         None
     }
 }
-
 
 pub fn parse_dag(s: &str) -> RecExpr<WasmLang> {
     s.parse().expect("invalid RecExpr")

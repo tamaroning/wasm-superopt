@@ -1,12 +1,12 @@
 //! Z3 symbolic interpreter for AL specs.
 
+use super::super::{I32_BITS, StateTouches, Z3State};
 use super::env::AlEnv;
 use super::ir::{AlCond, AlExpr, AlSpec, AlStep, BinOpKind};
 use super::policy::EmbeddingPolicy;
 use super::util::{else_push_expr, is_trap_else_push};
-use super::super::{StateTouches, Z3State, I32_BITS};
-use z3::ast::{BV, Bool};
 use z3::Context;
+use z3::ast::{BV, Bool};
 
 fn eval_cond<'ctx>(ctx: &'ctx Context, cond: &AlCond, env: &AlEnv<BV<'ctx>>) -> Bool<'ctx> {
     match cond {
@@ -180,14 +180,7 @@ pub fn exec_al_z3<'ctx>(
     let mut trap = Bool::from_bool(ctx, false);
     let mut env = AlEnv::new();
     exec_steps(
-        ctx,
-        &al.steps,
-        stack,
-        state,
-        &mut trap,
-        &mut env,
-        touches,
-        policy,
+        ctx, &al.steps, stack, state, &mut trap, &mut env, touches, policy,
     );
     trap
 }

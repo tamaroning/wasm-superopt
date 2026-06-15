@@ -1,8 +1,8 @@
 //! AL IR types and binop partiality (`binop(a,b) = ε`).
 
 use super::super::I32_BITS;
-use z3::ast::{Ast, BV, Bool};
 use z3::Context;
+use z3::ast::{Ast, BV, Bool};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlSpec {
@@ -13,8 +13,14 @@ pub struct AlSpec {
 pub enum AlStep {
     Pop(&'static str),
     Push(AlExpr),
-    SetLocal { idx: u32, var: &'static str },
-    StoreMem { addr: &'static str, val: &'static str },
+    SetLocal {
+        idx: u32,
+        var: &'static str,
+    },
+    StoreMem {
+        addr: &'static str,
+        val: &'static str,
+    },
     If {
         cond: AlCond,
         then_steps: Vec<AlStep>,

@@ -5,7 +5,9 @@
 
 mod al;
 
-use al::{STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, exec_al_concrete, exec_al_z3, format_al_z3};
+use al::{
+    STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, exec_al_concrete, exec_al_z3, format_al_z3,
+};
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
 
@@ -257,7 +259,10 @@ pub fn initial_inputs_consumed(input: &[StackTy], ops: &[SemOp]) -> Option<usize
                 StackSlotOrigin::Computed => {}
             }
         }
-        stack.extend(std::iter::repeat_n(StackSlotOrigin::Computed, spec.pushes.len()));
+        stack.extend(std::iter::repeat_n(
+            StackSlotOrigin::Computed,
+            spec.pushes.len(),
+        ));
     }
     Some(consumed)
 }
@@ -429,7 +434,14 @@ fn state_diff_z3<'ctx>(
         let idx_bv = BV::from_u64(ctx, idx as u64, I32_BITS);
         diff = Bool::or(
             ctx,
-            &[&diff, &lhs.state.locals.select(&idx_bv)._eq(&rhs.state.locals.select(&idx_bv)).not()],
+            &[
+                &diff,
+                &lhs.state
+                    .locals
+                    .select(&idx_bv)
+                    ._eq(&rhs.state.locals.select(&idx_bv))
+                    .not(),
+            ],
         );
     }
 
@@ -441,7 +453,14 @@ fn state_diff_z3<'ctx>(
     {
         diff = Bool::or(
             ctx,
-            &[&diff, &lhs.state.memory.select(addr)._eq(&rhs.state.memory.select(addr)).not()],
+            &[
+                &diff,
+                &lhs.state
+                    .memory
+                    .select(addr)
+                    ._eq(&rhs.state.memory.select(addr))
+                    .not(),
+            ],
         );
     }
 
@@ -470,10 +489,7 @@ pub fn sequences_valid_rewrite_z3(
 
     // δ_s ⇒ δ_t and trap preservation (trap kinds are not distinguished).
     let trap_violation = source_r.trap.xor(&target_r.trap);
-    let defined_both = Bool::and(
-        ctx,
-        &[&source_r.trap.not(), &target_r.trap.not()],
-    );
+    let defined_both = Bool::and(ctx, &[&source_r.trap.not(), &target_r.trap.not()]);
     let diff = state_diff_z3(ctx, &source_r, &target_r);
     let value_violation = Bool::and(ctx, &[&defined_both, &diff]);
 
@@ -565,7 +581,9 @@ pub fn enumerate_sequences_by_output(
     while let Some((stack, seq)) = work.pop() {
         if !seq.is_empty() && is_type_valid(input, &seq) && uses_all_input_slots(input, &seq) {
             by_output
-                .entry(StackSig { stack: stack.clone() })
+                .entry(StackSig {
+                    stack: stack.clone(),
+                })
                 .or_default()
                 .push(seq.clone());
         }

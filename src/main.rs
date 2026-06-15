@@ -8,9 +8,11 @@ mod synthesis;
 use clap::{Parser, ValueEnum};
 use egg::*;
 use lang::{ConstantFolding, WasmLang, arith_rules, effect_rules, manual_rules};
-use stack::{WasmOp, format_wasm_block, parse_dag, stack_to_dag};
 use semantics::DEFAULT_RANDOM_TESTS;
-use synthesis::{print_synthesized, print_synthesized_json, synthesize_rules, synthesized_to_rewrites};
+use stack::{WasmOp, format_wasm_block, parse_dag, stack_to_dag};
+use synthesis::{
+    print_synthesized, print_synthesized_json, synthesize_rules, synthesized_to_rewrites,
+};
 
 #[derive(Clone, Debug, ValueEnum, PartialEq, Eq)]
 enum RulesMode {
@@ -64,11 +66,7 @@ fn run_example(
     println!();
 }
 
-fn run_example_ops(
-    name: &str,
-    ops: &[WasmOp],
-    rules: &[Rewrite<WasmLang, ConstantFolding>],
-) {
+fn run_example_ops(name: &str, ops: &[WasmOp], rules: &[Rewrite<WasmLang, ConstantFolding>]) {
     run_example(name, &format_wasm_block(ops), &stack_to_dag(ops), rules);
 }
 
@@ -87,11 +85,7 @@ fn load_rules(cli: &Cli) -> Vec<Rewrite<WasmLang, ConstantFolding>> {
 fn run_demos(rules: &[Rewrite<WasmLang, ConstantFolding>]) {
     run_example_ops(
         "Stack-to-DAG",
-        &[
-            WasmOp::LocalGet(0),
-            WasmOp::I32Const(1),
-            WasmOp::I32Add,
-        ],
+        &[WasmOp::LocalGet(0), WasmOp::I32Const(1), WasmOp::I32Add],
         rules,
     );
 

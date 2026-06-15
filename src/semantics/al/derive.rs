@@ -1,9 +1,9 @@
 //! Derive static `InstSpec` from AL definitions.
 
+use super::super::{InstSpec, StackTy};
 use super::ir::{AlCond, AlExpr, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
-use super::super::{InstSpec, StackTy};
 
 const I32: StackTy = StackTy::I32;
 const POPS_0: &[StackTy] = &[];
@@ -24,10 +24,7 @@ fn count_pops(steps: &[AlStep]) -> usize {
             } => {
                 n += count_pops(then_steps) + count_pops(else_steps);
             }
-            AlStep::Push(_)
-            | AlStep::SetLocal { .. }
-            | AlStep::StoreMem { .. }
-            | AlStep::Trap => {}
+            AlStep::Push(_) | AlStep::SetLocal { .. } | AlStep::StoreMem { .. } | AlStep::Trap => {}
         }
     }
     n
@@ -51,10 +48,7 @@ fn count_pushes(steps: &[AlStep], policy: &EmbeddingPolicy) -> usize {
                     n += then_p + else_p;
                 }
             }
-            AlStep::Pop(_)
-            | AlStep::SetLocal { .. }
-            | AlStep::StoreMem { .. }
-            | AlStep::Trap => {}
+            AlStep::Pop(_) | AlStep::SetLocal { .. } | AlStep::StoreMem { .. } | AlStep::Trap => {}
         }
     }
     n
