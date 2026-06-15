@@ -1,6 +1,6 @@
 //! Concrete evaluator for meta-level AL `$fn` definitions.
 
-use super::binop_defs::{
+use super::al_defs::{
     binop_def, idiv_def, inv_signed_def, irem_def, list_def, signed_def, size_def, sizenn_def,
 };
 use super::ir::{NumType, Sign, WasmBinOp};

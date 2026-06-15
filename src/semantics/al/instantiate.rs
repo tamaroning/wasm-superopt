@@ -1,6 +1,6 @@
 //! Instantiate parameterized AL step templates into flat [`AlSpec`](super::ir::AlSpec).
 
-use super::binop_defs::{instantiate_binop_, step_pure_binop_template};
+use super::al_defs::{instantiate_binop_, step_pure_binop_template};
 use super::meta::{AlMetaExpr, AlMetaStep, BinopInstantiation, PopPattern};
 use super::ir::{AlCond, AlExpr, AlSpec, AlStep, NumType, WasmBinOp};
 
