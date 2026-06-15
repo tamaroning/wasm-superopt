@@ -30,25 +30,34 @@ pub enum Sign {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WasmBinOp {
     Add,
+    Sub,
     Mul,
     Shl,
     Div(Sign),
+    Rem(Sign),
+    And,
+    Or,
 }
 
 impl WasmBinOp {
     pub const fn to_binop_kind(self) -> Option<BinOpKind> {
         match self {
             WasmBinOp::Add => Some(BinOpKind::Add),
+            WasmBinOp::Sub => Some(BinOpKind::Sub),
             WasmBinOp::Mul => Some(BinOpKind::Mul),
             WasmBinOp::Shl => Some(BinOpKind::Shl),
             WasmBinOp::Div(Sign::U) => Some(BinOpKind::DivU),
             WasmBinOp::Div(Sign::S) => Some(BinOpKind::DivS),
+            WasmBinOp::Rem(Sign::U) => Some(BinOpKind::RemU),
+            WasmBinOp::Rem(Sign::S) => Some(BinOpKind::RemS),
+            WasmBinOp::And => Some(BinOpKind::And),
+            WasmBinOp::Or => Some(BinOpKind::Or),
         }
     }
 
-    /// Whether `$binop_` may return ε (via `$idiv_` / `$list_`).
+    /// Whether `$binop_` may return ε (via `$idiv_` / `$irem_` / `$list_`).
     pub const fn is_partial(self) -> bool {
-        matches!(self, WasmBinOp::Div(_))
+        matches!(self, WasmBinOp::Div(_) | WasmBinOp::Rem(_))
     }
 }
 
@@ -95,19 +104,30 @@ pub enum AlCond {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BinOpKind {
     Add,
+    Sub,
     Mul,
     DivU,
     DivS,
+    RemU,
+    RemS,
     Shl,
+    And,
+    Or,
 }
 
 impl BinOpKind {
     /// `binop(a, b) = ε` (Wasm partiality): may the operation trap?
     pub fn binop_empty_concrete(self, a: i32, b: i32) -> bool {
         match self {
-            BinOpKind::DivU => b == 0,
+            BinOpKind::DivU | BinOpKind::RemU => b == 0,
             BinOpKind::DivS => b == 0 || (b == -1 && a == i32::MIN),
-            BinOpKind::Add | BinOpKind::Mul | BinOpKind::Shl => false,
+            BinOpKind::RemS => b == 0,
+            BinOpKind::Add
+            | BinOpKind::Sub
+            | BinOpKind::Mul
+            | BinOpKind::Shl
+            | BinOpKind::And
+            | BinOpKind::Or => false,
         }
     }
 
@@ -118,7 +138,7 @@ impl BinOpKind {
         b: &BV<'ctx>,
     ) -> Bool<'ctx> {
         match self {
-            BinOpKind::DivU => b._eq(&BV::from_i64(ctx, 0, I32_BITS)),
+            BinOpKind::DivU | BinOpKind::RemU => b._eq(&BV::from_i64(ctx, 0, I32_BITS)),
             BinOpKind::DivS => Bool::or(
                 ctx,
                 &[
@@ -132,7 +152,13 @@ impl BinOpKind {
                     ),
                 ],
             ),
-            BinOpKind::Add | BinOpKind::Mul | BinOpKind::Shl => Bool::from_bool(ctx, false),
+            BinOpKind::RemS => b._eq(&BV::from_i64(ctx, 0, I32_BITS)),
+            BinOpKind::Add
+            | BinOpKind::Sub
+            | BinOpKind::Mul
+            | BinOpKind::Shl
+            | BinOpKind::And
+            | BinOpKind::Or => Bool::from_bool(ctx, false),
         }
     }
 }

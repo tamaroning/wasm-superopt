@@ -1,6 +1,8 @@
 //! SpecTec AL definitions transcribed from [`binop.al`](../../../../binop.al).
 //!
 //! This file contains **definitions only** — step templates and `$fn` helpers.
+//! Primitive `binop` from `Language.md` (`+`, `-`, `*`, `&`, `|`, `<<`, `\`, …) are
+//! encoded inline via [`AlMetaExpr`](super::meta::AlMetaExpr), not as separate `$fn`s.
 //! Lowering to flat [`AlSpec`](super::ir::AlSpec) is in [`super::instantiate`];
 //! concrete evaluation is in [`super::eval`].
 
@@ -81,6 +83,56 @@ fn and(a: AlMetaPred, b: AlMetaPred) -> AlMetaPred {
 
 fn wrap_mod(nat_expr: AlMetaExpr, modulus: AlMetaExpr) -> AlMetaExpr {
     AlMetaExpr::Mod(Box::new(nat_expr), Box::new(modulus))
+}
+
+/// `$((i_1 + i_2) \ (2 ^ N))` — spectec equation, not a separate `$fn` def.
+fn inn_iadd(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    wrap_mod(
+        AlMetaExpr::Add(Box::new(i_1), Box::new(i_2)),
+        full_modulus(n),
+    )
+}
+
+/// `$((2^N + i_1 - i_2) \ 2^N)` — spectec equation.
+fn inn_isub(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    let modulus = full_modulus(n);
+    nat_coerce(wrap_mod(
+        AlMetaExpr::Sub(
+            Box::new(int_coerce(AlMetaExpr::Add(
+                Box::new(modulus.clone()),
+                Box::new(i_1),
+            ))),
+            Box::new(int_coerce(i_2)),
+        ),
+        int_coerce(modulus),
+    ))
+}
+
+/// `$((i_1 * i_2) \ (2 ^ N))` — spectec equation.
+fn inn_imul(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    wrap_mod(
+        AlMetaExpr::Mul(Box::new(i_1), Box::new(i_2)),
+        full_modulus(n),
+    )
+}
+
+/// `$iand_` / `$ior_` / `$ishl_` are spectec `hint(builtin)` — encode as primitive ops only.
+fn inn_iand(i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    AlMetaExpr::BitAnd(Box::new(i_1), Box::new(i_2))
+}
+
+fn inn_ior(i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    AlMetaExpr::BitOr(Box::new(i_1), Box::new(i_2))
+}
+
+fn inn_ishl(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    wrap_mod(
+        AlMetaExpr::Shl(
+            Box::new(i_1),
+            Box::new(AlMetaExpr::Rem(Box::new(i_2), Box::new(n.clone()))),
+        ),
+        full_modulus(n),
+    )
 }
 
 // =============================================================================
@@ -244,77 +296,7 @@ pub fn list_def() -> AlMetaFnDef {
 }
 
 // =============================================================================
-// iadd_ N i_1 i_2  (binop.al L68–70)
-// =============================================================================
-
-pub fn iadd_def() -> AlMetaFnDef {
-    AlMetaFnDef {
-        name: "iadd_",
-        params: &["N", "i_1", "i_2"],
-        body: vec![AlMetaFnStep::Return(wrap_mod(
-            AlMetaExpr::Add(Box::new(p("i_1")), Box::new(p("i_2"))),
-            full_modulus(p("N")),
-        ))],
-    }
-}
-
-// =============================================================================
-// isub_ N i_1 i_2  (binop.al L72–74)
-// =============================================================================
-
-pub fn isub_def() -> AlMetaFnDef {
-    let modulus = full_modulus(p("N"));
-    AlMetaFnDef {
-        name: "isub_",
-        params: &["N", "i_1", "i_2"],
-        body: vec![AlMetaFnStep::Return(nat_coerce(wrap_mod(
-            AlMetaExpr::Sub(
-                Box::new(int_coerce(AlMetaExpr::Add(
-                    Box::new(modulus.clone()),
-                    Box::new(p("i_1")),
-                ))),
-                Box::new(int_coerce(p("i_2"))),
-            ),
-            int_coerce(modulus),
-        )))],
-    }
-}
-
-// =============================================================================
-// imul_ N i_1 i_2  (binop.al L76–78)
-// =============================================================================
-
-pub fn imul_def() -> AlMetaFnDef {
-    AlMetaFnDef {
-        name: "imul_",
-        params: &["N", "i_1", "i_2"],
-        body: vec![AlMetaFnStep::Return(wrap_mod(
-            AlMetaExpr::Mul(Box::new(p("i_1")), Box::new(p("i_2"))),
-            full_modulus(p("N")),
-        ))],
-    }
-}
-
-// =============================================================================
-// ishl_ N i_1 i_2  (binop.al L148–149, via spectec numerics)
-// =============================================================================
-
-pub fn ishl_def() -> AlMetaFnDef {
-    AlMetaFnDef {
-        name: "ishl_",
-        params: &["N", "i_1", "i_2"],
-        body: vec![AlMetaFnStep::Return(wrap_mod(
-            AlMetaExpr::Shl(
-                Box::new(p("i_1")),
-                Box::new(AlMetaExpr::Rem(Box::new(p("i_2")), Box::new(p("N")))),
-            ),
-            full_modulus(p("N")),
-        ))],
-    }
-}
-
-// =============================================================================
-// idiv_ N sx i_1 i_2  (binop.al L81–101)
+// idiv_ N sx i_1 i_2  (wasm-2.0.al L1445–1459)
 // =============================================================================
 
 pub fn idiv_def() -> AlMetaFnDef {
@@ -397,7 +379,7 @@ pub fn idiv_def() -> AlMetaFnDef {
 }
 
 // =============================================================================
-// irem_ N sx i_1 i_2  (binop.al L103–117)
+// irem_ N sx i_1 i_2  (wasm-2.0.al L1466–1479; spectec 3-numerics)
 // =============================================================================
 
 pub fn irem_def() -> AlMetaFnDef {
@@ -475,61 +457,70 @@ pub fn irem_def() -> AlMetaFnDef {
 }
 
 // =============================================================================
-// binop_ numtype binop_ iN_1 iN_2  (binop.al L119–183)
+// binop_ numtype binop_ iN_1 iN_2  (wasm-2.0.al L1486–1526)
 // =============================================================================
+
+fn singleton_binop(call_expr: AlMetaExpr) -> AlMetaFnStep {
+    AlMetaFnStep::Return(AlMetaExpr::SingletonList(Box::new(call_expr)))
+}
 
 pub fn binop_def() -> AlMetaFnDef {
     let sizenn_nt = call("sizenn", vec![AlMetaArg::Expr(Box::new(p("numtype")))]);
-    let list_idiv = AlMetaFnStep::Return(call(
-        "list_",
+    let list_partial = |partial_call: AlMetaExpr| {
+        AlMetaFnStep::Return(call(
+            "list_",
+            vec![
+                AlMetaArg::Expr(Box::new(p("numtype"))),
+                AlMetaArg::Expr(Box::new(partial_call)),
+            ],
+        ))
+    };
+    let list_idiv = list_partial(call(
+        "idiv_",
         vec![
-            AlMetaArg::Expr(Box::new(p("numtype"))),
-            AlMetaArg::Expr(Box::new(call(
-                "idiv_",
-                vec![
-                    AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
-                    AlMetaArg::Expr(Box::new(p("sx"))),
-                    AlMetaArg::Expr(Box::new(p("iN_1"))),
-                    AlMetaArg::Expr(Box::new(p("iN_2"))),
-                ],
-            ))),
+            AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
+            AlMetaArg::Expr(Box::new(p("sx"))),
+            AlMetaArg::Expr(Box::new(p("iN_1"))),
+            AlMetaArg::Expr(Box::new(p("iN_2"))),
         ],
     ));
+    let list_irem = list_partial(call(
+        "irem_",
+        vec![
+            AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
+            AlMetaArg::Expr(Box::new(p("sx"))),
+            AlMetaArg::Expr(Box::new(p("iN_1"))),
+            AlMetaArg::Expr(Box::new(p("iN_2"))),
+        ],
+    ));
+    let i_1 = p("iN_1");
+    let i_2 = p("iN_2");
     let inn_branch = vec![
         AlMetaFnStep::If {
             cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Add),
-            then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::SingletonList(Box::new(call(
-                "iadd_",
-                vec![
-                    AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
-                    AlMetaArg::Expr(Box::new(p("iN_1"))),
-                    AlMetaArg::Expr(Box::new(p("iN_2"))),
-                ],
-            ))))],
+            then_steps: vec![singleton_binop(inn_iadd(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
+            else_steps: vec![],
+        },
+        AlMetaFnStep::If {
+            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Sub),
+            then_steps: vec![singleton_binop(inn_isub(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
             else_steps: vec![],
         },
         AlMetaFnStep::If {
             cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Mul),
-            then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::SingletonList(Box::new(call(
-                "imul_",
-                vec![
-                    AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
-                    AlMetaArg::Expr(Box::new(p("iN_1"))),
-                    AlMetaArg::Expr(Box::new(p("iN_2"))),
-                ],
-            ))))],
-            else_steps: vec![],
-        },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Shl),
-            then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::SingletonList(Box::new(call(
-                "ishl_",
-                vec![
-                    AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
-                    AlMetaArg::Expr(Box::new(p("iN_1"))),
-                    AlMetaArg::Expr(Box::new(p("iN_2"))),
-                ],
-            ))))],
+            then_steps: vec![singleton_binop(inn_imul(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
             else_steps: vec![],
         },
         AlMetaFnStep::If {
@@ -540,8 +531,39 @@ pub fn binop_def() -> AlMetaFnDef {
                     sx_name: "sx",
                     binop: p("binop_"),
                 },
-                list_idiv.clone(),
+                list_idiv,
             ],
+            else_steps: vec![],
+        },
+        AlMetaFnStep::If {
+            cond: AlMetaPred::BinOpCaseIs(p("binop_"), BinOpCase::Rem),
+            then_steps: vec![
+                AlMetaFnStep::LetBinOpCase {
+                    case: BinOpCase::Rem,
+                    sx_name: "sx",
+                    binop: p("binop_"),
+                },
+                list_irem,
+            ],
+            else_steps: vec![],
+        },
+        AlMetaFnStep::If {
+            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::And),
+            then_steps: vec![singleton_binop(inn_iand(i_1.clone(), i_2.clone()))],
+            else_steps: vec![],
+        },
+        AlMetaFnStep::If {
+            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Or),
+            then_steps: vec![singleton_binop(inn_ior(i_1.clone(), i_2.clone()))],
+            else_steps: vec![],
+        },
+        AlMetaFnStep::If {
+            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Shl),
+            then_steps: vec![singleton_binop(inn_ishl(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
             else_steps: vec![],
         },
     ];
@@ -625,6 +647,34 @@ mod tests {
         assert_eq!(size(ValType::I32), Some(32));
         assert_eq!(size(ValType::V128), Some(128));
         assert_eq!(sizenn(NumType::I32), 32);
+    }
+
+    #[test]
+    fn binop_concrete_sub_and_and_or() {
+        assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::Sub, 10, 3),
+            Some(7)
+        );
+        assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::And, 0b1100, 0b1010),
+            Some(0b1000)
+        );
+        assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::Or, 0b1100, 0b1010),
+            Some(0b1110)
+        );
+    }
+
+    #[test]
+    fn binop_concrete_rem_u_empty_on_zero() {
+        assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::Rem(Sign::U), 10, 0),
+            None
+        );
+        assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::Rem(Sign::U), 10, 3),
+            Some(1)
+        );
     }
 
     #[test]

@@ -41,10 +41,15 @@ fn eval_push_expr(expr: &AlExpr, env: &AlEnv<i32>, state: &ConcreteState) -> i32
 fn eval_binop(kind: BinOpKind, a: i32, b: i32) -> i32 {
     match kind {
         BinOpKind::Add => a.wrapping_add(b),
+        BinOpKind::Sub => a.wrapping_sub(b),
         BinOpKind::Mul => a.wrapping_mul(b),
         BinOpKind::DivU => (a as u32).wrapping_div(b as u32) as i32,
         BinOpKind::DivS => a.wrapping_div(b),
+        BinOpKind::RemU => (a as u32).wrapping_rem(b as u32) as i32,
+        BinOpKind::RemS => a.wrapping_rem(b),
         BinOpKind::Shl => a.wrapping_shl(b as u32 & 31),
+        BinOpKind::And => a & b,
+        BinOpKind::Or => a | b,
     }
 }
 

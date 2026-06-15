@@ -1,8 +1,7 @@
 //! Concrete evaluator for meta-level AL `$fn` definitions.
 
 use super::binop_defs::{
-    binop_def, idiv_def, iadd_def, imul_def, inv_signed_def, irem_def, ishl_def, isub_def,
-    list_def, signed_def, size_def, sizenn_def,
+    binop_def, idiv_def, inv_signed_def, irem_def, list_def, signed_def, size_def, sizenn_def,
 };
 use super::ir::{NumType, Sign, WasmBinOp};
 use super::meta::{
@@ -82,18 +81,6 @@ pub fn eval_list_is_empty<T>(opt: Option<T>) -> bool {
     )
 }
 
-pub fn eval_iadd_(n: u32, i_1: u32, i_2: u32) -> u32 {
-    nat_result(&iadd_def(), n, i_1, i_2)
-}
-
-pub fn eval_isub_(n: u32, i_1: u32, i_2: u32) -> u32 {
-    nat_result(&isub_def(), n, i_1, i_2)
-}
-
-pub fn eval_imul_(n: u32, i_1: u32, i_2: u32) -> u32 {
-    nat_result(&imul_def(), n, i_1, i_2)
-}
-
 pub fn eval_idiv_(n: u32, sx: Sign, i_1: u32, i_2: u32) -> Option<u32> {
     opt_nat_result(&idiv_def(), n, sx, i_1, i_2)
 }
@@ -133,20 +120,6 @@ pub fn eval_binop_(
         },
         Err(EvalError::Fail) => None,
         other => panic!("binop_ returned unexpected {other:?}"),
-    }
-}
-
-fn nat_result(def: &AlMetaFnDef, n: u32, i_1: u32, i_2: u32) -> u32 {
-    match eval_fn(
-        def,
-        &[
-            ("N", AlValue::Nat(n)),
-            ("i_1", AlValue::Nat(i_1)),
-            ("i_2", AlValue::Nat(i_2)),
-        ],
-    ) {
-        Ok(AlValue::Nat(v)) => v,
-        other => panic!("{} returned unexpected {other:?}", def.name),
     }
 }
 
@@ -289,6 +262,9 @@ fn eval_expr(expr: &AlMetaExpr, env: &FnEnv) -> EvalResult {
         AlMetaExpr::Mod(a, b) => eval_mod(eval_expr(a, env)?, eval_expr(b, env)?),
         AlMetaExpr::Rem(a, b) => eval_rem(eval_expr(a, env)?, eval_expr(b, env)?),
         AlMetaExpr::Shl(a, b) => eval_shl(eval_expr(a, env)?, eval_expr(b, env)?),
+        AlMetaExpr::BitAnd(a, b) => eval_bitand(eval_expr(a, env)?, eval_expr(b, env)?),
+        AlMetaExpr::BitOr(a, b) => eval_bitor(eval_expr(a, env)?, eval_expr(b, env)?),
+        AlMetaExpr::BitXor(a, b) => eval_bitxor(eval_expr(a, env)?, eval_expr(b, env)?),
         AlMetaExpr::Pow(a, b) => eval_pow(eval_expr(a, env)?, eval_expr(b, env)?),
         AlMetaExpr::Neg(inner) => Ok(AlValue::Int(-as_int(eval_expr(inner, env)?)?)),
         AlMetaExpr::Choose(inner) => eval_choose(eval_expr(inner, env)?),
@@ -350,38 +326,6 @@ fn eval_call(name: &str, args: &[AlMetaArg], env: &FnEnv) -> EvalResult {
         "list_" => eval_fn(
             &list_def(),
             &[("X", bound[0].clone()), ("X_opt", bound[1].clone())],
-        ),
-        "iadd_" => eval_fn(
-            &iadd_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("i_1", AlValue::Nat(as_nat(bound[1].clone())?)),
-                ("i_2", AlValue::Nat(as_nat(bound[2].clone())?)),
-            ],
-        ),
-        "isub_" => eval_fn(
-            &isub_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("i_1", AlValue::Nat(as_nat(bound[1].clone())?)),
-                ("i_2", AlValue::Nat(as_nat(bound[2].clone())?)),
-            ],
-        ),
-        "imul_" => eval_fn(
-            &imul_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("i_1", AlValue::Nat(as_nat(bound[1].clone())?)),
-                ("i_2", AlValue::Nat(as_nat(bound[2].clone())?)),
-            ],
-        ),
-        "ishl_" => eval_fn(
-            &ishl_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("i_1", AlValue::Nat(as_nat(bound[1].clone())?)),
-                ("i_2", AlValue::Nat(as_nat(bound[2].clone())?)),
-            ],
         ),
         "idiv_" => eval_fn(
             &idiv_def(),
@@ -499,6 +443,18 @@ fn eval_rem(a: AlValue, b: AlValue) -> EvalResult {
 
 fn eval_shl(a: AlValue, b: AlValue) -> EvalResult {
     Ok(AlValue::Nat(as_nat(a)?.wrapping_shl(as_nat(b)?)))
+}
+
+fn eval_bitand(a: AlValue, b: AlValue) -> EvalResult {
+    Ok(AlValue::Nat(as_nat(a)? & as_nat(b)?))
+}
+
+fn eval_bitor(a: AlValue, b: AlValue) -> EvalResult {
+    Ok(AlValue::Nat(as_nat(a)? | as_nat(b)?))
+}
+
+fn eval_bitxor(a: AlValue, b: AlValue) -> EvalResult {
+    Ok(AlValue::Nat(as_nat(a)? ^ as_nat(b)?))
 }
 
 fn eval_choose(v: AlValue) -> EvalResult {
@@ -636,7 +592,7 @@ fn trunc_rat((n, d): (i64, i64)) -> i32 {
 fn binop_case(op: WasmBinOp, case: BinOpCase) -> bool {
     matches!(
         (op, case),
-        (WasmBinOp::Div(_), BinOpCase::Div)
+        (WasmBinOp::Div(_), BinOpCase::Div) | (WasmBinOp::Rem(_), BinOpCase::Rem)
     )
 }
 
@@ -644,13 +600,14 @@ fn binop_sign(v: AlValue, case: BinOpCase) -> Result<Sign, EvalError> {
     let op = as_binop(v)?;
     match (op, case) {
         (WasmBinOp::Div(sx), BinOpCase::Div) => Ok(sx),
+        (WasmBinOp::Rem(sx), BinOpCase::Rem) => Ok(sx),
         other => panic!("LetBinOpCase mismatch: {other:?}"),
     }
 }
 
 fn binop_sign_value(op: WasmBinOp) -> Sign {
     match op {
-        WasmBinOp::Div(sx) => sx,
+        WasmBinOp::Div(sx) | WasmBinOp::Rem(sx) => sx,
         _ => panic!("BinOpSignOf on non-case binop: {op:?}"),
     }
 }

@@ -2,6 +2,10 @@
 //!
 //! Types for representing SpecTec AL steps and expressions before lowering to
 //! flat [`AlSpec`](super::ir::AlSpec). Definitions live in [`super::binop_defs`].
+//!
+//! [`AlMetaExpr`] arithmetic/bitwise variants (`Add`, `Sub`, `Mul`, `Mod`, `Rem`,
+//! `Shl`, `BitAnd`, `BitOr`, …) encode only what `Language.md` treats as primitive
+//! `binop` / `unop` — not thin spectec helper `$fn`s like `$iadd_`.
 
 use super::ir::{BinOpKind, NumType, Sign, WasmBinOp};
 
@@ -71,6 +75,12 @@ pub enum AlMetaExpr {
     Rem(Box<AlMetaExpr>, Box<AlMetaExpr>),
     /// `a << b` — natural left shift.
     Shl(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    /// `a & b` — bitwise and (Language.md `binop`).
+    BitAnd(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    /// `a | b` — bitwise or (Language.md `binop`).
+    BitOr(Box<AlMetaExpr>, Box<AlMetaExpr>),
+    /// `a ^ b` — bitwise xor (`$ixor_`, spectec builtin).
+    BitXor(Box<AlMetaExpr>, Box<AlMetaExpr>),
     Pow(Box<AlMetaExpr>, Box<AlMetaExpr>),
     Neg(Box<AlMetaExpr>),
     /// Extract `sx` from `(DIV sx)` / `(REM sx)` / `(SHR sx)`.

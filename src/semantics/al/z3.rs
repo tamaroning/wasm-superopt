@@ -40,13 +40,18 @@ fn eval_expr<'ctx>(
 fn eval_binop<'ctx>(ctx: &'ctx Context, kind: BinOpKind, a: &BV<'ctx>, b: &BV<'ctx>) -> BV<'ctx> {
     match kind {
         BinOpKind::Add => a.bvadd(b),
+        BinOpKind::Sub => a.bvsub(b),
         BinOpKind::Mul => a.bvmul(b),
         BinOpKind::DivU => a.bvudiv(b),
         BinOpKind::DivS => a.bvsdiv(b),
+        BinOpKind::RemU => a.bvurem(b),
+        BinOpKind::RemS => a.bvsrem(b),
         BinOpKind::Shl => {
             let mask = BV::from_u64(ctx, 31, I32_BITS);
             a.bvshl(&b.bvand(&mask))
         }
+        BinOpKind::And => a.bvand(b),
+        BinOpKind::Or => a.bvor(b),
     }
 }
 
