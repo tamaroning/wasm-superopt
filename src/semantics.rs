@@ -3,6 +3,9 @@
 //! Operand stack holds i32 values only. Locals and linear memory are implicit machine
 //! state threaded through effectful instructions (mirroring Wasm, not the egg DAG token).
 
+mod al;
+
+use al::{STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, exec_al_concrete, exec_al_z3, format_al_z3};
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
 
@@ -48,129 +51,19 @@ impl SemOp {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TrapCond {
-    /// `i32.div_u` / `i32.div_s`: divisor == 0.
-    DivByZero,
-    /// `i32.div_s` only: `INT_MIN / -1`.
-    DivSOverflow,
-}
-
-impl TrapCond {
-    pub fn describe(self) -> &'static str {
-        match self {
-            TrapCond::DivByZero => "divisor==0",
-            TrapCond::DivSOverflow => "INT_MIN/-1",
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct InstSpec {
     pub pops: &'static [StackTy],
     pub pushes: &'static [StackTy],
     /// Reads or writes implicit machine state (locals / memory).
     pub touches_state: bool,
-    /// Wasm trap conditions for this instruction.
-    pub traps: &'static [TrapCond],
+    /// Whether this instruction may trap (trap kind is not distinguished).
+    pub can_trap: bool,
 }
 
 pub fn spec_for(op: &SemOp) -> InstSpec {
-    match op {
-        SemOp::I32Const(_) => InstSpec {
-            pops: &[],
-            pushes: &[StackTy::I32],
-            touches_state: false,
-            traps: &[],
-        },
-        SemOp::I32Add | SemOp::I32Mul | SemOp::I32Shl => InstSpec {
-            pops: &[StackTy::I32, StackTy::I32],
-            pushes: &[StackTy::I32],
-            touches_state: false,
-            traps: &[],
-        },
-        SemOp::I32DivU => InstSpec {
-            pops: &[StackTy::I32, StackTy::I32],
-            pushes: &[StackTy::I32],
-            touches_state: false,
-            traps: &[TrapCond::DivByZero],
-        },
-        SemOp::I32DivS => InstSpec {
-            pops: &[StackTy::I32, StackTy::I32],
-            pushes: &[StackTy::I32],
-            touches_state: false,
-            traps: &[TrapCond::DivByZero, TrapCond::DivSOverflow],
-        },
-        SemOp::LocalGet(_) => InstSpec {
-            pops: &[],
-            pushes: &[StackTy::I32],
-            touches_state: true,
-            traps: &[],
-        },
-        SemOp::LocalSet(_) => InstSpec {
-            pops: &[StackTy::I32],
-            pushes: &[],
-            touches_state: true,
-            traps: &[],
-        },
-        SemOp::I32Load => InstSpec {
-            pops: &[StackTy::I32],
-            pushes: &[StackTy::I32],
-            touches_state: true,
-            traps: &[],
-        },
-        SemOp::I32Store => InstSpec {
-            pops: &[StackTy::I32, StackTy::I32],
-            pushes: &[],
-            touches_state: true,
-            traps: &[],
-        },
-        SemOp::Drop => InstSpec {
-            pops: &[StackTy::I32],
-            pushes: &[],
-            touches_state: false,
-            traps: &[],
-        },
-    }
-}
-
-/// Evaluate Wasm trap conditions from popped operands `[a, b]` (b = divisor for div).
-pub fn trap_concrete(op: &SemOp, a: i32, b: i32) -> bool {
-    for cond in spec_for(op).traps {
-        if trap_concrete_cond(*cond, a, b) {
-            return true;
-        }
-    }
-    false
-}
-
-fn trap_concrete_cond(cond: TrapCond, a: i32, b: i32) -> bool {
-    match cond {
-        TrapCond::DivByZero => b == 0,
-        TrapCond::DivSOverflow => b == -1 && a == i32::MIN,
-    }
-}
-
-/// Encode trap conditions as a Z3 boolean from operands `[a, b]`.
-pub fn trap_z3<'ctx>(ctx: &'ctx Context, op: &SemOp, a: &BV<'ctx>, b: &BV<'ctx>) -> Bool<'ctx> {
-    let mut trap = Bool::from_bool(ctx, false);
-    for cond in spec_for(op).traps {
-        trap = Bool::or(ctx, &[&trap, &trap_z3_cond(ctx, *cond, a, b)]);
-    }
-    trap
-}
-
-fn trap_z3_cond<'ctx>(ctx: &'ctx Context, cond: TrapCond, a: &BV<'ctx>, b: &BV<'ctx>) -> Bool<'ctx> {
-    match cond {
-        TrapCond::DivByZero => b._eq(&BV::from_i64(ctx, 0, I32_BITS)),
-        TrapCond::DivSOverflow => Bool::and(
-            ctx,
-            &[
-                &b._eq(&BV::from_i64(ctx, -1, I32_BITS)),
-                &a._eq(&BV::from_i64(ctx, i32::MIN as i64, I32_BITS)),
-            ],
-        ),
-    }
+    let al = al_spec_for(op);
+    derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
 }
 
 pub fn concrete_ops() -> Vec<SemOp> {
@@ -198,7 +91,7 @@ pub fn concrete_ops() -> Vec<SemOp> {
 // Concrete machine (fast randomized equivalence filter)
 // ---------------------------------------------------------------------------
 
-const I32_BITS: u32 = 32;
+pub(crate) const I32_BITS: u32 = 32;
 const LOCAL_SLOTS: u32 = 8;
 const MEM_SLOTS: u32 = 16;
 /// Default number of randomized concrete tests before invoking Z3.
@@ -215,7 +108,7 @@ impl ConcreteState {
         Self { locals, memory }
     }
 
-    fn store_local(&self, idx: u32, val: i32) -> Self {
+    pub(crate) fn store_local(&self, idx: u32, val: i32) -> Self {
         let mut next = self.clone();
         if (idx as usize) < next.locals.len() {
             next.locals[idx as usize] = val;
@@ -223,18 +116,18 @@ impl ConcreteState {
         next
     }
 
-    fn load_local(&self, idx: u32) -> i32 {
+    pub(crate) fn load_local(&self, idx: u32) -> i32 {
         self.locals.get(idx as usize).copied().unwrap_or(0)
     }
 
-    fn store_mem(&self, addr: i32, val: i32) -> Self {
+    pub(crate) fn store_mem(&self, addr: i32, val: i32) -> Self {
         let mut next = self.clone();
         let slot = addr.rem_euclid(MEM_SLOTS as i32) as usize;
         next.memory[slot] = val;
         next
     }
 
-    fn load_mem(&self, addr: i32) -> i32 {
+    pub(crate) fn load_mem(&self, addr: i32) -> i32 {
         let slot = addr.rem_euclid(MEM_SLOTS as i32) as usize;
         self.memory[slot]
     }
@@ -248,61 +141,8 @@ pub struct ConcreteResult {
 }
 
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
-    let mut trap = false;
-
-    match op {
-        SemOp::I32Const(n) => stack.push(*n),
-        SemOp::I32Add => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            stack.push(a.wrapping_add(b));
-        }
-        SemOp::I32Mul => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            stack.push(a.wrapping_mul(b));
-        }
-        SemOp::I32DivU => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            trap = trap_concrete(op, a, b);
-            stack.push(if trap {
-                0
-            } else {
-                (a as u32).wrapping_div(b as u32) as i32
-            });
-        }
-        SemOp::I32DivS => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            trap = trap_concrete(op, a, b);
-            stack.push(if trap { 0 } else { a.wrapping_div(b) });
-        }
-        SemOp::I32Shl => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            stack.push(a.wrapping_shl(b as u32 & 31));
-        }
-        SemOp::LocalGet(idx) => stack.push(state.load_local(*idx)),
-        SemOp::LocalSet(idx) => {
-            let val = stack.pop().unwrap();
-            *state = state.store_local(*idx, val);
-        }
-        SemOp::I32Load => {
-            let addr = stack.pop().unwrap();
-            stack.push(state.load_mem(addr));
-        }
-        SemOp::I32Store => {
-            let val = stack.pop().unwrap();
-            let addr = stack.pop().unwrap();
-            *state = state.store_mem(addr, val);
-        }
-        SemOp::Drop => {
-            stack.pop().unwrap();
-        }
-    }
-
-    trap
+    let al = al_spec_for(op);
+    exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
 }
 
 pub fn exec_sequence_concrete(
@@ -520,7 +360,7 @@ impl<'ctx> Z3State<'ctx> {
         }
     }
 
-    pub     fn load_mem(&self, addr: &BV<'ctx>) -> BV<'ctx> {
+    pub fn load_mem(&self, addr: &BV<'ctx>) -> BV<'ctx> {
         self.memory.select(addr).as_bv().unwrap()
     }
 }
@@ -546,64 +386,8 @@ pub fn exec_op<'ctx>(
     state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
 ) -> Bool<'ctx> {
-    let mut trap = Bool::from_bool(ctx, false);
-
-    match op {
-        SemOp::I32Const(n) => stack.push(BV::from_i64(ctx, *n as i64, I32_BITS)),
-        SemOp::I32Add => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            stack.push(a.bvadd(&b));
-        }
-        SemOp::I32Mul => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            stack.push(a.bvmul(&b));
-        }
-        SemOp::I32DivU => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            trap = trap_z3(ctx, op, &a, &b);
-            let zero = BV::from_i64(ctx, 0, I32_BITS);
-            let result = trap.ite(&zero, &a.bvudiv(&b));
-            stack.push(result);
-        }
-        SemOp::I32DivS => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            trap = trap_z3(ctx, op, &a, &b);
-            let zero = BV::from_i64(ctx, 0, I32_BITS);
-            let result = trap.ite(&zero, &a.bvsdiv(&b));
-            stack.push(result);
-        }
-        SemOp::I32Shl => {
-            let b = stack.pop().unwrap();
-            let a = stack.pop().unwrap();
-            let mask = BV::from_u64(ctx, 31, I32_BITS);
-            stack.push(a.bvshl(&b.bvand(&mask)));
-        }
-        SemOp::LocalGet(idx) => stack.push(state.load_local(ctx, *idx)),
-        SemOp::LocalSet(idx) => {
-            let val = stack.pop().unwrap();
-            touches.local_writes.insert(*idx);
-            *state = state.store_local(ctx, *idx, &val);
-        }
-        SemOp::I32Load => {
-            let addr = stack.pop().unwrap();
-            stack.push(state.load_mem(&addr));
-        }
-        SemOp::I32Store => {
-            let val = stack.pop().unwrap();
-            let addr = stack.pop().unwrap();
-            touches.mem_writes.push(addr.clone());
-            *state = state.store_mem(&addr, &val);
-        }
-        SemOp::Drop => {
-            stack.pop().unwrap();
-        }
-    }
-
-    trap
+    let al = al_spec_for(op);
+    exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)
 }
 
 pub fn exec_sequence<'ctx>(
@@ -825,28 +609,8 @@ pub fn print_semantics_table() {
     );
     for op in concrete_ops() {
         let spec = spec_for(&op);
-        let trap = if spec.traps.is_empty() {
-            "-".to_string()
-        } else {
-            spec.traps
-                .iter()
-                .map(|c| c.describe())
-                .collect::<Vec<_>>()
-                .join(" | ")
-        };
-        let z3_op = match &op {
-            SemOp::I32Const(n) => format!("BV const {n}"),
-            SemOp::I32Add => "bvadd".into(),
-            SemOp::I32Mul => "bvmul".into(),
-            SemOp::I32DivU => "ite(trap,a,bvudiv(a,b))".into(),
-            SemOp::I32DivS => "ite(trap,a,bvsdiv(a,b))".into(),
-            SemOp::I32Shl => "bvshl (amt&31)".into(),
-            SemOp::LocalGet(i) => format!("select locals[{i}]"),
-            SemOp::LocalSet(i) => format!("store locals[{i}]"),
-            SemOp::I32Load => "select memory[addr]".into(),
-            SemOp::I32Store => "store memory[addr]".into(),
-            SemOp::Drop => "pop".into(),
-        };
+        let trap = if spec.can_trap { "yes" } else { "-" };
+        let z3_op = format_al_z3(&al_spec_for(&op));
         println!(
             "{:<12} {:<6} {:<6} {:<6} {:<20} {}",
             op.name(),
