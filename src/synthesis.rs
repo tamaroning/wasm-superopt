@@ -3,7 +3,7 @@
 use crate::lang::{ConstantFolding, WasmLang};
 use crate::semantics::{
     OpCatalog, StackTy, concrete_ops, enumerate_sequences_by_output, exploration_inputs,
-    is_type_valid, same_stack_effect, sequences_equivalent_random, sequences_equivalent_z3,
+    is_type_valid, same_stack_effect, sequences_valid_rewrite_random, sequences_valid_rewrite_z3,
     uses_all_input_slots, z3_context,
 };
 use crate::stack::sem_sequence_to_pattern;
@@ -104,11 +104,11 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
                         ));
                     }
 
-                    if !sequences_equivalent_random(input, lhs, rhs, random_tests) {
+                    if !sequences_valid_rewrite_random(input, lhs, rhs, random_tests) {
                         continue;
                     }
                     z3_queries += 1;
-                    if !sequences_equivalent_z3(&ctx, input, lhs, rhs) {
+                    if !sequences_valid_rewrite_z3(&ctx, input, lhs, rhs) {
                         continue;
                     }
                     let Some(lhs_pat) = sem_sequence_to_pattern(input, lhs) else {

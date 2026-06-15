@@ -427,15 +427,25 @@ pub fn uses_all_input_slots(input: &[StackTy], ops: &[SemOp]) -> bool {
     initial_inputs_consumed(input, ops) == Some(input.len())
 }
 
-fn concrete_results_match(lhs: &ConcreteResult, rhs: &ConcreteResult) -> bool {
-    if lhs.trap != rhs.trap {
+/// Whether `source => target` is a sound optimization rewrite.
+///
+/// Trap is a single boolean (any Wasm trap kind is collapsed). Validity requires:
+/// - **δ_s ⇒ δ_t**: if source is defined (no trap), target must also be defined.
+/// - **Trap preservation**: if source traps, target must trap (e.g. div-by-zero on
+///   both sides); together with δ_s ⇒ δ_t this is trap equivalence.
+/// - **Defined-domain equality**: when both are defined, stack and machine state match.
+fn concrete_valid_rewrite(source: &ConcreteResult, target: &ConcreteResult) -> bool {
+    if source.trap != target.trap {
         return false;
     }
-    lhs.stack == rhs.stack && lhs.state == rhs.state
+    if source.trap {
+        return true;
+    }
+    source.stack == target.stack && source.state == target.state
 }
 
 /// Fast filter: returns `false` if a concrete counterexample is found.
-pub fn sequences_equivalent_random(
+pub fn sequences_valid_rewrite_random(
     input: &[StackTy],
     lhs: &[SemOp],
     rhs: &[SemOp],
@@ -456,7 +466,7 @@ pub fn sequences_equivalent_random(
         let (stack_in, state_in) = concrete_inputs_for_test(input, &mut rng, case);
         let lhs_r = exec_sequence_concrete(lhs, stack_in.clone(), state_in.clone());
         let rhs_r = exec_sequence_concrete(rhs, stack_in, state_in);
-        if !concrete_results_match(&lhs_r, &rhs_r) {
+        if !concrete_valid_rewrite(&lhs_r, &rhs_r) {
             return false;
         }
     }
@@ -654,34 +664,14 @@ fn state_diff_z3<'ctx>(
     diff
 }
 
-/// Prove equivalence under all inputs and initial machine states.
-/// Runs randomized concrete tests first, then Z3.
-pub fn sequences_equivalent(
+/// Z3 proof only (call after `sequences_valid_rewrite_random` passes).
+pub fn sequences_valid_rewrite_z3(
     ctx: &Context,
     input: &[StackTy],
-    lhs: &[SemOp],
-    rhs: &[SemOp],
-    random_tests: usize,
+    source: &[SemOp],
+    target: &[SemOp],
 ) -> bool {
-    if !same_stack_effect(input, lhs, rhs) || lhs == rhs {
-        return false;
-    }
-
-    if !sequences_equivalent_random(input, lhs, rhs, random_tests) {
-        return false;
-    }
-
-    sequences_equivalent_z3(ctx, input, lhs, rhs)
-}
-
-/// Z3 proof only (call after `sequences_equivalent_random` passes).
-pub fn sequences_equivalent_z3(
-    ctx: &Context,
-    input: &[StackTy],
-    lhs: &[SemOp],
-    rhs: &[SemOp],
-) -> bool {
-    if !same_stack_effect(input, lhs, rhs) {
+    if !same_stack_effect(input, source, target) {
         return false;
     }
     let stack_in: Vec<BV<'_>> = (0..input.len())
@@ -689,15 +679,21 @@ pub fn sequences_equivalent_z3(
         .collect();
 
     let init = Z3State::fresh(ctx, "init");
-    let lhs_r = exec_sequence(ctx, lhs, stack_in.clone(), init.clone());
-    let rhs_r = exec_sequence(ctx, rhs, stack_in, init);
+    let source_r = exec_sequence(ctx, source, stack_in.clone(), init.clone());
+    let target_r = exec_sequence(ctx, target, stack_in, init);
 
     let solver = z3::Solver::new(ctx);
 
-    let trap_mismatch = lhs_r.trap.xor(&rhs_r.trap);
-    let diff = state_diff_z3(ctx, &lhs_r, &rhs_r);
+    // δ_s ⇒ δ_t and trap preservation (trap kinds are not distinguished).
+    let trap_violation = source_r.trap.xor(&target_r.trap);
+    let defined_both = Bool::and(
+        ctx,
+        &[&source_r.trap.not(), &target_r.trap.not()],
+    );
+    let diff = state_diff_z3(ctx, &source_r, &target_r);
+    let value_violation = Bool::and(ctx, &[&defined_both, &diff]);
 
-    solver.assert(&Bool::or(ctx, &[&trap_mismatch, &diff]));
+    solver.assert(&Bool::or(ctx, &[&trap_violation, &value_violation]));
     matches!(solver.check(), z3::SatResult::Unsat)
 }
 
@@ -896,11 +892,6 @@ mod tests {
                 );
                 exec_sequence_concrete(seq, vec![0], state.clone());
             }
-            for i in 0..seqs.len() {
-                for j in (i + 1)..seqs.len() {
-                    sequences_equivalent_random(&input, &seqs[i], &seqs[j], 100);
-                }
-            }
         }
     }
 
@@ -919,7 +910,7 @@ mod tests {
         let input = vec![StackTy::I32];
         let mul_seq = vec![SemOp::I32Const(2), SemOp::I32Mul];
         let shl_seq = vec![SemOp::I32Const(1), SemOp::I32Shl];
-        assert!(sequences_equivalent_z3(&ctx, &input, &mul_seq, &shl_seq));
+        assert!(sequences_valid_rewrite_z3(&ctx, &input, &mul_seq, &shl_seq));
     }
 
     #[test]
@@ -928,7 +919,7 @@ mod tests {
         let input = vec![StackTy::I32, StackTy::I32];
         let div_s = vec![SemOp::I32DivS];
         let div_u = vec![SemOp::I32DivU];
-        assert!(!sequences_equivalent_z3(&ctx, &input, &div_s, &div_u));
+        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &div_s, &div_u));
     }
 
     #[test]
@@ -937,7 +928,25 @@ mod tests {
         let input = vec![StackTy::I32];
         let div_s = vec![SemOp::I32Const(2), SemOp::I32DivS];
         let mul = vec![SemOp::I32Const(2), SemOp::I32Mul];
-        assert!(!sequences_equivalent_z3(&ctx, &input, &div_s, &mul));
+        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &div_s, &mul));
+    }
+
+    #[test]
+    fn defined_source_must_not_trap_on_target() {
+        let ctx = z3_context();
+        let input = vec![StackTy::I32, StackTy::I32];
+        // δ_s ⇒ δ_t: when div_u is defined (divisor ≠ 0), mul must not trap.
+        let div_u = vec![SemOp::I32DivU];
+        let mul = vec![SemOp::I32Mul];
+        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &div_u, &mul));
+    }
+
+    #[test]
+    fn trap_preservation_rejects_removing_div_trap() {
+        let input = vec![StackTy::I32, StackTy::I32];
+        let div_u = vec![SemOp::I32DivU];
+        let mul = vec![SemOp::I32Mul];
+        assert!(!sequences_valid_rewrite_random(&input, &div_u, &mul, 200));
     }
 
     #[test]
