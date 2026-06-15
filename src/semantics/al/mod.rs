@@ -4,8 +4,10 @@
 //! execution, Z3 lowering, and `InstSpec` are derived from these definitions.
 
 mod concrete;
+mod defs;
 mod derive;
 mod env;
+mod instantiate;
 mod ir;
 mod policy;
 mod specs;
@@ -17,6 +19,7 @@ mod tests;
 
 pub use concrete::exec_al_concrete;
 pub use derive::derive_inst_spec;
+pub use instantiate::step_pure_binop;
 pub use policy::STRAIGHT_LINE_EMBED;
 pub use specs::al_spec_for;
 pub use z3::{exec_al_z3, format_al_z3};

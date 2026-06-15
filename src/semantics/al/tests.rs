@@ -1,7 +1,7 @@
 use super::derive::{POPS_0_TEST, POPS_1_TEST, POPS_2_TEST, PUSHES_0_TEST, PUSHES_1_TEST};
-use super::ir::{AlCond, AlStep, BinOpKind};
+use super::ir::{AlCond, AlExpr, AlStep, BinOpKind, NumType, Sign, WasmBinOp};
 use super::policy::STRAIGHT_LINE_EMBED;
-use super::{al_spec_for, derive_inst_spec};
+use super::{al_spec_for, derive_inst_spec, step_pure_binop};
 use crate::semantics::{InstSpec, SemOp, concrete_ops};
 
 #[test]
@@ -96,4 +96,47 @@ fn div_u_al_has_wasm_binop_shape() {
     } else {
         panic!("expected If");
     }
+}
+
+#[test]
+fn instantiate_i32_div_s_has_wasm_binop_shape() {
+    let al = step_pure_binop(NumType::I32, WasmBinOp::Div(Sign::S));
+    assert!(matches!(
+        al.steps.as_slice(),
+        [AlStep::Pop("c2"), AlStep::Pop("c1"), AlStep::If { .. }]
+    ));
+    if let AlStep::If {
+        cond,
+        then_steps,
+        else_steps,
+    } = &al.steps[2]
+    {
+        assert!(matches!(
+            cond,
+            AlCond::BinOpEmpty(BinOpKind::DivS, "c1", "c2")
+        ));
+        assert_eq!(then_steps.as_slice(), [AlStep::Trap]);
+        assert!(matches!(
+            else_steps.as_slice(),
+            [AlStep::Push(AlExpr::BinOp(BinOpKind::DivS, "c1", "c2"))]
+        ));
+    } else {
+        panic!("expected If");
+    }
+}
+
+#[test]
+fn instantiate_i32_div_s_partiality_matches_binop_kind() {
+    let kind = BinOpKind::DivS;
+    assert!(kind.binop_empty_concrete(0, 0));
+    assert!(kind.binop_empty_concrete(i32::MIN, -1));
+    assert!(!kind.binop_empty_concrete(8, 2));
+    assert!(kind.binop_empty_concrete(8, 0));
+}
+
+#[test]
+fn al_spec_for_div_s_matches_instantiate() {
+    let via_spec = al_spec_for(&SemOp::I32DivS);
+    let via_inst = step_pure_binop(NumType::I32, WasmBinOp::Div(Sign::S));
+    assert_eq!(via_spec.steps, via_inst.steps);
 }

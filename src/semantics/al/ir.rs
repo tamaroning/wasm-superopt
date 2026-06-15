@@ -4,6 +4,54 @@ use super::super::I32_BITS;
 use z3::Context;
 use z3::ast::{Ast, BV, Bool};
 
+/// Wasm numeric type parameter (`nt` / `valtype` in SpecTec AL).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NumType {
+    I32,
+}
+
+impl NumType {
+    /// `size` / `sizenn` from binop.al (L17–38).
+    pub const fn bit_width(self) -> u32 {
+        match self {
+            NumType::I32 => 32,
+        }
+    }
+}
+
+/// Signedness flag for `DIV` / `REM` / `SHR` variants (`S` or `U`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Sign {
+    U,
+    S,
+}
+
+/// Wasm `binop` variant from instruction syntax (e.g. `DIV S`, `ADD`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WasmBinOp {
+    Add,
+    Mul,
+    Shl,
+    Div(Sign),
+}
+
+impl WasmBinOp {
+    pub const fn to_binop_kind(self) -> Option<BinOpKind> {
+        match self {
+            WasmBinOp::Add => Some(BinOpKind::Add),
+            WasmBinOp::Mul => Some(BinOpKind::Mul),
+            WasmBinOp::Shl => Some(BinOpKind::Shl),
+            WasmBinOp::Div(Sign::U) => Some(BinOpKind::DivU),
+            WasmBinOp::Div(Sign::S) => Some(BinOpKind::DivS),
+        }
+    }
+
+    /// Whether `$binop_` may return ε (via `$idiv_` / `$list_`).
+    pub const fn is_partial(self) -> bool {
+        matches!(self, WasmBinOp::Div(_))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlSpec {
     pub steps: Vec<AlStep>,
