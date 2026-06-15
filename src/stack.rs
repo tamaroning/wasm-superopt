@@ -2,7 +2,7 @@
 
 use crate::lang::WasmLang;
 use crate::semantics::{SemOp, StackTy, spec_for};
-use egg::{Id, RecExpr};
+use egg::{Id, Language, RecExpr};
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
@@ -38,6 +38,7 @@ pub enum WasmOp {
     I32Mul,
     I32DivU,
     I32DivS,
+    I32Shl,
     I32Load,
     I32Store,
     Drop,
@@ -53,7 +54,7 @@ impl From<&SemOp> for WasmOp {
             SemOp::I32Mul => WasmOp::I32Mul,
             SemOp::I32DivU => WasmOp::I32DivU,
             SemOp::I32DivS => WasmOp::I32DivS,
-            SemOp::I32Shl => panic!("WasmOp has no I32Shl; use DAG directly"),
+            SemOp::I32Shl => WasmOp::I32Shl,
             SemOp::I32Load => WasmOp::I32Load,
             SemOp::I32Store => WasmOp::I32Store,
             SemOp::Drop => WasmOp::Drop,
@@ -71,6 +72,7 @@ impl Display for WasmOp {
             WasmOp::I32Mul => write!(f, "i32.mul"),
             WasmOp::I32DivU => write!(f, "i32.div_u"),
             WasmOp::I32DivS => write!(f, "i32.div_s"),
+            WasmOp::I32Shl => write!(f, "i32.shl"),
             WasmOp::I32Load => write!(f, "i32.load"),
             WasmOp::I32Store => write!(f, "i32.store"),
             WasmOp::Drop => write!(f, "drop"),
@@ -120,6 +122,7 @@ impl StackToDag {
             WasmOp::I32Mul => SemOp::I32Mul,
             WasmOp::I32DivU => SemOp::I32DivU,
             WasmOp::I32DivS => SemOp::I32DivS,
+            WasmOp::I32Shl => SemOp::I32Shl,
             WasmOp::I32Load => SemOp::I32Load,
             WasmOp::I32Store => SemOp::I32Store,
             WasmOp::Drop => SemOp::Drop,
@@ -228,7 +231,7 @@ impl StackToDag {
     /// Build an s-expression pattern for the value on top of the operand stack.
     pub fn pattern_from_stack_top(&self) -> Option<String> {
         let id = *self.stack.last()?;
-        Some(format!("{}", self.expr[id]))
+        Some(enode_to_pattern(&self.expr, id))
     }
 
     /// Pattern for the current implicit state token (after effectful sequence).
@@ -239,6 +242,21 @@ impl StackToDag {
 
 pub fn stack_to_dag(ops: &[WasmOp]) -> RecExpr<WasmLang> {
     StackToDag::new().build(ops)
+}
+
+fn enode_to_pattern(expr: &RecExpr<WasmLang>, id: Id) -> String {
+    let node = &expr[id];
+    if node.is_leaf() {
+        node.to_string()
+    } else {
+        let children = node
+            .children()
+            .iter()
+            .map(|&child| enode_to_pattern(expr, child))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("({node} {children})")
+    }
 }
 
 pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<String> {

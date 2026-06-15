@@ -2,8 +2,9 @@
 
 use crate::lang::{ConstantFolding, WasmLang};
 use crate::semantics::{
-    SemOp, StackSig, StackTy, concrete_ops, enumerate_sequences, exploration_inputs,
-    sequences_equivalent_random, sequences_equivalent_z3, z3_context,
+    OpCatalog, StackTy, concrete_ops, enumerate_sequences_by_output, exploration_inputs,
+    is_type_valid, same_stack_effect, sequences_equivalent_random, sequences_equivalent_z3,
+    uses_all_input_slots, z3_context,
 };
 use crate::stack::sem_sequence_to_pattern;
 use egg::{Pattern, Rewrite};
@@ -38,6 +39,7 @@ fn report_progress(msg: &str) {
 pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedRule> {
     let ctx = z3_context();
     let ops = concrete_ops();
+    let catalog = OpCatalog::from_ops(&ops);
     let inputs = exploration_inputs();
     let mut proven = Vec::new();
     let mut seen = HashSet::new();
@@ -57,15 +59,8 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
             inputs.len()
         ));
 
-        let sequences = enumerate_sequences(input, &ops, max_len);
-        let mut by_output: std::collections::HashMap<StackSig, Vec<Vec<SemOp>>> =
-            std::collections::HashMap::new();
-
-        for seq in &sequences {
-            if let Some(out) = crate::semantics::simulate_stack_effect(input, seq) {
-                by_output.entry(StackSig { stack: out }).or_default().push(seq.clone());
-            }
-        }
+        let by_output = enumerate_sequences_by_output(input, &catalog, max_len);
+        let sequence_count: usize = by_output.values().map(|seqs| seqs.len()).sum();
 
         let total_pairs: usize = by_output
             .values()
@@ -76,8 +71,7 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
             .sum();
 
         report_progress(&format!(
-            "  {} sequences, {} output classes, {total_pairs} candidate pairs",
-            sequences.len(),
+            "  {sequence_count} sequences, {} output classes, {total_pairs} candidate pairs",
             by_output.len()
         ));
 
@@ -87,7 +81,13 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
                 for j in (i + 1)..seqs.len() {
                     let lhs = &seqs[i];
                     let rhs = &seqs[j];
-                    if lhs == rhs {
+                    if lhs == rhs
+                        || !is_type_valid(input, lhs)
+                        || !is_type_valid(input, rhs)
+                        || !uses_all_input_slots(input, lhs)
+                        || !uses_all_input_slots(input, rhs)
+                        || !same_stack_effect(input, lhs, rhs)
+                    {
                         continue;
                     }
                     pairs_checked += 1;

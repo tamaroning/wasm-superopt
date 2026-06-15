@@ -58,7 +58,7 @@ impl Analysis<WasmLang> for ConstantFolding {
                     Some(x(a)? / divisor)
                 }
             }
-            WasmLang::I32Shl([a, b]) => Some(x(a)? << x(b)?),
+            WasmLang::I32Shl([a, b]) => Some(x(a)?.wrapping_shl(x(b)? as u32 & 31)),
             _ => None,
         }
     }

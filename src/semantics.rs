@@ -184,7 +184,7 @@ pub fn concrete_ops() -> Vec<SemOp> {
         SemOp::I32Store,
         SemOp::Drop,
     ];
-    for c in [0, 1, 2, 3, 4, 16, 42] {
+    for c in [0, 1, 2, 3, 4, 8, 16, -1, i32::MIN, i32::MAX] {
         ops.push(SemOp::I32Const(c));
     }
     for i in 0..3 {
@@ -380,12 +380,56 @@ fn concrete_inputs_for_test(
     (stack_in, ConcreteState::new(locals, memory))
 }
 
+/// Both sequences must be type-valid on `input` and leave the same operand-stack shape.
+pub fn same_stack_effect(input: &[StackTy], lhs: &[SemOp], rhs: &[SemOp]) -> bool {
+    match (
+        simulate_stack_effect(input, lhs),
+        simulate_stack_effect(input, rhs),
+    ) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Whether `ops` is type-valid when executed on `input` (no stack underflow).
+pub fn is_type_valid(input: &[StackTy], ops: &[SemOp]) -> bool {
+    simulate_stack_effect(input, ops).is_some()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StackSlotOrigin {
+    Initial,
+    Computed,
+}
+
+/// How many operand-stack slots from the initial input this sequence actually pops.
+pub fn initial_inputs_consumed(input: &[StackTy], ops: &[SemOp]) -> Option<usize> {
+    let mut stack = vec![StackSlotOrigin::Initial; input.len()];
+    let mut consumed = 0usize;
+    for op in ops {
+        let spec = spec_for(op);
+        if spec.pops.len() > stack.len() {
+            return None;
+        }
+        for _ in 0..spec.pops.len() {
+            match stack.pop()? {
+                StackSlotOrigin::Initial => consumed += 1,
+                StackSlotOrigin::Computed => {}
+            }
+        }
+        stack.extend(std::iter::repeat_n(StackSlotOrigin::Computed, spec.pushes.len()));
+    }
+    Some(consumed)
+}
+
+/// Sequence uses every symbolic input slot (no pass-through leftovers).
+pub fn uses_all_input_slots(input: &[StackTy], ops: &[SemOp]) -> bool {
+    initial_inputs_consumed(input, ops) == Some(input.len())
+}
+
 fn concrete_results_match(lhs: &ConcreteResult, rhs: &ConcreteResult) -> bool {
     if lhs.trap != rhs.trap {
         return false;
-    }
-    if lhs.trap {
-        return true;
     }
     lhs.stack == rhs.stack && lhs.state == rhs.state
 }
@@ -397,6 +441,12 @@ pub fn sequences_equivalent_random(
     rhs: &[SemOp],
     num_tests: usize,
 ) -> bool {
+    if !is_type_valid(input, lhs) || !is_type_valid(input, rhs) {
+        return false;
+    }
+    if !same_stack_effect(input, lhs, rhs) {
+        return false;
+    }
     if num_tests == 0 {
         return true;
     }
@@ -420,6 +470,15 @@ pub fn sequences_equivalent_random(
 pub struct Z3State<'ctx> {
     pub locals: Array<'ctx>,
     pub memory: Array<'ctx>,
+}
+
+impl<'ctx> Clone for Z3State<'ctx> {
+    fn clone(&self) -> Self {
+        Self {
+            locals: self.locals.clone(),
+            memory: self.memory.clone(),
+        }
+    }
 }
 
 impl<'ctx> Z3State<'ctx> {
@@ -451,15 +510,23 @@ impl<'ctx> Z3State<'ctx> {
         }
     }
 
-    pub fn load_mem(&self, addr: &BV<'ctx>) -> BV<'ctx> {
+    pub     fn load_mem(&self, addr: &BV<'ctx>) -> BV<'ctx> {
         self.memory.select(addr).as_bv().unwrap()
     }
+}
+
+/// Locals / memory slots written during execution (reads affect the stack only).
+#[derive(Default)]
+pub struct StateTouches<'ctx> {
+    pub local_writes: std::collections::HashSet<u32>,
+    pub mem_writes: Vec<BV<'ctx>>,
 }
 
 pub struct ExecResult<'ctx> {
     pub stack: Vec<BV<'ctx>>,
     pub state: Z3State<'ctx>,
     pub trap: Bool<'ctx>,
+    pub touches: StateTouches<'ctx>,
 }
 
 pub fn exec_op<'ctx>(
@@ -467,6 +534,7 @@ pub fn exec_op<'ctx>(
     op: &SemOp,
     stack: &mut Vec<BV<'ctx>>,
     state: &mut Z3State<'ctx>,
+    touches: &mut StateTouches<'ctx>,
 ) -> Bool<'ctx> {
     let mut trap = Bool::from_bool(ctx, false);
 
@@ -486,14 +554,16 @@ pub fn exec_op<'ctx>(
             let b = stack.pop().unwrap();
             let a = stack.pop().unwrap();
             trap = trap_z3(ctx, op, &a, &b);
-            let result = trap.ite(&a, &a.bvudiv(&b));
+            let zero = BV::from_i64(ctx, 0, I32_BITS);
+            let result = trap.ite(&zero, &a.bvudiv(&b));
             stack.push(result);
         }
         SemOp::I32DivS => {
             let b = stack.pop().unwrap();
             let a = stack.pop().unwrap();
             trap = trap_z3(ctx, op, &a, &b);
-            let result = trap.ite(&a, &a.bvsdiv(&b));
+            let zero = BV::from_i64(ctx, 0, I32_BITS);
+            let result = trap.ite(&zero, &a.bvsdiv(&b));
             stack.push(result);
         }
         SemOp::I32Shl => {
@@ -505,6 +575,7 @@ pub fn exec_op<'ctx>(
         SemOp::LocalGet(idx) => stack.push(state.load_local(ctx, *idx)),
         SemOp::LocalSet(idx) => {
             let val = stack.pop().unwrap();
+            touches.local_writes.insert(*idx);
             *state = state.store_local(ctx, *idx, &val);
         }
         SemOp::I32Load => {
@@ -514,6 +585,7 @@ pub fn exec_op<'ctx>(
         SemOp::I32Store => {
             let val = stack.pop().unwrap();
             let addr = stack.pop().unwrap();
+            touches.mem_writes.push(addr.clone());
             *state = state.store_mem(&addr, &val);
         }
         SemOp::Drop => {
@@ -531,11 +603,55 @@ pub fn exec_sequence<'ctx>(
     mut state: Z3State<'ctx>,
 ) -> ExecResult<'ctx> {
     let mut trap = Bool::from_bool(ctx, false);
+    let mut touches = StateTouches::default();
     for op in ops {
-        let t = exec_op(ctx, op, &mut stack, &mut state);
+        let t = exec_op(ctx, op, &mut stack, &mut state, &mut touches);
         trap = Bool::or(ctx, &[&trap, &t]);
     }
-    ExecResult { stack, state, trap }
+    ExecResult {
+        stack,
+        state,
+        trap,
+        touches,
+    }
+}
+
+fn state_diff_z3<'ctx>(
+    ctx: &'ctx Context,
+    lhs: &ExecResult<'ctx>,
+    rhs: &ExecResult<'ctx>,
+) -> Bool<'ctx> {
+    let mut diff = Bool::from_bool(ctx, false);
+    if lhs.stack.len() != rhs.stack.len() {
+        return Bool::from_bool(ctx, true);
+    }
+    for (l, r) in lhs.stack.iter().zip(rhs.stack.iter()) {
+        diff = Bool::or(ctx, &[&diff, &l._eq(r).not()]);
+    }
+
+    let mut local_writes = lhs.touches.local_writes.clone();
+    local_writes.extend(&rhs.touches.local_writes);
+    for idx in local_writes {
+        let idx_bv = BV::from_u64(ctx, idx as u64, I32_BITS);
+        diff = Bool::or(
+            ctx,
+            &[&diff, &lhs.state.locals.select(&idx_bv)._eq(&rhs.state.locals.select(&idx_bv)).not()],
+        );
+    }
+
+    for addr in lhs
+        .touches
+        .mem_writes
+        .iter()
+        .chain(rhs.touches.mem_writes.iter())
+    {
+        diff = Bool::or(
+            ctx,
+            &[&diff, &lhs.state.memory.select(addr)._eq(&rhs.state.memory.select(addr)).not()],
+        );
+    }
+
+    diff
 }
 
 /// Prove equivalence under all inputs and initial machine states.
@@ -547,12 +663,7 @@ pub fn sequences_equivalent(
     rhs: &[SemOp],
     random_tests: usize,
 ) -> bool {
-    let out_lhs = simulate_stack_effect(input, lhs);
-    let out_rhs = simulate_stack_effect(input, rhs);
-    if out_lhs != out_rhs {
-        return false;
-    }
-    if lhs == rhs {
+    if !same_stack_effect(input, lhs, rhs) || lhs == rhs {
         return false;
     }
 
@@ -570,58 +681,32 @@ pub fn sequences_equivalent_z3(
     lhs: &[SemOp],
     rhs: &[SemOp],
 ) -> bool {
+    if !same_stack_effect(input, lhs, rhs) {
+        return false;
+    }
     let stack_in: Vec<BV<'_>> = (0..input.len())
         .map(|i| BV::new_const(ctx, format!("in_{i}"), I32_BITS))
         .collect();
 
-    let st_lhs = Z3State::fresh(ctx, "lhs");
-    let st_rhs = Z3State::fresh(ctx, "rhs");
-
-    let lhs_r = exec_sequence(ctx, lhs, stack_in.clone(), st_lhs);
-    let rhs_r = exec_sequence(ctx, rhs, stack_in, st_rhs);
+    let init = Z3State::fresh(ctx, "init");
+    let lhs_r = exec_sequence(ctx, lhs, stack_in.clone(), init.clone());
+    let rhs_r = exec_sequence(ctx, rhs, stack_in, init);
 
     let solver = z3::Solver::new(ctx);
 
     let trap_mismatch = lhs_r.trap.xor(&rhs_r.trap);
-    let no_trap = Bool::and(ctx, &[&lhs_r.trap.not(), &rhs_r.trap.not()]);
+    let diff = state_diff_z3(ctx, &lhs_r, &rhs_r);
 
-    let mut diff = Bool::from_bool(ctx, false);
-    if lhs_r.stack.len() != rhs_r.stack.len() {
-        return false;
-    }
-    for (l, r) in lhs_r.stack.iter().zip(rhs_r.stack.iter()) {
-        diff = Bool::or(ctx, &[&diff, &l._eq(r).not()]);
-    }
-    for i in 0..LOCAL_SLOTS {
-        let idx = BV::from_u64(ctx, i as u64, I32_BITS);
-        diff = Bool::or(
-            ctx,
-            &[&diff, &lhs_r.state.locals.select(&idx)._eq(&rhs_r.state.locals.select(&idx)).not()],
-        );
-    }
-    for a in 0..MEM_SLOTS {
-        let addr = BV::from_u64(ctx, a as u64, I32_BITS);
-        diff = Bool::or(
-            ctx,
-            &[&diff, &lhs_r.state.memory.select(&addr)._eq(&rhs_r.state.memory.select(&addr)).not()],
-        );
-    }
-
-    solver.assert(&Bool::or(ctx, &[&trap_mismatch, &Bool::and(ctx, &[&no_trap, &diff])]));
+    solver.assert(&Bool::or(ctx, &[&trap_mismatch, &diff]));
     matches!(solver.check(), z3::SatResult::Unsat)
 }
 
 pub fn simulate_stack_effect(input: &[StackTy], ops: &[SemOp]) -> Option<Vec<StackTy>> {
     let mut stack = input.to_vec();
     for op in ops {
-        let spec = spec_for(op);
-        if spec.pops.len() > stack.len() {
+        if !apply_op_to_stack(&mut stack, op) {
             return None;
         }
-        for _ in 0..spec.pops.len() {
-            stack.pop();
-        }
-        stack.extend_from_slice(spec.pushes);
     }
     Some(stack)
 }
@@ -631,37 +716,106 @@ pub struct StackSig {
     pub stack: Vec<StackTy>,
 }
 
-pub fn enumerate_sequences(
+/// Static operand-stack effect `(pop_n, push_n)` for indexing applicable ops.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StackOpSig {
+    pub pop_n: usize,
+    pub push_n: usize,
+}
+
+impl StackOpSig {
+    pub fn for_op(op: &SemOp) -> Self {
+        let spec = spec_for(op);
+        Self {
+            pop_n: spec.pops.len(),
+            push_n: spec.pushes.len(),
+        }
+    }
+}
+
+/// Concrete ops indexed by pop count for stack-height–aware enumeration.
+pub struct OpCatalog {
+    by_pop: Vec<Vec<SemOp>>,
+    max_pop: usize,
+}
+
+impl OpCatalog {
+    pub fn from_ops(ops: &[SemOp]) -> Self {
+        let max_pop = ops
+            .iter()
+            .map(|op| StackOpSig::for_op(op).pop_n)
+            .max()
+            .unwrap_or(0);
+        let mut by_pop = vec![Vec::new(); max_pop + 1];
+        for op in ops {
+            by_pop[StackOpSig::for_op(op).pop_n].push(op.clone());
+        }
+        Self { by_pop, max_pop }
+    }
+
+    /// Ops applicable when the operand stack has `height` slots (all `I32`).
+    pub fn applicable(&self, stack_height: usize) -> impl Iterator<Item = &SemOp> {
+        let limit = stack_height.min(self.max_pop);
+        (0..=limit).flat_map(move |pop_n| self.by_pop[pop_n].iter())
+    }
+}
+
+fn apply_op_to_stack(stack: &mut Vec<StackTy>, op: &SemOp) -> bool {
+    let spec = spec_for(op);
+    if spec.pops.len() > stack.len() {
+        return false;
+    }
+    for _ in 0..spec.pops.len() {
+        stack.pop();
+    }
+    stack.extend_from_slice(spec.pushes);
+    true
+}
+
+pub fn enumerate_sequences_by_output(
     input: &[StackTy],
-    ops: &[SemOp],
+    catalog: &OpCatalog,
     max_len: usize,
-) -> Vec<Vec<SemOp>> {
-    let mut results = Vec::new();
+) -> std::collections::HashMap<StackSig, Vec<Vec<SemOp>>> {
+    use std::collections::HashMap;
+
+    let mut by_output: HashMap<StackSig, Vec<Vec<SemOp>>> = HashMap::new();
     let mut work = vec![(input.to_vec(), Vec::new())];
 
     while let Some((stack, seq)) = work.pop() {
-        if !seq.is_empty() {
-            results.push(seq.clone());
+        if !seq.is_empty() && is_type_valid(input, &seq) && uses_all_input_slots(input, &seq) {
+            by_output
+                .entry(StackSig { stack: stack.clone() })
+                .or_default()
+                .push(seq.clone());
         }
         if seq.len() >= max_len {
             continue;
         }
-        for op in ops {
-            let spec = spec_for(op);
-            if spec.pops.len() > stack.len() {
+        for op in catalog.applicable(stack.len()) {
+            let mut next_stack = stack.clone();
+            if !apply_op_to_stack(&mut next_stack, op) {
                 continue;
             }
-            let mut next_stack = stack.clone();
-            for _ in 0..spec.pops.len() {
-                next_stack.pop();
-            }
-            next_stack.extend_from_slice(spec.pushes);
             let mut next_seq = seq.clone();
             next_seq.push(op.clone());
             work.push((next_stack, next_seq));
         }
     }
-    results
+
+    by_output
+}
+
+pub fn enumerate_sequences(
+    input: &[StackTy],
+    ops: &[SemOp],
+    max_len: usize,
+) -> Vec<Vec<SemOp>> {
+    let catalog = OpCatalog::from_ops(ops);
+    enumerate_sequences_by_output(input, &catalog, max_len)
+        .into_values()
+        .flatten()
+        .collect()
 }
 
 pub fn exploration_inputs() -> Vec<Vec<StackTy>> {
@@ -720,4 +874,78 @@ pub fn print_semantics_table() {
         );
     }
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enumerated_sequences_are_type_valid() {
+        let input = vec![StackTy::I32];
+        let catalog = OpCatalog::from_ops(&concrete_ops());
+        let by_output = enumerate_sequences_by_output(&input, &catalog, 2);
+        let state = ConcreteState::new([0; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
+        for (sig, seqs) in &by_output {
+            for seq in seqs {
+                assert!(is_type_valid(&input, seq), "invalid: {seq:?}");
+                assert_eq!(
+                    simulate_stack_effect(&input, seq).as_ref(),
+                    Some(&sig.stack),
+                    "seq={seq:?}"
+                );
+                exec_sequence_concrete(seq, vec![0], state.clone());
+            }
+            for i in 0..seqs.len() {
+                for j in (i + 1)..seqs.len() {
+                    sequences_equivalent_random(&input, &seqs[i], &seqs[j], 100);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn same_stack_effect_rejects_invalid_pairs() {
+        let input = vec![StackTy::I32];
+        let valid = vec![SemOp::LocalSet(0)];
+        let invalid = vec![SemOp::I32Add];
+        assert!(!same_stack_effect(&input, &valid, &invalid));
+        assert!(!same_stack_effect(&input, &invalid, &invalid));
+    }
+
+    #[test]
+    fn mul_const2_equivalent_to_shl_const1_via_z3() {
+        let ctx = z3_context();
+        let input = vec![StackTy::I32];
+        let mul_seq = vec![SemOp::I32Const(2), SemOp::I32Mul];
+        let shl_seq = vec![SemOp::I32Const(1), SemOp::I32Shl];
+        assert!(sequences_equivalent_z3(&ctx, &input, &mul_seq, &shl_seq));
+    }
+
+    #[test]
+    fn div_s_not_equivalent_to_div_u_via_z3() {
+        let ctx = z3_context();
+        let input = vec![StackTy::I32, StackTy::I32];
+        let div_s = vec![SemOp::I32DivS];
+        let div_u = vec![SemOp::I32DivU];
+        assert!(!sequences_equivalent_z3(&ctx, &input, &div_s, &div_u));
+    }
+
+    #[test]
+    fn div_s_const1_not_equivalent_to_mul_const2_via_z3() {
+        let ctx = z3_context();
+        let input = vec![StackTy::I32];
+        let div_s = vec![SemOp::I32Const(2), SemOp::I32DivS];
+        let mul = vec![SemOp::I32Const(2), SemOp::I32Mul];
+        assert!(!sequences_equivalent_z3(&ctx, &input, &div_s, &mul));
+    }
+
+    #[test]
+    fn uses_all_input_slots_filters_pass_through() {
+        let input = vec![StackTy::I32, StackTy::I32];
+        let seq = vec![SemOp::I32Const(1), SemOp::I32Mul];
+        assert!(is_type_valid(&input, &seq));
+        assert_eq!(initial_inputs_consumed(&input, &seq), Some(1));
+        assert!(!uses_all_input_slots(&input, &seq));
+    }
 }
