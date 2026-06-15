@@ -1,12 +1,13 @@
 //! Instantiate parameterized AL step templates into flat [`AlSpec`](super::ir::AlSpec).
 
-use super::defs::{self, AlMetaExpr, AlMetaStep, BinopInstantiation, PopPattern};
+use super::binop_defs::{instantiate_binop_, step_pure_binop_template};
+use super::meta::{AlMetaExpr, AlMetaStep, BinopInstantiation, PopPattern};
 use super::ir::{AlCond, AlExpr, AlSpec, AlStep, NumType, WasmBinOp};
 
 /// Instantiate `Step_pure/binop(nt, binop)` from binop.al L5–15.
 pub fn step_pure_binop(nt: NumType, binop: WasmBinOp) -> AlSpec {
-    let inst = defs::instantiate_binop_(nt, binop);
-    let template = defs::step_pure_binop_template(nt, binop);
+    let inst = instantiate_binop_(nt, binop);
+    let template = step_pure_binop_template(nt, binop);
     AlSpec {
         steps: lower_meta_steps(&template, &inst),
     }
