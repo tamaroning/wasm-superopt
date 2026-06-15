@@ -3,7 +3,7 @@
 //! Each `SemOp` is defined by an `AlSpec` (pop / if / trap / push steps). Concrete
 //! execution, Z3 lowering, and `InstSpec` are derived from these definitions.
 
-mod binop_defs;
+mod al_defs;
 mod concrete;
 mod eval;
 mod derive;
