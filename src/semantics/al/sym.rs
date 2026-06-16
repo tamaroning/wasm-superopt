@@ -629,6 +629,59 @@ fn is_zero_bv<'ctx>(bv: &BV<'ctx>) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// SpecTec numerics builtins (wasm-2.0/3-numerics.spectec, numerics.ml)
+// ---------------------------------------------------------------------------
+
+/// `maskN z = 2^z - 1` (`numerics.ml`).
+fn mask_n_bv<'ctx>(ctx: &'ctx Context, z: u32) -> BV<'ctx> {
+    let bits = z.min(I32_BITS);
+    if bits == I32_BITS {
+        BV::from_u64(ctx, u32::MAX as u64, I32_BITS)
+    } else {
+        BV::from_u64(ctx, (1u64 << bits) - 1, I32_BITS)
+    }
+}
+
+/// `$truncz(rat)` — 0 方向切り捨て; see `truncz_rat`.
+fn truncz_rat<'ctx>(_ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'ctx> {
+    let q = n.div(&d);
+    BV::from_int(&q, I32_BITS)
+}
+
+/// `\ 2^N` for Inn types: modulus `0` is the `2^32` sentinel (identity on u32 bits).
+fn sym_mod_inn<'ctx>(ctx: &'ctx Context, x: BV<'ctx>, modulus: &BV<'ctx>, signed: bool) -> BV<'ctx> {
+    let zero = BV::from_u64(ctx, 0, I32_BITS);
+    let one = BV::from_u64(ctx, 1, I32_BITS);
+    let is_mod_2p32 = modulus._eq(&zero);
+    if signed {
+        let m = modulus.bvsgt(&one).ite(modulus, &one);
+        is_mod_2p32.ite(&x, &x.bvsrem(&m))
+    } else {
+        is_mod_2p32.ite(&x, &x.bvurem(&modulus.bvugt(&one).ite(modulus, &one)))
+    }
+}
+
+/// `$iand_(N, m, n) = (m & n) & mask(N)`.
+fn sym_iand_<'ctx>(ctx: &'ctx Context, z: u32, m: &BV<'ctx>, n: &BV<'ctx>) -> BV<'ctx> {
+    m.bvand(n).bvand(&mask_n_bv(ctx, z))
+}
+
+/// `$ior_(N, m, n) = (m | n) & mask(N)`.
+fn sym_ior_<'ctx>(ctx: &'ctx Context, z: u32, m: &BV<'ctx>, n: &BV<'ctx>) -> BV<'ctx> {
+    m.bvor(n).bvand(&mask_n_bv(ctx, z))
+}
+
+/// `$ixor_(N, m, n) = (m xor n) & mask(N)`.
+fn sym_ixor_<'ctx>(ctx: &'ctx Context, z: u32, m: &BV<'ctx>, n: &BV<'ctx>) -> BV<'ctx> {
+    m.bvxor(n).bvand(&mask_n_bv(ctx, z))
+}
+
+/// `$ishl_(N, m, n) = (m << (n rem N)) & mask(N)` — amount `rem` is done in AL (`inn_ishl`).
+fn sym_ishl_<'ctx>(ctx: &'ctx Context, z: u32, m: &BV<'ctx>, amount: &BV<'ctx>) -> BV<'ctx> {
+    m.bvshl(amount).bvand(&mask_n_bv(ctx, z))
+}
+
+// ---------------------------------------------------------------------------
 // Symbolic expression helpers
 // ---------------------------------------------------------------------------
 
@@ -680,13 +733,6 @@ fn as_rat_pair<'ctx>(v: SymValue<'ctx>) -> Result<(Int<'ctx>, Int<'ctx>), Encode
 
 fn int_concrete<'ctx>(i: &Int<'ctx>) -> Option<i64> {
     i.as_i64().or_else(|| i.simplify().as_i64())
-}
-
-fn truncz_rat<'ctx>(_ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'ctx> {
-    // SpecTec `$truncz`: rational → int, truncate toward zero (builtin / Q.to_bigint).
-    // Z3 integer division truncates toward zero; int2bv yields the i32 bit pattern.
-    let q = n.div(&d);
-    BV::from_int(&q, I32_BITS)
 }
 
 fn trunc_rat<'ctx>(ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'ctx> {
@@ -766,22 +812,17 @@ fn sym_mod<'ctx>(
 ) -> EncodeResult<'ctx> {
     Ok(match (a, b) {
         (SymValue::Nat(x), SymValue::Nat(y)) => {
-            if bv_const_u64(&y) == Some(0) {
-                SymValue::Nat(x)
-            } else if let (Some(xu), Some(yu)) = (bv_const_u64(&x), bv_const_u64(&y)) {
-                SymValue::Nat(BV::from_u64(ctx, xu % yu.max(1), I32_BITS))
+            if let (Some(xu), Some(yu)) = (bv_const_u64(&x), bv_const_u64(&y)) {
+                if yu == 0 {
+                    SymValue::Nat(x)
+                } else {
+                    SymValue::Nat(BV::from_u64(ctx, xu % yu, I32_BITS))
+                }
             } else {
-                let zero = BV::from_u64(ctx, 0, I32_BITS);
-                let one = BV::from_u64(ctx, 1, I32_BITS);
-                let is_zero = y._eq(&zero);
-                SymValue::Nat(is_zero.ite(&x, &x.bvurem(&y.bvugt(&one).ite(&y, &one))))
+                SymValue::Nat(sym_mod_inn(ctx, x, &y, false))
             }
         }
-        (SymValue::Int(x), SymValue::Int(y)) => {
-            let one = BV::from_u64(ctx, 1, I32_BITS);
-            let m = y.bvsgt(&one).ite(&y, &one);
-            SymValue::Int(x.bvsrem(&m))
-        }
+        (SymValue::Int(x), SymValue::Int(y)) => SymValue::Int(sym_mod_inn(ctx, x, &y, true)),
         _ => panic!("mod on incompatible values"),
     })
 }
@@ -804,7 +845,7 @@ fn sym_shl<'ctx>(
 ) -> EncodeResult<'ctx> {
     let x = as_nat_bv(ctx, a)?;
     let y = as_nat_bv(ctx, b)?;
-    Ok(SymValue::Nat(x.bvshl(&y)))
+    Ok(SymValue::Nat(sym_ishl_(ctx, I32_BITS, &x, &y)))
 }
 
 fn sym_bitand<'ctx>(
@@ -812,7 +853,9 @@ fn sym_bitand<'ctx>(
     a: SymValue<'ctx>,
     b: SymValue<'ctx>,
 ) -> EncodeResult<'ctx> {
-    Ok(SymValue::Nat(as_nat_bv(ctx, a)?.bvand(&as_nat_bv(ctx, b)?)))
+    let x = as_nat_bv(ctx, a)?;
+    let y = as_nat_bv(ctx, b)?;
+    Ok(SymValue::Nat(sym_iand_(ctx, I32_BITS, &x, &y)))
 }
 
 fn sym_bitor<'ctx>(
@@ -820,7 +863,9 @@ fn sym_bitor<'ctx>(
     a: SymValue<'ctx>,
     b: SymValue<'ctx>,
 ) -> EncodeResult<'ctx> {
-    Ok(SymValue::Nat(as_nat_bv(ctx, a)?.bvor(&as_nat_bv(ctx, b)?)))
+    let x = as_nat_bv(ctx, a)?;
+    let y = as_nat_bv(ctx, b)?;
+    Ok(SymValue::Nat(sym_ior_(ctx, I32_BITS, &x, &y)))
 }
 
 fn sym_bitxor<'ctx>(
@@ -828,7 +873,9 @@ fn sym_bitxor<'ctx>(
     a: SymValue<'ctx>,
     b: SymValue<'ctx>,
 ) -> EncodeResult<'ctx> {
-    Ok(SymValue::Nat(as_nat_bv(ctx, a)?.bvxor(&as_nat_bv(ctx, b)?)))
+    let x = as_nat_bv(ctx, a)?;
+    let y = as_nat_bv(ctx, b)?;
+    Ok(SymValue::Nat(sym_ixor_(ctx, I32_BITS, &x, &y)))
 }
 
 fn sym_pow<'ctx>(
@@ -1067,6 +1114,15 @@ mod tests {
             encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::Div(Sign::U), u32::MAX, 1)
                 .unwrap(),
             eval_binop_(NumType::I32, WasmBinOp::Div(Sign::U), u32::MAX, 1)
+        );
+    }
+
+    #[test]
+    fn encode_binop_and_matches_eval_with_high_bits() {
+        let ctx = z3_context();
+        assert_eq!(
+            encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::And, u32::MAX, u32::MAX).unwrap(),
+            eval_binop_(NumType::I32, WasmBinOp::And, u32::MAX, u32::MAX)
         );
     }
 }

@@ -153,13 +153,19 @@ fn inn_imul(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
     )
 }
 
-/// `$iand_` / `$ior_` / `$ishl_` are spectec `hint(builtin)` — encode as primitive ops only.
-fn inn_iand(i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::BitAnd(Box::new(i_1), Box::new(i_2))
+/// `$iand_` / `$ior_` — spectec `hint(builtin)`: `(m op n) & mask(N)`.
+fn inn_iand(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    wrap_mod(
+        AlMetaExpr::BitAnd(Box::new(i_1), Box::new(i_2)),
+        full_modulus(n),
+    )
 }
 
-fn inn_ior(i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::BitOr(Box::new(i_1), Box::new(i_2))
+fn inn_ior(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+    wrap_mod(
+        AlMetaExpr::BitOr(Box::new(i_1), Box::new(i_2)),
+        full_modulus(n),
+    )
 }
 
 fn inn_ishl(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
@@ -586,12 +592,20 @@ pub fn binop_def() -> AlMetaFnDef {
         },
         AlMetaFnStep::If {
             cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::And),
-            then_steps: vec![singleton_binop(inn_iand(i_1.clone(), i_2.clone()))],
+            then_steps: vec![singleton_binop(inn_iand(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
             else_steps: vec![],
         },
         AlMetaFnStep::If {
             cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Or),
-            then_steps: vec![singleton_binop(inn_ior(i_1.clone(), i_2.clone()))],
+            then_steps: vec![singleton_binop(inn_ior(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
             else_steps: vec![],
         },
         AlMetaFnStep::If {
