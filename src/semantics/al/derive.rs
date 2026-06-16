@@ -122,6 +122,16 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
     }
 }
 
+/// Static `InstSpec` for `Step_pure/binop` from meta template shape.
+pub fn derive_meta_binop_spec(binop: super::ir::WasmBinOp) -> InstSpec {
+    InstSpec {
+        pops: POPS_2,
+        pushes: PUSHES_1,
+        touches_state: false,
+        can_trap: binop.is_partial(),
+    }
+}
+
 #[cfg(test)]
 pub(crate) const POPS_0_TEST: &[StackTy] = POPS_0;
 #[cfg(test)]

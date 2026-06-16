@@ -1,7 +1,6 @@
-//! Per-op AL spec definitions.
+//! Per-op AL spec definitions (non-binop flat specs only; binops use meta AL).
 
-use super::instantiate::step_pure_binop;
-use super::ir::{AlExpr, AlSpec, AlStep, NumType, Sign, WasmBinOp};
+use super::ir::{AlExpr, AlSpec, AlStep};
 use super::super::SemOp;
 use std::borrow::Cow;
 
@@ -29,17 +28,9 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         SemOp::I32Const(n) => Cow::Owned(AlSpec {
             steps: vec![AlStep::Push(AlExpr::ConstI32(*n))],
         }),
-        SemOp::I32Add => Cow::Owned(step_pure_binop(NumType::I32, WasmBinOp::Add)),
-        SemOp::I32Mul => Cow::Owned(step_pure_binop(NumType::I32, WasmBinOp::Mul)),
-        SemOp::I32Shl => Cow::Owned(step_pure_binop(NumType::I32, WasmBinOp::Shl)),
-        SemOp::I32DivU => Cow::Owned(step_pure_binop(
-            NumType::I32,
-            WasmBinOp::Div(Sign::U),
-        )),
-        SemOp::I32DivS => Cow::Owned(step_pure_binop(
-            NumType::I32,
-            WasmBinOp::Div(Sign::S),
-        )),
+        SemOp::I32Add | SemOp::I32Mul | SemOp::I32Shl | SemOp::I32DivU | SemOp::I32DivS => {
+            panic!("binop {op:?} uses meta AL (Step_pure/binop), not flat AlSpec")
+        }
         SemOp::LocalGet(i) => Cow::Owned(AlSpec {
             steps: vec![AlStep::Push(AlExpr::LocalGet(*i))],
         }),

@@ -1,11 +1,13 @@
 //! Concrete evaluator for meta-level AL `$fn` definitions.
 
 use super::al_defs::{
-    binop_def, idiv_def, inv_signed_def, irem_def, list_def, signed_def, size_def, sizenn_def,
+    binop_def, idiv_def, inv_signed_def, irem_def, list_def, lookup_fn, signed_def, size_def,
+    sizenn_def,
 };
 use super::ir::{NumType, Sign, WasmBinOp};
 use super::meta::{
-    AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaPred, BinOpCase, ValType,
+    AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
+    BinOpCase, ValType,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,15 +155,15 @@ struct FnEnv {
 }
 
 impl FnEnv {
-    fn new(params: &[&'static str], args: &[(&str, AlValue)]) -> Self {
+    fn new(params: &[AlMetaParam], args: &[(&str, AlValue)]) -> Self {
         let mut vars = Vec::new();
-        for name in params {
+        for param in params {
             let val = args
                 .iter()
-                .find(|(n, _)| n == name)
+                .find(|(n, _)| *n == param.name)
                 .map(|(_, v)| v.clone())
-                .unwrap_or_else(|| panic!("missing arg {name} for AL fn"));
-            vars.push((*name, val));
+                .unwrap_or_else(|| panic!("missing arg {} for AL fn", param.name));
+            vars.push((param.name, val));
         }
         Self { vars }
     }
@@ -246,7 +248,8 @@ fn eval_expr(expr: &AlMetaExpr, env: &FnEnv) -> EvalResult {
         AlMetaExpr::IntCoerce(inner) => Ok(AlValue::Int(as_int(eval_expr(inner, env)?)?)),
         AlMetaExpr::NatCoerce(inner) => match eval_expr(inner, env)? {
             AlValue::Nat(n) => Ok(AlValue::Nat(n)),
-            AlValue::Int(n) if n >= 0 => Ok(AlValue::Nat(n as u32)),
+            // `$nat$` reinterprets i32 bit patterns (e.g. `$truncz` of 2^31).
+            AlValue::Int(n) => Ok(AlValue::Nat(n as u32)),
             AlValue::Rat(n, d) => Ok(AlValue::Nat((n / d) as u32)),
             other => panic!("nat coerce on {other:?}"),
         },
@@ -297,56 +300,9 @@ fn eval_call(name: &str, args: &[AlMetaArg], env: &FnEnv) -> EvalResult {
         });
     }
 
-    match name {
-        "size" => eval_fn(
-            &size_def(),
-            &[(
-                "valtype",
-                AlValue::ValType(as_valtype(bound[0].clone())?),
-            )],
-        ),
-        "sizenn" => eval_fn(
-            &sizenn_def(),
-            &[("nt", AlValue::NumType(as_numtype(bound[0].clone())?))],
-        ),
-        "signed_" => eval_fn(
-            &signed_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("i", AlValue::Nat(as_nat(bound[1].clone())?)),
-            ],
-        ),
-        "inv_signed_" => eval_fn(
-            &inv_signed_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("i", AlValue::Int(as_int(bound[1].clone())?)),
-            ],
-        ),
-        "list_" => eval_fn(
-            &list_def(),
-            &[("X", bound[0].clone()), ("X_opt", bound[1].clone())],
-        ),
-        "idiv_" => eval_fn(
-            &idiv_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("sx", AlValue::Sign(as_sign(bound[1].clone())?)),
-                ("i_1", AlValue::Nat(as_nat(bound[2].clone())?)),
-                ("i_2", AlValue::Nat(as_nat(bound[3].clone())?)),
-            ],
-        ),
-        "irem_" => eval_fn(
-            &irem_def(),
-            &[
-                ("N", AlValue::Nat(as_nat(bound[0].clone())?)),
-                ("sx", AlValue::Sign(as_sign(bound[1].clone())?)),
-                ("i_1", AlValue::Nat(as_nat(bound[2].clone())?)),
-                ("i_2", AlValue::Nat(as_nat(bound[3].clone())?)),
-            ],
-        ),
-        other => panic!("unsupported AL call in fn eval: {other}"),
-    }
+    let def = lookup_fn(name).unwrap_or_else(|| panic!("unsupported AL call in fn eval: {name}"));
+    let fn_args = bind_eval_fn_args(&def, bound)?;
+    eval_fn(&def, &fn_args)
 }
 
 fn eval_pred(pred: &AlMetaPred, env: &FnEnv) -> Result<bool, EvalError> {
@@ -425,10 +381,17 @@ fn eval_div(a: AlValue, b: AlValue) -> EvalResult {
 }
 
 fn eval_mod(a: AlValue, b: AlValue) -> EvalResult {
+    /// `eval_pow(2, N)` for `N >= 32` uses `Nat(0)` as a `2^32` sentinel (u32 wrap).
+    fn wrap_u32_mod_2p32(v: AlValue) -> EvalResult {
+        Ok(AlValue::Nat(match v {
+            AlValue::Nat(n) => n,
+            AlValue::Int(n) => n as u32,
+            other => panic!("mod 2^32 expected numeric, got {other:?}"),
+        }))
+    }
     match (a, b) {
-        (AlValue::Nat(x), AlValue::Nat(0)) => Ok(AlValue::Nat(x)),
+        (a, AlValue::Nat(0)) | (a, AlValue::Int(0)) => wrap_u32_mod_2p32(a),
         (AlValue::Nat(x), AlValue::Nat(y)) => Ok(AlValue::Nat(x % y.max(1))),
-        (AlValue::Int(x), AlValue::Int(0)) => Ok(AlValue::Int(x)),
         (AlValue::Int(x), AlValue::Int(y)) => {
             let m = y.max(1);
             Ok(AlValue::Int(x.rem_euclid(m)))
@@ -501,6 +464,32 @@ fn to_i64(v: AlValue) -> Result<i64, EvalError> {
         AlValue::Int(n) => n as i64,
         AlValue::Rat(n, d) => n / d,
         other => panic!("cmp expected numeric, got {other:?}"),
+    })
+}
+
+fn bind_eval_fn_args(def: &AlMetaFnDef, bound: Vec<AlValue>) -> Result<Vec<(&'static str, AlValue)>, EvalError> {
+    assert_eq!(
+        def.params.len(),
+        bound.len(),
+        "arg count mismatch for ${}",
+        def.name
+    );
+    def.params
+        .iter()
+        .zip(bound)
+        .map(|(param, val)| Ok((param.name, coerce_al(param.ty, val)?)))
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn coerce_al(ty: AlMetaParamType, val: AlValue) -> Result<AlValue, EvalError> {
+    Ok(match ty {
+        AlMetaParamType::Nat => AlValue::Nat(as_nat(val)?),
+        AlMetaParamType::Int => AlValue::Int(as_int(val)?),
+        AlMetaParamType::ValType => AlValue::ValType(as_valtype(val)?),
+        AlMetaParamType::NumType => AlValue::NumType(as_numtype(val)?),
+        AlMetaParamType::Sign => AlValue::Sign(as_sign(val)?),
+        AlMetaParamType::BinOp => AlValue::BinOp(as_binop(val)?),
+        AlMetaParamType::Any => val,
     })
 }
 

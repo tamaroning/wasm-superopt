@@ -3,16 +3,53 @@
 //! This file contains **definitions only** — step templates and `$fn` helpers.
 //! Primitive `binop` from `Language.md` (`+`, `-`, `*`, `&`, `|`, `<<`, `\`, …) are
 //! encoded inline via [`AlMetaExpr`](super::meta::AlMetaExpr), not as separate `$fn`s.
-//! Lowering to flat [`AlSpec`](super::ir::AlSpec) is in [`super::instantiate`];
-//! concrete evaluation is in [`super::eval`].
+//! Lowering to flat [`AlSpec`](super::ir::AlSpec) is for hand-written step specs only;
+//! binop `SemOp`s use the meta encoder ([`super::sym`], [`super::meta_z3`]).
 
 #![allow(dead_code)] // mirrors binop.al; not every def is wired to instantiate yet
 
 use super::ir::{BinOpKind, NumType, Sign, WasmBinOp};
 use super::meta::{
-    AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaPred, AlMetaStep, BinOpCase,
-    BinopInstantiation, PopPattern, ValType,
+    AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
+    AlMetaStep, BinOpCase, PopPattern, ValType,
 };
+
+const fn mp(name: &'static str, ty: AlMetaParamType) -> AlMetaParam {
+    AlMetaParam { name, ty }
+}
+
+const SIZE_PARAMS: &[AlMetaParam] = &[mp("valtype", AlMetaParamType::ValType)];
+const SIZENN_PARAMS: &[AlMetaParam] = &[mp("nt", AlMetaParamType::NumType)];
+const SIGNED_PARAMS: &[AlMetaParam] = &[
+    mp("N", AlMetaParamType::Nat),
+    mp("i", AlMetaParamType::Nat),
+];
+const INV_SIGNED_PARAMS: &[AlMetaParam] = &[
+    mp("N", AlMetaParamType::Nat),
+    mp("i", AlMetaParamType::Int),
+];
+const LIST_PARAMS: &[AlMetaParam] = &[
+    mp("X", AlMetaParamType::Any),
+    mp("X_opt", AlMetaParamType::Any),
+];
+const IDIV_PARAMS: &[AlMetaParam] = &[
+    mp("N", AlMetaParamType::Nat),
+    mp("sx", AlMetaParamType::Sign),
+    mp("i_1", AlMetaParamType::Nat),
+    mp("i_2", AlMetaParamType::Nat),
+];
+const IREM_PARAMS: &[AlMetaParam] = &[
+    mp("N", AlMetaParamType::Nat),
+    mp("sx", AlMetaParamType::Sign),
+    mp("i_1", AlMetaParamType::Nat),
+    mp("i_2", AlMetaParamType::Nat),
+];
+const BINOP_PARAMS: &[AlMetaParam] = &[
+    mp("numtype", AlMetaParamType::NumType),
+    mp("binop_", AlMetaParamType::BinOp),
+    mp("iN_1", AlMetaParamType::Nat),
+    mp("iN_2", AlMetaParamType::Nat),
+];
 
 fn p(name: &'static str) -> AlMetaExpr {
     AlMetaExpr::Param(name)
@@ -188,7 +225,7 @@ pub fn size_def() -> AlMetaFnDef {
     }
     AlMetaFnDef {
         name: "size",
-        params: &["valtype"],
+        params: &SIZE_PARAMS,
         body: vec![
             if_valtype(ValType::I32, 32),
             if_valtype(ValType::I64, 64),
@@ -207,7 +244,7 @@ pub fn size_def() -> AlMetaFnDef {
 pub fn sizenn_def() -> AlMetaFnDef {
     AlMetaFnDef {
         name: "sizenn",
-        params: &["nt"],
+        params: &SIZENN_PARAMS,
         body: vec![AlMetaFnStep::Return(call(
             "size",
             vec![AlMetaArg::Expr(Box::new(p("nt")))],
@@ -223,7 +260,7 @@ pub fn signed_def() -> AlMetaFnDef {
     let threshold = half_modulus(p("N"));
     AlMetaFnDef {
         name: "signed_",
-        params: &["N", "i"],
+        params: &SIGNED_PARAMS,
         body: vec![
             AlMetaFnStep::If {
                 cond: lt(p("i"), threshold.clone()),
@@ -248,7 +285,7 @@ pub fn inv_signed_def() -> AlMetaFnDef {
     let threshold = half_modulus(p("N"));
     AlMetaFnDef {
         name: "inv_signed_",
-        params: &["N", "i"],
+        params: &INV_SIGNED_PARAMS,
         body: vec![
             AlMetaFnStep::If {
                 cond: and(
@@ -278,7 +315,7 @@ pub fn inv_signed_def() -> AlMetaFnDef {
 pub fn list_def() -> AlMetaFnDef {
     AlMetaFnDef {
         name: "list_",
-        params: &["X", "X_opt"],
+        params: &LIST_PARAMS,
         body: vec![
             AlMetaFnStep::If {
                 cond: AlMetaPred::OptIsNone(p("X_opt")),
@@ -327,7 +364,7 @@ pub fn idiv_def() -> AlMetaFnDef {
     );
     AlMetaFnDef {
         name: "idiv_",
-        params: &["N", "sx", "i_1", "i_2"],
+        params: IDIV_PARAMS,
         body: vec![
             AlMetaFnStep::If {
                 cond: eq(p("sx"), AlMetaExpr::SignLit(Sign::U)),
@@ -391,7 +428,7 @@ pub fn irem_def() -> AlMetaFnDef {
     };
     AlMetaFnDef {
         name: "irem_",
-        params: &["N", "sx", "i_1", "i_2"],
+        params: IREM_PARAMS,
         body: vec![
             AlMetaFnStep::If {
                 cond: eq(p("sx"), AlMetaExpr::SignLit(Sign::U)),
@@ -569,7 +606,7 @@ pub fn binop_def() -> AlMetaFnDef {
     ];
     AlMetaFnDef {
         name: "binop_",
-        params: &["numtype", "binop_", "iN_1", "iN_2"],
+        params: BINOP_PARAMS,
         body: vec![
             AlMetaFnStep::If {
                 cond: AlMetaPred::TypeIsInn(p("numtype")),
@@ -580,19 +617,19 @@ pub fn binop_def() -> AlMetaFnDef {
     }
 }
 
-/// Partial evaluation of `$binop_(numtype, binop, iN_1, iN_2)` for fixed `nt`/`binop`.
-pub fn instantiate_binop_(nt: NumType, binop: WasmBinOp) -> BinopInstantiation {
-    let kind = binop
-        .to_binop_kind()
-        .unwrap_or_else(|| panic!("unsupported binop for {nt:?}: {binop:?}"));
-    assert_eq!(nt, NumType::I32, "only I32 Inn binops supported in this phase");
-    debug_assert_eq!(nt.bit_width(), 32);
-    BinopInstantiation {
-        kind,
-        is_partial: binop.is_partial(),
-        lhs: "c1",
-        rhs: "c2",
-    }
+/// Look up a SpecTec `$fn` definition by name.
+pub fn lookup_fn(name: &str) -> Option<AlMetaFnDef> {
+    Some(match name {
+        "size" => size_def(),
+        "sizenn" => sizenn_def(),
+        "signed_" => signed_def(),
+        "inv_signed_" => inv_signed_def(),
+        "list_" => list_def(),
+        "idiv_" => idiv_def(),
+        "irem_" => irem_def(),
+        "binop_" => binop_def(),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -604,22 +641,18 @@ mod tests {
     fn size_def_matches_binop_al() {
         let def = size_def();
         assert_eq!(def.name, "size");
-        assert_eq!(def.params, &["valtype"]);
+        assert_eq!(def.params, SIZE_PARAMS);
         assert!(matches!(def.body.last(), Some(AlMetaFnStep::Fail)));
     }
 
     #[test]
-    fn instantiate_binop_i32_div_s_is_partial() {
-        let inst = instantiate_binop_(NumType::I32, WasmBinOp::Div(Sign::S));
-        assert_eq!(inst.kind, BinOpKind::DivS);
-        assert!(inst.is_partial);
+    fn binop_i32_div_s_is_partial() {
+        assert!(WasmBinOp::Div(Sign::S).is_partial());
     }
 
     #[test]
-    fn instantiate_binop_i32_add_is_total() {
-        let inst = instantiate_binop_(NumType::I32, WasmBinOp::Add);
-        assert_eq!(inst.kind, BinOpKind::Add);
-        assert!(!inst.is_partial);
+    fn binop_i32_add_is_total() {
+        assert!(!WasmBinOp::Add.is_partial());
     }
 
     #[test]
@@ -656,6 +689,14 @@ mod tests {
             Some(7)
         );
         assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::Sub, 0, 1),
+            Some((-1i32) as u32)
+        );
+        assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::Sub, 3, 5),
+            Some((-2i32) as u32)
+        );
+        assert_eq!(
             binop_concrete(NumType::I32, WasmBinOp::And, 0b1100, 0b1010),
             Some(0b1000)
         );
@@ -666,7 +707,58 @@ mod tests {
     }
 
     #[test]
-    fn binop_concrete_rem_u_empty_on_zero() {
+    fn binop_concrete_fuzz_no_panic() {
+        use crate::semantics::al::ir::{NumType, Sign, WasmBinOp};
+        let ops = [
+            WasmBinOp::Add,
+            WasmBinOp::Sub,
+            WasmBinOp::Mul,
+            WasmBinOp::Shl,
+            WasmBinOp::And,
+            WasmBinOp::Or,
+            WasmBinOp::Div(Sign::U),
+            WasmBinOp::Div(Sign::S),
+            WasmBinOp::Rem(Sign::U),
+            WasmBinOp::Rem(Sign::S),
+        ];
+        let samples: [u32; 16] = [
+            0,
+            1,
+            2,
+            3,
+            5,
+            10,
+            0x7fff_ffff,
+            0x8000_0000,
+            0x8000_0001,
+            0xffff_ffff,
+            0xffff_fffe,
+            100,
+            50,
+            0x1234_5678,
+            0xdead_beef,
+            0x0000_0007,
+        ];
+        for op in ops {
+            for &a in &samples {
+                for &b in &samples {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        binop_concrete(NumType::I32, op, a, b)
+                    }))
+                    .unwrap_or_else(|_| {
+                        panic!("binop_concrete panicked: {op:?} {a} {b}");
+                    });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn binop_concrete_div_u_and_rem_u() {
+        assert_eq!(
+            binop_concrete(NumType::I32, WasmBinOp::Div(Sign::U), 0x8000_0000, 1),
+            Some(0x8000_0000)
+        );
         assert_eq!(
             binop_concrete(NumType::I32, WasmBinOp::Rem(Sign::U), 10, 0),
             None

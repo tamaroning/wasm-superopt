@@ -6,8 +6,9 @@
 mod al;
 
 use al::{
-    STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, exec_al_concrete, exec_al_z3,
-    format_al_pretty,
+    STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, derive_meta_binop_spec,
+    exec_al_concrete, exec_al_z3, exec_meta_binop_concrete, exec_meta_binop_z3,
+    format_al_pretty, format_meta_binop_pretty, NumType, Sign, WasmBinOp,
 };
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
@@ -54,7 +55,7 @@ impl SemOp {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InstSpec {
     pub pops: &'static [StackTy],
     pub pushes: &'static [StackTy],
@@ -65,8 +66,28 @@ pub struct InstSpec {
 }
 
 pub fn spec_for(op: &SemOp) -> InstSpec {
-    let al = al_spec_for(op);
-    derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
+    match op {
+        SemOp::I32Add => derive_meta_binop_spec(WasmBinOp::Add),
+        SemOp::I32Mul => derive_meta_binop_spec(WasmBinOp::Mul),
+        SemOp::I32Shl => derive_meta_binop_spec(WasmBinOp::Shl),
+        SemOp::I32DivU => derive_meta_binop_spec(WasmBinOp::Div(Sign::U)),
+        SemOp::I32DivS => derive_meta_binop_spec(WasmBinOp::Div(Sign::S)),
+        _ => {
+            let al = al_spec_for(op);
+            derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
+        }
+    }
+}
+
+fn binop_wasm(op: &SemOp) -> Option<(NumType, WasmBinOp)> {
+    match op {
+        SemOp::I32Add => Some((NumType::I32, WasmBinOp::Add)),
+        SemOp::I32Mul => Some((NumType::I32, WasmBinOp::Mul)),
+        SemOp::I32Shl => Some((NumType::I32, WasmBinOp::Shl)),
+        SemOp::I32DivU => Some((NumType::I32, WasmBinOp::Div(Sign::U))),
+        SemOp::I32DivS => Some((NumType::I32, WasmBinOp::Div(Sign::S))),
+        _ => None,
+    }
 }
 
 pub fn concrete_ops() -> Vec<SemOp> {
@@ -144,6 +165,9 @@ pub struct ConcreteResult {
 }
 
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
+    if let Some((nt, binop)) = binop_wasm(op) {
+        return exec_meta_binop_concrete(nt, binop, stack);
+    }
     let al = al_spec_for(op);
     exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
 }
@@ -392,6 +416,9 @@ pub fn exec_op<'ctx>(
     state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
 ) -> Bool<'ctx> {
+    if let Some((nt, binop)) = binop_wasm(op) {
+        return exec_meta_binop_z3(ctx, nt, binop, stack, state, touches, &STRAIGHT_LINE_EMBED);
+    }
     let al = al_spec_for(op);
     exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)
 }
@@ -633,7 +660,12 @@ pub fn print_semantics_table() {
             if spec.touches_state { "yes" } else { "no" },
             trap,
         );
-        for line in format_al_pretty(&al_spec_for(&op)).lines() {
+        for line in match binop_wasm(&op) {
+            Some((nt, binop)) => format_meta_binop_pretty(nt, binop),
+            None => format_al_pretty(&al_spec_for(&op)),
+        }
+        .lines()
+        {
             println!("  {line}");
         }
         println!();

@@ -7,7 +7,7 @@
 //! `Shl`, `BitAnd`, `BitOr`, …) encode only what `Language.md` treats as primitive
 //! `binop` / `unop` — not thin spectec helper `$fn`s like `$iadd_`.
 
-use super::ir::{BinOpKind, NumType, Sign, WasmBinOp};
+use super::ir::{NumType, Sign, WasmBinOp};
 
 /// Wasm value type for `$size` (binop.al L17–34).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -161,19 +161,48 @@ pub enum AlMetaFnStep {
     Fail,
 }
 
+/// Spectec type of a formal parameter in a `$fn` definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlMetaParamType {
+    Nat,
+    Int,
+    ValType,
+    NumType,
+    Sign,
+    BinOp,
+    /// Polymorphic / pass-through (e.g. `X`, `X_opt` in `$list_`).
+    Any,
+}
+
+/// Named formal parameter of a `$fn` definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AlMetaParam {
+    pub name: &'static str,
+    pub ty: AlMetaParamType,
+}
+
 /// SpecTec AL function definition (`name params { ... }`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlMetaFnDef {
     pub name: &'static str,
-    pub params: &'static [&'static str],
+    pub params: &'static [AlMetaParam],
     pub body: Vec<AlMetaFnStep>,
 }
 
-/// Result of partially evaluating `$binop_(nt, binop, c_1, c_2)` for fixed `nt`/`binop`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BinopInstantiation {
-    pub kind: BinOpKind,
-    pub is_partial: bool,
-    pub lhs: &'static str,
-    pub rhs: &'static str,
+/// Pretty-print `Step_pure/binop` meta template with `$binop_` call visible.
+pub fn format_meta_binop_pretty(nt: NumType, binop: WasmBinOp) -> String {
+    let partial = if binop.is_partial() { "yes" } else { "no" };
+    format!(
+        "Step_pure/binop {nt:?} {binop:?}\n\
+           assert top_value({nt:?})\n\
+           pop c_2\n\
+           assert top_value({nt:?})\n\
+           pop c_1\n\
+           if |$binop_({nt:?}, {binop:?}, c_1, c_2)| <= 0 then\n\
+             trap\n\
+           else\n\
+             let c = choose($binop_({nt:?}, {binop:?}, c_1, c_2))\n\
+             push const({nt:?}, c)\n\
+         (partial via $binop_: {partial})"
+    )
 }
