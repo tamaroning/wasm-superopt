@@ -1,11 +1,11 @@
 //! Z3 executor for meta-level `AlMetaStep` templates (e.g. `Step_pure/binop`).
 
 use super::al_defs::step_pure_binop_template;
-use super::ir::NumType;
+use super::encode_sym::{encode_binop_stack, sym_choose_nat, sym_is_empty, SymEnv, SymValue};
+use super::ir::{NumType, WasmBinOp};
 use super::meta::AlMetaStep;
 use super::policy::EmbeddingPolicy;
 use super::super::{I32_BITS, StateTouches, Z3State};
-use super::sym::{encode_binop_stack, sym_choose_nat, sym_is_empty, SymEnv, SymValue};
 use z3::Context;
 use z3::ast::{BV, Bool};
 
@@ -13,7 +13,7 @@ fn exec_meta_step_z3<'ctx>(
     ctx: &'ctx Context,
     step: &AlMetaStep,
     nt: NumType,
-    binop: super::ir::WasmBinOp,
+    binop: WasmBinOp,
     stack: &mut Vec<BV<'ctx>>,
     trap: &mut Bool<'ctx>,
     env: &mut SymEnv<'ctx>,
@@ -65,7 +65,7 @@ fn exec_meta_steps_z3_inner<'ctx>(
     ctx: &'ctx Context,
     steps: &[AlMetaStep],
     nt: NumType,
-    binop: super::ir::WasmBinOp,
+    binop: WasmBinOp,
     stack: &mut Vec<BV<'ctx>>,
     trap: &mut Bool<'ctx>,
     env: &mut SymEnv<'ctx>,
@@ -80,7 +80,7 @@ pub fn exec_meta_steps_z3<'ctx>(
     ctx: &'ctx Context,
     steps: &[AlMetaStep],
     nt: NumType,
-    binop: super::ir::WasmBinOp,
+    binop: WasmBinOp,
     stack: &mut Vec<BV<'ctx>>,
     _state: &mut Z3State<'ctx>,
     trap: &mut Bool<'ctx>,
@@ -94,7 +94,7 @@ pub fn exec_meta_steps_z3<'ctx>(
 pub fn exec_meta_binop_z3<'ctx>(
     ctx: &'ctx Context,
     nt: NumType,
-    binop: super::ir::WasmBinOp,
+    binop: WasmBinOp,
     stack: &mut Vec<BV<'ctx>>,
     state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
@@ -104,22 +104,4 @@ pub fn exec_meta_binop_z3<'ctx>(
     let mut trap = Bool::from_bool(ctx, false);
     exec_meta_steps_z3(ctx, &steps, nt, binop, stack, state, &mut trap, touches, policy);
     trap
-}
-
-/// Concrete execution of `Step_pure/binop` via meta AL (`eval_binop_`).
-pub fn exec_meta_binop_concrete(
-    nt: NumType,
-    binop: super::ir::WasmBinOp,
-    stack: &mut Vec<i32>,
-) -> bool {
-    use super::eval::eval_binop_;
-    let c2 = stack.pop().expect("stack underflow") as u32;
-    let c1 = stack.pop().expect("stack underflow") as u32;
-    match eval_binop_(nt, binop, c1, c2) {
-        None => true,
-        Some(n) => {
-            stack.push(n as i32);
-            false
-        }
-    }
 }

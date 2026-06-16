@@ -1,4 +1,4 @@
-//! Concrete (i32) interpreter for AL specs.
+//! Concrete (i32) interpreter for flat [`AlSpec`](super::ir::AlSpec) step lists.
 
 use super::super::ConcreteState;
 use super::env::AlEnv;

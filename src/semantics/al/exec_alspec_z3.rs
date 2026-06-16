@@ -1,4 +1,4 @@
-//! Z3 symbolic interpreter for AL specs.
+//! Z3 symbolic interpreter for flat [`AlSpec`](super::ir::AlSpec) step lists.
 
 use super::super::{I32_BITS, StateTouches, Z3State};
 use super::env::AlEnv;

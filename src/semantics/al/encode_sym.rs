@@ -86,7 +86,7 @@ pub fn sym_is_empty<'ctx>(ctx: &'ctx Context, v: &SymValue<'ctx>) -> Bool<'ctx> 
 /// Spectec `choose` — extract singleton nat BV from list/opt.
 ///
 /// Empty list/opt return a dummy zero; callers that branch on `sym_is_empty`
-/// must use `is_empty.ite(&zero, &sym_choose_nat(...))` (see `meta_z3`).
+/// must use `is_empty.ite(&zero, &sym_choose_nat(...))` (see `exec_step_z3`).
 pub fn sym_choose_nat<'ctx>(ctx: &'ctx Context, v: SymValue<'ctx>) -> BV<'ctx> {
     let zero = BV::from_u64(ctx, 0, I32_BITS);
     match v {

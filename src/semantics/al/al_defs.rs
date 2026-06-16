@@ -4,7 +4,7 @@
 //! Primitive `binop` from `Language.md` (`+`, `-`, `*`, `&`, `|`, `<<`, `\`, …) are
 //! encoded inline via [`AlMetaExpr`](super::meta::AlMetaExpr), not as separate `$fn`s.
 //! Lowering to flat [`AlSpec`](super::ir::AlSpec) is for hand-written step specs only;
-//! binop `SemOp`s use the meta encoder ([`super::sym`], [`super::meta_z3`]).
+//! binop `SemOp`s use the meta encoder ([`super::encode_sym`], [`super::exec_step_z3`]).
 
 #![allow(dead_code)] // mirrors binop.al; not every def is wired to instantiate yet
 
