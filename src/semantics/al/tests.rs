@@ -1,5 +1,5 @@
 use super::derive::{POPS_0_TEST, POPS_1_TEST, POPS_2_TEST, PUSHES_0_TEST, PUSHES_1_TEST};
-use super::ir::{AlCond, AlExpr, AlStep, BinOpKind, NumType, Sign, WasmBinOp};
+use super::ir::{format_al_pretty, AlCond, AlExpr, AlStep, BinOpKind, NumType, Sign, WasmBinOp};
 use super::policy::STRAIGHT_LINE_EMBED;
 use super::{al_spec_for, derive_inst_spec, step_pure_binop};
 use crate::semantics::{InstSpec, SemOp, concrete_ops};
@@ -132,6 +132,16 @@ fn instantiate_i32_div_s_partiality_matches_binop_kind() {
     assert!(kind.binop_empty_concrete(i32::MIN, -1));
     assert!(!kind.binop_empty_concrete(8, 2));
     assert!(kind.binop_empty_concrete(8, 0));
+}
+
+#[test]
+fn format_al_pretty_div_s() {
+    let al = step_pure_binop(NumType::I32, WasmBinOp::Div(Sign::S));
+    let pretty = format_al_pretty(&al);
+    assert_eq!(
+        pretty,
+        "pop c2\npop c1\nif empty(DivS, c1, c2) then\n  trap\nelse\n  push DivS(c1, c2)"
+    );
 }
 
 #[test]

@@ -6,7 +6,8 @@
 mod al;
 
 use al::{
-    STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, exec_al_concrete, exec_al_z3, format_al_z3,
+    STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, exec_al_concrete, exec_al_z3,
+    format_al_pretty,
 };
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
@@ -620,26 +621,23 @@ pub fn z3_context() -> Context {
 
 /// Human-readable summary of instruction semantics (for `--print-semantics`).
 pub fn print_semantics_table() {
-    println!("=== Wasm instruction semantics ===");
-    println!(
-        "{:<12} {:<6} {:<6} {:<6} {:<20} Z3 op",
-        "opcode", "pop", "push", "state?", "trap (Z3)"
-    );
+    println!("=== Wasm instruction semantics ===\n");
     for op in concrete_ops() {
         let spec = spec_for(&op);
-        let trap = if spec.can_trap { "yes" } else { "-" };
-        let z3_op = format_al_z3(&al_spec_for(&op));
+        let trap = if spec.can_trap { "yes" } else { "no" };
         println!(
-            "{:<12} {:<6} {:<6} {:<6} {:<20} {}",
+            "{}  pop={} push={} state={} trap={}",
             op.name(),
             spec.pops.len(),
             spec.pushes.len(),
             if spec.touches_state { "yes" } else { "no" },
             trap,
-            z3_op,
         );
+        for line in format_al_pretty(&al_spec_for(&op)).lines() {
+            println!("  {line}");
+        }
+        println!();
     }
-    println!();
 }
 
 #[cfg(test)]

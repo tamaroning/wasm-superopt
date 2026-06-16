@@ -116,6 +116,21 @@ pub enum BinOpKind {
 }
 
 impl BinOpKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            BinOpKind::Add => "Add",
+            BinOpKind::Sub => "Sub",
+            BinOpKind::Mul => "Mul",
+            BinOpKind::DivU => "DivU",
+            BinOpKind::DivS => "DivS",
+            BinOpKind::RemU => "RemU",
+            BinOpKind::RemS => "RemS",
+            BinOpKind::Shl => "Shl",
+            BinOpKind::And => "And",
+            BinOpKind::Or => "Or",
+        }
+    }
+
     /// `binop(a, b) = ε` (Wasm partiality): may the operation trap?
     pub fn binop_empty_concrete(self, a: i32, b: i32) -> bool {
         match self {
@@ -160,5 +175,61 @@ impl BinOpKind {
             | BinOpKind::And
             | BinOpKind::Or => Bool::from_bool(ctx, false),
         }
+    }
+}
+
+/// Pretty-print flattened [`AlSpec`] steps (for `--print-semantics`).
+pub fn format_al_pretty(al: &AlSpec) -> String {
+    let mut lines = Vec::new();
+    for step in &al.steps {
+        format_step_pretty(step, 0, &mut lines);
+    }
+    lines.join("\n")
+}
+
+fn format_step_pretty(step: &AlStep, indent: usize, lines: &mut Vec<String>) {
+    let pad = "  ".repeat(indent);
+    match step {
+        AlStep::Pop(name) => lines.push(format!("{pad}pop {name}")),
+        AlStep::Push(expr) => lines.push(format!("{pad}push {}", format_expr_pretty(expr))),
+        AlStep::SetLocal { idx, var } => {
+            lines.push(format!("{pad}set local[{idx}] = {var}"))
+        }
+        AlStep::StoreMem { addr, val } => {
+            lines.push(format!("{pad}store memory[{addr}] = {val}"))
+        }
+        AlStep::If {
+            cond,
+            then_steps,
+            else_steps,
+        } => {
+            lines.push(format!("{pad}if {} then", format_cond_pretty(cond)));
+            for s in then_steps {
+                format_step_pretty(s, indent + 1, lines);
+            }
+            lines.push(format!("{pad}else"));
+            for s in else_steps {
+                format_step_pretty(s, indent + 1, lines);
+            }
+        }
+        AlStep::Trap => lines.push(format!("{pad}trap")),
+    }
+}
+
+fn format_cond_pretty(cond: &AlCond) -> String {
+    match cond {
+        AlCond::BinOpEmpty(kind, lhs, rhs) => {
+            format!("empty({}, {lhs}, {rhs})", kind.label())
+        }
+    }
+}
+
+fn format_expr_pretty(expr: &AlExpr) -> String {
+    match expr {
+        AlExpr::ConstI32(n) => format!("const {n}"),
+        AlExpr::Var(name) => (*name).to_string(),
+        AlExpr::BinOp(kind, lhs, rhs) => format!("{}({lhs}, {rhs})", kind.label()),
+        AlExpr::LocalGet(idx) => format!("local[{idx}]"),
+        AlExpr::MemLoad(addr) => format!("memory[{addr}]"),
     }
 }

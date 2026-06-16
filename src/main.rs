@@ -313,6 +313,10 @@ fn main() {
         return;
     }
 
+    if cli.print_semantics {
+        return;
+    }
+
     let rules = load_rules(&cli);
     if matches!(cli.rules, RulesMode::Synthesize) {
         println!("Running demos with {} synthesized rules.\n", rules.len());
