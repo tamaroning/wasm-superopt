@@ -1,6 +1,8 @@
-//! Per-op AL spec definitions (non-binop flat specs only; binops use meta AL).
+//! Per-op AL spec definitions (non-binop flat specs; binops use meta AL).
 
+use super::al_defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
 use super::ir::{AlExpr, AlSpec, AlStep};
+use super::meta::AlMetaStep;
 use super::super::SemOp;
 use std::borrow::Cow;
 
@@ -21,6 +23,19 @@ fn steps_store() -> Vec<AlStep> {
 
 fn steps_drop() -> Vec<AlStep> {
     vec![AlStep::Pop("_")]
+}
+
+/// Meta-level `Step_pure/...` template for an op, if any.
+pub fn meta_steps_for(op: &SemOp) -> Option<Vec<AlMetaStep>> {
+    let (nt, binop) = match op {
+        SemOp::I32Add => (NumType::I32, WasmBinOp::Add),
+        SemOp::I32Mul => (NumType::I32, WasmBinOp::Mul),
+        SemOp::I32Shl => (NumType::I32, WasmBinOp::Shl),
+        SemOp::I32DivU => (NumType::I32, WasmBinOp::Div(Sign::U)),
+        SemOp::I32DivS => (NumType::I32, WasmBinOp::Div(Sign::S)),
+        _ => return None,
+    };
+    Some(step_pure_binop_template(nt, binop))
 }
 
 pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {

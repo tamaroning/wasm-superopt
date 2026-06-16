@@ -66,6 +66,11 @@ pub fn encode_call<'ctx>(
         });
     }
 
+    if name == "const" {
+        let _nt = as_numtype(bound[0].clone())?;
+        return Ok(SymValue::Nat(as_nat_bv(ctx, bound[1].clone())?));
+    }
+
     let def = lookup_fn(name).unwrap_or_else(|| panic!("unsupported AL call in sym encode: {name}"));
     let fn_args = bind_sym_fn_args(&def, bound)?;
     encode_fn(ctx, &def, &fn_args)
@@ -164,23 +169,44 @@ pub fn encode_expr<'ctx>(
             encode_expr(ctx, inner, env)?,
         )?))),
         AlMetaExpr::Call(name, args) => encode_call(ctx, name, args, env),
-        AlMetaExpr::OptionalLen(inner) => Ok(SymValue::nat_const(
-            ctx,
-            match encode_expr(ctx, inner, env)? {
-                SymValue::List(items) if items.is_empty() => 0,
-                SymValue::Opt(None) => 0,
-                _ => 1,
-            },
-        )),
-        AlMetaExpr::TopValue(_) => panic!("step-only TopValue in sym encode: {expr:?}"),
+        AlMetaExpr::OptionalLen(inner) => {
+            Ok(sym_optional_len(ctx, encode_expr(ctx, inner, env)?))
+        }
+        AlMetaExpr::TopValue(nt) => Ok(SymValue::NumType(*nt)),
     }
 }
 
+fn sym_optional_len<'ctx>(ctx: &'ctx Context, v: SymValue<'ctx>) -> SymValue<'ctx> {
+    match v {
+        SymValue::List(items) if items.is_empty() => SymValue::nat_const(ctx, 0),
+        SymValue::Opt(None) => SymValue::nat_const(ctx, 0),
+        SymValue::Partial { empty, .. } => SymValue::Nat(empty.ite(
+            &BV::from_u64(ctx, 0, I32_BITS),
+            &BV::from_u64(ctx, 1, I32_BITS),
+        )),
+        _ => SymValue::nat_const(ctx, 1),
+    }
+}
+
+/// Evaluate an `AlMetaExpr` in a step template (Assert / Let / If / Push).
+pub fn encode_meta_expr<'ctx>(
+    ctx: &'ctx Context,
+    expr: &AlMetaExpr,
+    env: &SymEnv<'ctx>,
+) -> EncodeResult<'ctx> {
+    encode_expr(ctx, expr, env)
+}
+
+#[derive(Clone)]
 pub struct SymEnv<'ctx> {
     vars: Vec<(&'static str, SymValue<'ctx>)>,
 }
 
 impl<'ctx> SymEnv<'ctx> {
+    pub fn empty() -> Self {
+        Self { vars: Vec::new() }
+    }
+
     pub fn new(params: &[AlMetaParam], args: &[(&str, SymValue<'ctx>)]) -> Self {
         let mut vars = Vec::new();
         for param in params {
@@ -609,10 +635,14 @@ fn as_nat_bv_direct<'ctx>(_ctx: &'ctx Context, v: SymValue<'ctx>) -> BV<'ctx> {
 }
 
 fn encode_choose_value<'ctx>(
-    _ctx: &'ctx Context,
+    ctx: &'ctx Context,
     v: SymValue<'ctx>,
 ) -> EncodeResult<'ctx> {
+    // Empty opt/list are unreachable in concrete eval (guarded by |expr| > 0), but
+    // trap_dummy_push still encodes the else-branch; return a dummy nat like sym_choose_nat.
     match v {
+        SymValue::Opt(None) => Ok(SymValue::nat_const(ctx, 0)),
+        SymValue::List(items) if items.is_empty() => Ok(SymValue::nat_const(ctx, 0)),
         SymValue::Opt(Some(inner)) => Ok(*inner),
         SymValue::List(items) if items.len() == 1 => Ok(items[0].clone()),
         SymValue::Partial { value, .. } => Ok(*value),
@@ -1049,9 +1079,24 @@ fn concretize_binop_list<'ctx>(v: SymValue<'ctx>) -> Result<Option<u32>, EncodeE
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::al::eval::eval_binop_;
-    use crate::semantics::al::al_defs::{NumType, Sign, WasmBinOp};
+    use crate::semantics::al::al_defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
+    use crate::semantics::al::exec_step_concrete::exec_meta_steps_concrete;
     use crate::semantics::z3_context;
+
+    fn meta_binop_concrete(
+        nt: NumType,
+        binop: WasmBinOp,
+        i_1: u32,
+        i_2: u32,
+    ) -> Option<u32> {
+        let mut stack = vec![i_1 as i32, i_2 as i32];
+        let trap = exec_meta_steps_concrete(&step_pure_binop_template(nt, binop), &mut stack);
+        if trap {
+            None
+        } else {
+            Some(stack.last().copied().unwrap() as u32)
+        }
+    }
 
     fn encode_binop_concrete(
         ctx: &z3::Context,
@@ -1074,7 +1119,7 @@ mod tests {
         let ctx = z3_context();
         assert_eq!(
             encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::Add, 3, 5).unwrap(),
-            eval_binop_(NumType::I32, WasmBinOp::Add, 3, 5)
+            meta_binop_concrete(NumType::I32, WasmBinOp::Add, 3, 5)
         );
     }
 
@@ -1103,7 +1148,7 @@ mod tests {
         let ctx = z3_context();
         assert_eq!(
             encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::Div(Sign::S), 8, 2).unwrap(),
-            eval_binop_(NumType::I32, WasmBinOp::Div(Sign::S), 8, 2)
+            meta_binop_concrete(NumType::I32, WasmBinOp::Div(Sign::S), 8, 2)
         );
     }
 
@@ -1113,7 +1158,7 @@ mod tests {
         assert_eq!(
             encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::Div(Sign::U), u32::MAX, 1)
                 .unwrap(),
-            eval_binop_(NumType::I32, WasmBinOp::Div(Sign::U), u32::MAX, 1)
+            meta_binop_concrete(NumType::I32, WasmBinOp::Div(Sign::U), u32::MAX, 1)
         );
     }
 
@@ -1122,7 +1167,7 @@ mod tests {
         let ctx = z3_context();
         assert_eq!(
             encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::And, u32::MAX, u32::MAX).unwrap(),
-            eval_binop_(NumType::I32, WasmBinOp::And, u32::MAX, u32::MAX)
+            meta_binop_concrete(NumType::I32, WasmBinOp::And, u32::MAX, u32::MAX)
         );
     }
 }

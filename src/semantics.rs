@@ -7,7 +7,7 @@ mod al;
 
 use al::{
     STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, derive_meta_binop_spec,
-    exec_al_concrete, exec_al_z3, exec_meta_binop_concrete, exec_meta_binop_z3,
+    exec_al_concrete, exec_al_z3, exec_meta_steps_concrete, exec_meta_steps_z3, meta_steps_for,
     format_al_pretty, format_meta_binop_pretty, NumType, Sign, WasmBinOp,
 };
 use z3::ast::{Array, Ast, BV, Bool};
@@ -165,8 +165,8 @@ pub struct ConcreteResult {
 }
 
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
-    if let Some((nt, binop)) = binop_wasm(op) {
-        return exec_meta_binop_concrete(nt, binop, stack);
+    if let Some(steps) = meta_steps_for(op) {
+        return exec_meta_steps_concrete(&steps, stack);
     }
     let al = al_spec_for(op);
     exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
@@ -416,8 +416,8 @@ pub fn exec_op<'ctx>(
     state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
 ) -> Bool<'ctx> {
-    if let Some((nt, binop)) = binop_wasm(op) {
-        return exec_meta_binop_z3(ctx, nt, binop, stack, state, touches, &STRAIGHT_LINE_EMBED);
+    if let Some(steps) = meta_steps_for(op) {
+        return exec_meta_steps_z3(ctx, &steps, stack, state, touches, &STRAIGHT_LINE_EMBED);
     }
     let al = al_spec_for(op);
     exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)

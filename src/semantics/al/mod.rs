@@ -26,14 +26,13 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-pub use encode_sym::encode_binop_stack;
 pub use derive::{derive_inst_spec, derive_meta_binop_spec};
 pub use exec_alspec_concrete::exec_al_concrete;
 pub use exec_alspec_z3::exec_al_z3;
-pub use exec_step_concrete::exec_meta_binop_concrete;
-pub use exec_step_z3::exec_meta_binop_z3;
+pub use exec_step_concrete::exec_meta_steps_concrete;
+pub use exec_step_z3::exec_meta_steps_z3;
 pub use policy::STRAIGHT_LINE_EMBED;
-pub use specs::al_spec_for;
+pub use specs::{al_spec_for, meta_steps_for};
 pub use al_defs::{NumType, Sign, WasmBinOp};
 pub use ir::format_al_pretty;
 pub use meta::format_meta_binop_pretty;

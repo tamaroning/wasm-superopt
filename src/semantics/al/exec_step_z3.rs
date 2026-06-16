@@ -1,107 +1,188 @@
-//! Z3 executor for meta-level `AlMetaStep` templates (e.g. `Step_pure/binop`).
+//! Z3 executor for meta-level [`AlMetaStep`](super::meta::AlMetaStep) templates.
 
-use super::al_defs::step_pure_binop_template;
-use super::encode_sym::{encode_binop_stack, sym_choose_nat, sym_is_empty, SymEnv, SymValue};
-use super::al_defs::{NumType, WasmBinOp};
-use super::meta::AlMetaStep;
+use super::encode_sym::{encode_meta_expr, SymEnv, SymValue};
+use super::meta::{AlMetaExpr, AlMetaStep, PopPattern};
 use super::policy::EmbeddingPolicy;
 use super::super::{I32_BITS, StateTouches, Z3State};
 use z3::Context;
-use z3::ast::{BV, Bool};
+use z3::ast::{Ast, BV, Bool};
+
+fn sym_if_cond<'ctx>(
+    ctx: &'ctx Context,
+    cond: &AlMetaExpr,
+    env: &SymEnv<'ctx>,
+) -> Bool<'ctx> {
+    match encode_meta_expr(ctx, cond, env).expect("if cond") {
+        SymValue::Nat(bv) => bv._eq(&BV::from_u64(ctx, 0, I32_BITS)),
+        other => panic!("if cond expected nat, got {other:?}"),
+    }
+}
+
+fn stack_push_bv<'ctx>(
+    ctx: &'ctx Context,
+    val: SymValue<'ctx>,
+    trap_guard: Option<&Bool<'ctx>>,
+) -> BV<'ctx> {
+    let bv = match val {
+        SymValue::Nat(bv) => bv,
+        SymValue::Int(bv) => bv,
+        other => panic!("stack push expected nat/int, got {other:?}"),
+    };
+    match trap_guard {
+        Some(guard) => {
+            let zero = BV::from_i64(ctx, 0, I32_BITS);
+            guard.ite(&zero, &bv)
+        }
+        None => bv,
+    }
+}
+
+fn is_trap_else_push_meta(then_steps: &[AlMetaStep], else_steps: &[AlMetaStep]) -> bool {
+    then_steps == [AlMetaStep::Trap]
+        && else_steps
+            .last()
+            .is_some_and(|s| matches!(s, AlMetaStep::Push(_)))
+}
 
 fn exec_meta_step_z3<'ctx>(
     ctx: &'ctx Context,
     step: &AlMetaStep,
-    nt: NumType,
-    binop: WasmBinOp,
     stack: &mut Vec<BV<'ctx>>,
     trap: &mut Bool<'ctx>,
     env: &mut SymEnv<'ctx>,
     policy: &EmbeddingPolicy,
 ) {
     match step {
-        AlMetaStep::Assert(_) => {}
+        AlMetaStep::Assert(expr) => {
+            if matches!(expr, AlMetaExpr::TopValue(_)) {
+                return;
+            }
+            encode_meta_expr(ctx, expr, env).expect("assert expr");
+        }
         AlMetaStep::Pop(pattern) => {
             let name = match pattern {
-                super::meta::PopPattern::NumConst(n) => *n,
+                PopPattern::NumConst(n) => *n,
             };
             let val = stack.pop().expect("stack underflow");
             env.bind(name, SymValue::nat_from_stack(val));
         }
-        AlMetaStep::If { then_steps, else_steps, .. } => {
-            let c1 = as_stack_bv(env.get("c_1"));
-            let c2 = as_stack_bv(env.get("c_2"));
-            let binop_result =
-                encode_binop_stack(ctx, nt, binop, c1, c2).expect("binop_ encode failed");
-            let is_empty = sym_is_empty(ctx, &binop_result);
-            if policy.trap_dummy_push {
+        AlMetaStep::Let { name, expr } => {
+            env.bind(name, encode_meta_expr(ctx, expr, env).expect("let expr"));
+        }
+        AlMetaStep::If {
+            cond,
+            then_steps,
+            else_steps,
+        } => {
+            if policy.trap_dummy_push && is_trap_else_push_meta(then_steps, else_steps) {
+                let is_empty = sym_if_cond(ctx, cond, env);
                 *trap = Bool::or(ctx, &[trap, &is_empty]);
-                let zero = BV::from_i64(ctx, 0, I32_BITS);
-                let result = sym_choose_nat(ctx, binop_result);
-                stack.push(is_empty.ite(&zero, &result));
-            } else if is_empty.as_bool().unwrap_or(false) {
-                exec_meta_steps_z3_inner(ctx, then_steps, nt, binop, stack, trap, env, policy);
-            } else {
-                exec_meta_steps_z3_inner(ctx, else_steps, nt, binop, stack, trap, env, policy);
+                let mut else_env = env.clone();
+                for step in else_steps {
+                    match step {
+                        AlMetaStep::Let { name, expr } => {
+                            else_env.bind(
+                                name,
+                                encode_meta_expr(ctx, expr, &else_env).expect("else let"),
+                            );
+                        }
+                        AlMetaStep::Push(expr) => {
+                            let val =
+                                encode_meta_expr(ctx, expr, &else_env).expect("else push expr");
+                            stack.push(stack_push_bv(ctx, val, Some(&is_empty)));
+                        }
+                        other => exec_meta_step_z3(
+                            ctx,
+                            other,
+                            stack,
+                            trap,
+                            &mut else_env,
+                            policy,
+                        ),
+                    }
+                }
+                return;
             }
+
+            let c = sym_if_cond(ctx, cond, env);
+            let mut stack_t = stack.clone();
+            let mut stack_e = stack.clone();
+            let mut trap_t = trap.clone();
+            let mut trap_e = trap.clone();
+            let mut env_t = env.clone();
+            let mut env_e = env.clone();
+            exec_meta_steps_inner(
+                ctx,
+                then_steps,
+                &mut stack_t,
+                &mut trap_t,
+                &mut env_t,
+                policy,
+            );
+            exec_meta_steps_inner(
+                ctx,
+                else_steps,
+                &mut stack_e,
+                &mut trap_e,
+                &mut env_e,
+                policy,
+            );
+            *trap = Bool::or(
+                ctx,
+                &[
+                    &Bool::and(ctx, &[&c, &trap_t]),
+                    &Bool::and(ctx, &[&c.not(), &trap_e]),
+                ],
+            );
+            let base_len = stack.len();
+            let new_len = stack_t.len().max(stack_e.len());
+            stack.truncate(base_len);
+            for i in base_len..new_len {
+                match (stack_t.get(i), stack_e.get(i)) {
+                    (Some(tv), Some(ev)) => stack.push(c.ite(tv, ev)),
+                    (Some(tv), None) => stack.push(tv.clone()),
+                    (None, Some(ev)) => stack.push(ev.clone()),
+                    (None, None) => {}
+                }
+            }
+            *env = env_e;
         }
-        AlMetaStep::Let { .. } | AlMetaStep::Push(_) => {
-            panic!("Let/Push in Step_pure/binop are encoded in the If/else branch")
+        AlMetaStep::Push(expr) => {
+            let val = encode_meta_expr(ctx, expr, env).expect("push expr");
+            stack.push(stack_push_bv(ctx, val, None));
         }
-        AlMetaStep::Trap => {
-            *trap = Bool::from_bool(ctx, true);
-        }
+        AlMetaStep::Trap => *trap = Bool::from_bool(ctx, true),
     }
 }
 
-fn as_stack_bv<'ctx>(v: &SymValue<'ctx>) -> BV<'ctx> {
-    match v {
-        SymValue::Nat(bv) => bv.clone(),
-        other => panic!("expected stack nat, got {other:?}"),
-    }
-}
-
-fn exec_meta_steps_z3_inner<'ctx>(
+fn exec_meta_steps_inner<'ctx>(
     ctx: &'ctx Context,
     steps: &[AlMetaStep],
-    nt: NumType,
-    binop: WasmBinOp,
     stack: &mut Vec<BV<'ctx>>,
     trap: &mut Bool<'ctx>,
     env: &mut SymEnv<'ctx>,
     policy: &EmbeddingPolicy,
 ) {
     for step in steps {
-        exec_meta_step_z3(ctx, step, nt, binop, stack, trap, env, policy);
+        if trap.as_bool() == Some(true) {
+            return;
+        }
+        exec_meta_step_z3(ctx, step, stack, trap, env, policy);
     }
 }
 
+/// Z3 execution of a `Step_pure/...` meta template.
 pub fn exec_meta_steps_z3<'ctx>(
     ctx: &'ctx Context,
     steps: &[AlMetaStep],
-    nt: NumType,
-    binop: WasmBinOp,
     stack: &mut Vec<BV<'ctx>>,
     _state: &mut Z3State<'ctx>,
-    trap: &mut Bool<'ctx>,
-    _touches: &mut StateTouches<'ctx>,
-    policy: &EmbeddingPolicy,
-) {
-    let mut env = SymEnv::new(&[], &[]);
-    exec_meta_steps_z3_inner(ctx, steps, nt, binop, stack, trap, &mut env, policy);
-}
-
-pub fn exec_meta_binop_z3<'ctx>(
-    ctx: &'ctx Context,
-    nt: NumType,
-    binop: WasmBinOp,
-    stack: &mut Vec<BV<'ctx>>,
-    state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
     policy: &EmbeddingPolicy,
 ) -> Bool<'ctx> {
-    let steps = step_pure_binop_template(nt, binop);
     let mut trap = Bool::from_bool(ctx, false);
-    exec_meta_steps_z3(ctx, &steps, nt, binop, stack, state, &mut trap, touches, policy);
+    let mut env = SymEnv::empty();
+    exec_meta_steps_inner(ctx, steps, stack, &mut trap, &mut env, policy);
+    let _ = touches;
     trap
 }

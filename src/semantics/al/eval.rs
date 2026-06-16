@@ -1,6 +1,6 @@
 //! Concrete evaluator for meta-level AL `$fn` definitions.
 
-use super::al_defs::{binop_def, lookup_fn, BinOpCase, NumType, Sign, ValType, WasmBinOp};
+use super::al_defs::{lookup_fn, BinOpCase, NumType, Sign, ValType, WasmBinOp};
 use super::meta::{
     AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
 };
@@ -26,60 +26,35 @@ pub enum EvalError {
 
 type EvalResult = Result<AlValue, EvalError>;
 
-pub fn eval_binop_(
-    nt: NumType,
-    binop: WasmBinOp,
-    i_1: u32,
-    i_2: u32,
-) -> Option<u32> {
-    match eval_fn(
-        &binop_def(),
-        &[
-            ("numtype", AlValue::NumType(nt)),
-            ("binop_", AlValue::BinOp(binop)),
-            ("iN_1", AlValue::Nat(i_1)),
-            ("iN_2", AlValue::Nat(i_2)),
-        ],
-    ) {
-        Ok(AlValue::List(items)) if items.is_empty() => None,
-        Ok(AlValue::List(items)) => match items.as_slice() {
-            [AlValue::Nat(n)] => Some(*n),
-            other => panic!("binop_ singleton list expected Nat, got {other:?}"),
-        },
-        Ok(AlValue::Opt(None)) => None,
-        Ok(AlValue::Opt(Some(v))) => match *v {
-            AlValue::Nat(n) => Some(n),
-            other => panic!("binop_ optional expected Nat, got {other:?}"),
-        },
-        Err(EvalError::Fail) => None,
-        other => panic!("binop_ returned unexpected {other:?}"),
-    }
-}
-
 pub fn eval_fn(def: &AlMetaFnDef, args: &[(&str, AlValue)]) -> EvalResult {
-    let mut env = FnEnv::new(def.params, args);
+    let mut env = MetaEnv::with_args(def.params, args);
     eval_fn_steps(&def.body, &mut env)
 }
 
-struct FnEnv {
+/// Variable environment for `$fn` bodies and `AlMetaStep` templates.
+pub struct MetaEnv {
     vars: Vec<(&'static str, AlValue)>,
 }
 
-impl FnEnv {
-    fn new(params: &[AlMetaParam], args: &[(&str, AlValue)]) -> Self {
-        let mut vars = Vec::new();
+impl MetaEnv {
+    pub fn new() -> Self {
+        Self { vars: Vec::new() }
+    }
+
+    fn with_args(params: &[AlMetaParam], args: &[(&str, AlValue)]) -> Self {
+        let mut env = Self::new();
         for param in params {
             let val = args
                 .iter()
                 .find(|(n, _)| *n == param.name)
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| panic!("missing arg {} for AL fn", param.name));
-            vars.push((param.name, val));
+            env.bind(param.name, val);
         }
-        Self { vars }
+        env
     }
 
-    fn bind(&mut self, name: &'static str, val: AlValue) {
+    pub fn bind(&mut self, name: &'static str, val: AlValue) {
         if let Some(slot) = self.vars.iter_mut().find(|(n, _)| *n == name) {
             slot.1 = val;
         } else {
@@ -96,7 +71,12 @@ impl FnEnv {
     }
 }
 
-fn eval_fn_steps(steps: &[AlMetaFnStep], env: &mut FnEnv) -> EvalResult {
+/// Evaluate an `AlMetaExpr` in a step template (Assert / Let / If / Push).
+pub fn eval_meta_expr(expr: &AlMetaExpr, env: &MetaEnv) -> EvalResult {
+    eval_expr(expr, env)
+}
+
+fn eval_fn_steps(steps: &[AlMetaFnStep], env: &mut MetaEnv) -> EvalResult {
     for step in steps {
         if let Some(val) = eval_fn_step(step, env)? {
             return Ok(val);
@@ -105,7 +85,7 @@ fn eval_fn_steps(steps: &[AlMetaFnStep], env: &mut FnEnv) -> EvalResult {
     Err(EvalError::Fail)
 }
 
-fn eval_fn_step(step: &AlMetaFnStep, env: &mut FnEnv) -> Result<Option<AlValue>, EvalError> {
+fn eval_fn_step(step: &AlMetaFnStep, env: &mut MetaEnv) -> Result<Option<AlValue>, EvalError> {
     match step {
         AlMetaFnStep::Return(expr) => Ok(Some(eval_expr(expr, env)?)),
         AlMetaFnStep::Fail => Err(EvalError::Fail),
@@ -144,7 +124,7 @@ fn eval_fn_step(step: &AlMetaFnStep, env: &mut FnEnv) -> Result<Option<AlValue>,
     }
 }
 
-fn eval_expr(expr: &AlMetaExpr, env: &FnEnv) -> EvalResult {
+fn eval_expr(expr: &AlMetaExpr, env: &MetaEnv) -> EvalResult {
     match expr {
         AlMetaExpr::Param(name) => Ok(env.get(name).clone()),
         AlMetaExpr::NatLit(n) => Ok(AlValue::Nat(*n)),
@@ -193,11 +173,11 @@ fn eval_expr(expr: &AlMetaExpr, env: &FnEnv) -> EvalResult {
                 _ => 1,
             }))
         }
-        AlMetaExpr::TopValue(_) => panic!("step-only TopValue in fn eval: {expr:?}"),
+        AlMetaExpr::TopValue(nt) => Ok(AlValue::NumType(*nt)),
     }
 }
 
-fn eval_call(name: &str, args: &[AlMetaArg], env: &FnEnv) -> EvalResult {
+fn eval_call(name: &str, args: &[AlMetaArg], env: &MetaEnv) -> EvalResult {
     let mut bound = Vec::new();
     for arg in args {
         bound.push(match arg {
@@ -211,12 +191,17 @@ fn eval_call(name: &str, args: &[AlMetaArg], env: &FnEnv) -> EvalResult {
         });
     }
 
+    if name == "const" {
+        let _nt = as_numtype(bound[0].clone())?;
+        return Ok(AlValue::Nat(as_nat(bound[1].clone())?));
+    }
+
     let def = lookup_fn(name).unwrap_or_else(|| panic!("unsupported AL call in fn eval: {name}"));
     let fn_args = bind_eval_fn_args(&def, bound)?;
     eval_fn(&def, &fn_args)
 }
 
-fn eval_pred(pred: &AlMetaPred, env: &FnEnv) -> Result<bool, EvalError> {
+fn eval_pred(pred: &AlMetaPred, env: &MetaEnv) -> Result<bool, EvalError> {
     match pred {
         AlMetaPred::Eq(a, b) => Ok(eval_eq(eval_expr(a, env)?, eval_expr(b, env)?)),
         AlMetaPred::Lt(a, b) => cmp_lt(eval_expr(a, env)?, eval_expr(b, env)?),
