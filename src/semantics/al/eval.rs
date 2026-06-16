@@ -4,10 +4,9 @@ use super::al_defs::{
     binop_def, idiv_def, inv_signed_def, irem_def, list_def, lookup_fn, signed_def, size_def,
     sizenn_def,
 };
-use super::ir::{NumType, Sign, WasmBinOp};
+use super::al_defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp};
 use super::meta::{
     AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
-    BinOpCase, ValType,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

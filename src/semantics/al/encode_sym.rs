@@ -3,7 +3,7 @@
 use std::ops::{Add, Mul, Sub};
 
 use super::al_defs::lookup_fn;
-use super::ir::{NumType, Sign, WasmBinOp};
+use super::al_defs::{NumType, Sign, WasmBinOp};
 use super::super::I32_BITS;
 use super::meta::{
     AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
@@ -1050,7 +1050,7 @@ fn concretize_binop_list<'ctx>(v: SymValue<'ctx>) -> Result<Option<u32>, EncodeE
 mod tests {
     use super::*;
     use crate::semantics::al::eval::eval_binop_;
-    use crate::semantics::al::ir::{NumType, Sign, WasmBinOp};
+    use crate::semantics::al::al_defs::{NumType, Sign, WasmBinOp};
     use crate::semantics::z3_context;
 
     fn encode_binop_concrete(

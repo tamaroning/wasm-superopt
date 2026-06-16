@@ -1,7 +1,7 @@
 //! Concrete executor for meta-level `AlMetaStep` templates (e.g. `Step_pure/binop`).
 
 use super::eval::eval_binop_;
-use super::ir::{NumType, WasmBinOp};
+use super::al_defs::{NumType, WasmBinOp};
 
 /// Concrete execution of `Step_pure/binop` via meta AL (`eval_binop_`).
 pub fn exec_meta_binop_concrete(

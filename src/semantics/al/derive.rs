@@ -1,6 +1,7 @@
 //! Derive static `InstSpec` from AL definitions.
 
 use super::super::{InstSpec, StackTy};
+use super::al_defs::WasmBinOp;
 use super::ir::{AlCond, AlExpr, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
@@ -123,7 +124,7 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
 }
 
 /// Static `InstSpec` for `Step_pure/binop` from meta template shape.
-pub fn derive_meta_binop_spec(binop: super::ir::WasmBinOp) -> InstSpec {
+pub fn derive_meta_binop_spec(binop: WasmBinOp) -> InstSpec {
     InstSpec {
         pops: POPS_2,
         pushes: PUSHES_1,

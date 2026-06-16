@@ -1,23 +1,14 @@
 //! Meta-level AL AST (instantiation-time only).
 //!
 //! Types for representing SpecTec AL steps and expressions before lowering to
-//! flat [`AlSpec`](super::ir::AlSpec). Definitions live in [`super::binop_defs`].
+//! flat [`AlSpec`](super::ir::AlSpec). Definitions from `binop.al` live in
+//! [`super::al_defs`].
 //!
 //! [`AlMetaExpr`] arithmetic/bitwise variants (`Add`, `Sub`, `Mul`, `Mod`, `Rem`,
 //! `Shl`, `BitAnd`, `BitOr`, …) encode only what `Language.md` treats as primitive
 //! `binop` / `unop` — not thin spectec helper `$fn`s like `$iadd_`.
 
-use super::ir::{NumType, Sign, WasmBinOp};
-
-/// Wasm value type for `$size` (binop.al L17–34).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ValType {
-    I32,
-    I64,
-    F32,
-    F64,
-    V128,
-}
+pub use super::al_defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp};
 
 /// Argument to a meta-level `$fn(...)` call.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,14 +95,6 @@ pub enum AlMetaPred {
     BinOpEq(AlMetaExpr, WasmBinOp),
     /// `case(param) == DIV|REM|SHR`
     BinOpCaseIs(AlMetaExpr, BinOpCase),
-}
-
-/// `case(binop_)` variants used in binop.al.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BinOpCase {
-    Div,
-    Rem,
-    Shr,
 }
 
 /// Typed pop pattern (`numtype_0.CONST name` in AL).

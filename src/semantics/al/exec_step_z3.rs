@@ -2,7 +2,7 @@
 
 use super::al_defs::step_pure_binop_template;
 use super::encode_sym::{encode_binop_stack, sym_choose_nat, sym_is_empty, SymEnv, SymValue};
-use super::ir::{NumType, WasmBinOp};
+use super::al_defs::{NumType, WasmBinOp};
 use super::meta::AlMetaStep;
 use super::policy::EmbeddingPolicy;
 use super::super::{I32_BITS, StateTouches, Z3State};

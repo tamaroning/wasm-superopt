@@ -1,5 +1,5 @@
 use super::derive::{POPS_0_TEST, POPS_1_TEST, POPS_2_TEST, PUSHES_0_TEST, PUSHES_1_TEST};
-use super::ir::{NumType, Sign, WasmBinOp};
+use super::al_defs::{NumType, Sign, WasmBinOp};
 use super::meta::format_meta_binop_pretty;
 use super::policy::STRAIGHT_LINE_EMBED;
 use super::{al_spec_for, derive_inst_spec, derive_meta_binop_spec};

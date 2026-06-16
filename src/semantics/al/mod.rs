@@ -34,5 +34,6 @@ pub use exec_step_concrete::exec_meta_binop_concrete;
 pub use exec_step_z3::exec_meta_binop_z3;
 pub use policy::STRAIGHT_LINE_EMBED;
 pub use specs::al_spec_for;
-pub use ir::{format_al_pretty, NumType, Sign, WasmBinOp};
+pub use al_defs::{NumType, Sign, WasmBinOp};
+pub use ir::format_al_pretty;
 pub use meta::format_meta_binop_pretty;
