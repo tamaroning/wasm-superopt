@@ -474,6 +474,19 @@ fn encode_pred_z3<'ctx>(
     }
 }
 
+fn sym_as_z3_int<'ctx>(v: &SymValue<'ctx>) -> Int<'ctx> {
+    match v {
+        SymValue::Nat(bv) => bv.to_int(false),
+        SymValue::Int(bv) => bv.to_int(true),
+        SymValue::Rat(n, d) => n.div(d),
+        other => panic!("sym_as_z3_int on {other:?}"),
+    }
+}
+
+fn sym_is_numeric(v: &SymValue<'_>) -> bool {
+    matches!(v, SymValue::Nat(_) | SymValue::Int(_) | SymValue::Rat(_, _))
+}
+
 fn sym_eq_z3<'ctx>(
     ctx: &'ctx Context,
     a: SymValue<'ctx>,
@@ -499,11 +512,14 @@ fn sym_lt_z3<'ctx>(
     if matches!((&a, &b), (SymValue::Nat(_), SymValue::Nat(y)) if is_zero_bv(y)) {
         return Ok(Bool::from_bool(ctx, true));
     }
-    Ok(match (a, b) {
-        (SymValue::Nat(x), SymValue::Nat(y)) => x.bvult(&y),
-        (SymValue::Int(x), SymValue::Int(y)) => x.bvslt(&y),
-        (SymValue::Rat(xn, xd), SymValue::Rat(yn, yd)) => xn.mul(&yd).lt(&yn.mul(&xd)),
-        _ => panic!("sym_lt_z3 on incompatible values"),
+    Ok(match (&a, &b) {
+        (SymValue::Nat(x), SymValue::Nat(y)) => x.bvult(y),
+        (SymValue::Int(x), SymValue::Int(y)) => x.bvslt(y),
+        (SymValue::Rat(xn, xd), SymValue::Rat(yn, yd)) => xn.mul(yd).lt(&yn.mul(xd)),
+        (a, b) if sym_is_numeric(a) && sym_is_numeric(b) => {
+            sym_as_z3_int(a).lt(&sym_as_z3_int(b))
+        }
+        (a, b) => panic!("sym_lt_z3 on incompatible {a:?} {b:?}"),
     })
 }
 
@@ -622,23 +638,19 @@ fn int_coerce<'ctx>(ctx: &'ctx Context, v: SymValue<'ctx>) -> Result<BV<'ctx>, E
         SymValue::Nat(bv) => bv,
         SymValue::Rat(n, d) => {
             let q = n.div(&d);
-            BV::from_i64(ctx, int_concrete(&q).unwrap_or(0), I32_BITS)
+            BV::from_int(&q, I32_BITS)
         }
         other => panic!("int coerce on {other:?}"),
     })
 }
 
-fn nat_coerce<'ctx>(ctx: &'ctx Context, v: SymValue<'ctx>) -> EncodeResult<'ctx> {
+fn nat_coerce<'ctx>(_ctx: &'ctx Context, v: SymValue<'ctx>) -> EncodeResult<'ctx> {
     Ok(match v {
         SymValue::Nat(bv) => SymValue::Nat(bv),
         SymValue::Int(bv) => SymValue::Nat(bv),
         SymValue::Rat(n, d) => {
             let q = n.div(&d);
-            SymValue::Nat(BV::from_u64(
-                ctx,
-                int_concrete(&q).unwrap_or(0) as u64,
-                I32_BITS,
-            ))
+            SymValue::Nat(BV::from_int(&q, I32_BITS))
         }
         other => panic!("nat coerce on {other:?}"),
     })
@@ -670,9 +682,15 @@ fn int_concrete<'ctx>(i: &Int<'ctx>) -> Option<i64> {
     i.as_i64().or_else(|| i.simplify().as_i64())
 }
 
-fn trunc_rat<'ctx>(ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'ctx> {
+fn truncz_rat<'ctx>(_ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'ctx> {
+    // SpecTec `$truncz`: rational → int, truncate toward zero (builtin / Q.to_bigint).
+    // Z3 integer division truncates toward zero; int2bv yields the i32 bit pattern.
     let q = n.div(&d);
-    BV::from_i64(ctx, int_concrete(&q).unwrap_or(0), I32_BITS)
+    BV::from_int(&q, I32_BITS)
+}
+
+fn trunc_rat<'ctx>(ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'ctx> {
+    truncz_rat(ctx, (n, d))
 }
 
 fn sym_add<'ctx>(
@@ -1039,6 +1057,16 @@ mod tests {
         assert_eq!(
             encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::Div(Sign::S), 8, 2).unwrap(),
             eval_binop_(NumType::I32, WasmBinOp::Div(Sign::S), 8, 2)
+        );
+    }
+
+    #[test]
+    fn encode_binop_div_u_max_u32_by_one() {
+        let ctx = z3_context();
+        assert_eq!(
+            encode_binop_concrete(&ctx, NumType::I32, WasmBinOp::Div(Sign::U), u32::MAX, 1)
+                .unwrap(),
+            eval_binop_(NumType::I32, WasmBinOp::Div(Sign::U), u32::MAX, 1)
         );
     }
 }

@@ -757,4 +757,14 @@ mod tests {
         assert_eq!(initial_inputs_consumed(&input, &seq), Some(1));
         assert!(!uses_all_input_slots(&input, &seq));
     }
+
+    #[test]
+    fn div_u_const1_equivalent_to_add_const0_via_z3() {
+        let ctx = z3_context();
+        let input = vec![StackTy::I32];
+        let div_u = vec![SemOp::I32Const(1), SemOp::I32DivU];
+        let add = vec![SemOp::I32Const(0), SemOp::I32Add];
+        assert!(sequences_valid_rewrite_random(&input, &div_u, &add, 200));
+        assert!(sequences_valid_rewrite_z3(&ctx, &input, &div_u, &add));
+    }
 }
