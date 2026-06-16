@@ -1,10 +1,6 @@
 //! Concrete evaluator for meta-level AL `$fn` definitions.
 
-use super::al_defs::{
-    binop_def, idiv_def, inv_signed_def, irem_def, list_def, lookup_fn, signed_def, size_def,
-    sizenn_def,
-};
-use super::al_defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp};
+use super::al_defs::{binop_def, lookup_fn, BinOpCase, NumType, Sign, ValType, WasmBinOp};
 use super::meta::{
     AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
 };
@@ -29,70 +25,6 @@ pub enum EvalError {
 }
 
 type EvalResult = Result<AlValue, EvalError>;
-
-pub fn eval_size(valtype: ValType) -> Option<u32> {
-    match eval_fn(
-        &size_def(),
-        &[("valtype", AlValue::ValType(valtype))],
-    ) {
-        Ok(AlValue::Nat(n)) => Some(n),
-        Err(EvalError::Fail) => None,
-        other => panic!("size returned unexpected {other:?}"),
-    }
-}
-
-pub fn eval_sizenn(nt: NumType) -> u32 {
-    match eval_fn(&sizenn_def(), &[("nt", AlValue::NumType(nt))]) {
-        Ok(AlValue::Nat(n)) => n,
-        other => panic!("sizenn returned unexpected {other:?}"),
-    }
-}
-
-pub fn eval_signed_(n: u32, i: u32) -> i32 {
-    match eval_fn(
-        &signed_def(),
-        &[("N", AlValue::Nat(n)), ("i", AlValue::Nat(i))],
-    ) {
-        Ok(AlValue::Int(j)) => j,
-        other => panic!("signed_ returned unexpected {other:?}"),
-    }
-}
-
-pub fn eval_inv_signed_(n: u32, i: i32) -> u32 {
-    match eval_fn(
-        &inv_signed_def(),
-        &[("N", AlValue::Nat(n)), ("i", AlValue::Int(i))],
-    ) {
-        Ok(AlValue::Nat(j)) => j,
-        other => panic!("inv_signed_ returned unexpected {other:?}"),
-    }
-}
-
-pub fn eval_list_is_empty<T>(opt: Option<T>) -> bool {
-    let val = match opt {
-        None => AlValue::Opt(None),
-        Some(_) => AlValue::Opt(Some(Box::new(AlValue::Nat(0)))),
-    };
-    matches!(
-        eval_fn(
-            &list_def(),
-            &[("X", AlValue::Nat(0)), ("X_opt", val)],
-        ),
-        Ok(AlValue::List(items)) if items.is_empty()
-    )
-}
-
-pub fn eval_idiv_(n: u32, sx: Sign, i_1: u32, i_2: u32) -> Option<u32> {
-    opt_nat_result(&idiv_def(), n, sx, i_1, i_2)
-}
-
-pub fn eval_idiv_is_empty(n: u32, sx: Sign, i_1: u32, i_2: u32) -> bool {
-    eval_idiv_(n, sx, i_1, i_2).is_none()
-}
-
-pub fn eval_irem_(n: u32, sx: Sign, i_1: u32, i_2: u32) -> Option<u32> {
-    opt_nat_result(&irem_def(), n, sx, i_1, i_2)
-}
 
 pub fn eval_binop_(
     nt: NumType,
@@ -121,26 +53,6 @@ pub fn eval_binop_(
         },
         Err(EvalError::Fail) => None,
         other => panic!("binop_ returned unexpected {other:?}"),
-    }
-}
-
-fn opt_nat_result(def: &AlMetaFnDef, n: u32, sx: Sign, i_1: u32, i_2: u32) -> Option<u32> {
-    match eval_fn(
-        def,
-        &[
-            ("N", AlValue::Nat(n)),
-            ("sx", AlValue::Sign(sx)),
-            ("i_1", AlValue::Nat(i_1)),
-            ("i_2", AlValue::Nat(i_2)),
-        ],
-    ) {
-        Ok(AlValue::Opt(None)) => None,
-        Ok(AlValue::Opt(Some(v))) => match *v {
-            AlValue::Nat(n) => Some(n),
-            other => panic!("{} optional expected Nat, got {other:?}", def.name),
-        },
-        Err(EvalError::Fail) => None,
-        other => panic!("{} returned unexpected {other:?}", def.name),
     }
 }
 
@@ -598,20 +510,4 @@ fn binop_sign_value(op: WasmBinOp) -> Sign {
         WasmBinOp::Div(sx) | WasmBinOp::Rem(sx) => sx,
         _ => panic!("BinOpSignOf on non-case binop: {op:?}"),
     }
-}
-
-pub fn size(valtype: ValType) -> Option<u32> {
-    eval_size(valtype)
-}
-
-pub fn sizenn(nt: NumType) -> u32 {
-    eval_sizenn(nt)
-}
-
-pub fn idiv_is_empty(n: u32, sx: Sign, i_1: u32, i_2: u32) -> bool {
-    eval_idiv_is_empty(n, sx, i_1, i_2)
-}
-
-pub fn binop_concrete(nt: NumType, binop: WasmBinOp, i_1: u32, i_2: u32) -> Option<u32> {
-    eval_binop_(nt, binop, i_1, i_2)
 }
