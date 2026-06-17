@@ -8,11 +8,13 @@ use crate::semantics::{
 };
 use crate::stack::sem_sequence_to_pattern;
 use egg::{Pattern, Rewrite};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::fs;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SynthesizedRule {
     pub name: String,
     pub lhs: String,
@@ -34,6 +36,53 @@ fn format_input_stack(input: &[StackTy]) -> String {
 fn report_progress(msg: &str) {
     let _ = writeln!(io::stderr(), "{msg}");
     let _ = io::stderr().flush();
+}
+
+fn rules_cache_path(max_len: usize) -> PathBuf {
+    PathBuf::from(format!("rules-len{max_len}.cache"))
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedRules {
+    max_seq_len: usize,
+    random_tests: usize,
+    rules: Vec<SynthesizedRule>,
+}
+
+pub fn load_cached_rules(max_len: usize) -> Option<Vec<SynthesizedRule>> {
+    let path = rules_cache_path(max_len);
+    let data = fs::read_to_string(&path).ok()?;
+    let cached: CachedRules = serde_json::from_str(&data).ok()?;
+    if cached.max_seq_len != max_len {
+        return None;
+    }
+    report_progress(&format!(
+        "loaded {} rules from {}",
+        cached.rules.len(),
+        path.display()
+    ));
+    Some(cached.rules)
+}
+
+fn save_cached_rules(max_len: usize, random_tests: usize, rules: &[SynthesizedRule]) {
+    let path = rules_cache_path(max_len);
+    let cached = CachedRules {
+        max_seq_len: max_len,
+        random_tests,
+        rules: rules.to_vec(),
+    };
+    let json = serde_json::to_string_pretty(&cached).expect("serialize rules cache");
+    fs::write(&path, json).expect("write rules cache");
+    report_progress(&format!("saved {} rules to {}", rules.len(), path.display()));
+}
+
+pub fn load_or_synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedRule> {
+    if let Some(rules) = load_cached_rules(max_len) {
+        return rules;
+    }
+    let rules = synthesize_rules(max_len, random_tests);
+    save_cached_rules(max_len, random_tests, &rules);
+    rules
 }
 
 pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedRule> {

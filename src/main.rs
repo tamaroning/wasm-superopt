@@ -10,9 +10,9 @@ use clap::Parser;
 use egg::*;
 use lang::{ConstantFolding, WasmLang};
 use semantics::DEFAULT_RANDOM_TESTS;
-use stack::{WasmOp, format_wasm_block, parse_dag, stack_to_dag};
+use stack::{WasmOp, dag_to_stack, format_wasm_block, parse_dag, stack_to_dag};
 use synthesis::{
-    print_synthesized, print_synthesized_json, synthesize_rules, synthesized_to_rewrites,
+    load_or_synthesize_rules, print_synthesized, print_synthesized_json, synthesized_to_rewrites,
 };
 
 #[derive(Parser, Debug)]
@@ -51,7 +51,7 @@ fn run_example(
     println!("Input Wasm: {wasm}");
     println!("Stack DAG:  {dag}");
     println!("Best cost:  {before_cost} -> {after_cost}");
-    println!("Best expr:  {best_expr}");
+    println!("Output Wasm: {}", format_wasm_block(&dag_to_stack(&best_expr)));
     println!();
 }
 
@@ -61,48 +61,21 @@ fn run_example_ops(name: &str, ops: &[WasmOp], rules: &[Rewrite<WasmLang, Consta
 
 fn load_rules(cli: &Cli) -> Vec<Rewrite<WasmLang, ConstantFolding>> {
     let max_len = cli.max_seq_len.clamp(1, 4);
-    let syn = synthesize_rules(max_len, cli.random_tests);
+    let syn = load_or_synthesize_rules(max_len, cli.random_tests);
     print_synthesized(&syn, cli.random_tests);
     synthesized_to_rewrites(&syn)
 }
 
 fn run_demos(rules: &[Rewrite<WasmLang, ConstantFolding>]) {
     run_example_ops(
-        "Stack-to-DAG",
-        &[WasmOp::I32Const(0), WasmOp::I32Const(1), WasmOp::I32Add],
-        rules,
-    );
-
-    run_example_ops(
         "Arithmetic Optimization",
         &[
+            WasmOp::I32Const(42),
             WasmOp::I32Const(0),
-            WasmOp::I32Const(2),
+            WasmOp::I32Add,
+            WasmOp::I32Const(1),
             WasmOp::I32Mul,
-            WasmOp::I32Const(3),
-            WasmOp::I32Const(4),
-            WasmOp::I32Add,
-            WasmOp::I32Add,
         ],
-        rules,
-    );
-
-    run_example_ops(
-        "Self Division (non-zero constant)",
-        &[WasmOp::I32Const(42), WasmOp::I32Const(42), WasmOp::I32DivU],
-        rules,
-    );
-
-    run_example_ops(
-        "Self Division (zero — trap preserved, no rewrite)",
-        &[WasmOp::I32Const(0), WasmOp::I32Const(0), WasmOp::I32DivU],
-        rules,
-    );
-
-    run_example(
-        "Self Division (unknown — no rewrite)",
-        "?x; ?x; i32.div_s",
-        &parse_dag("(i32.div_s ?x ?x)"),
         rules,
     );
 }
@@ -116,7 +89,7 @@ fn main() {
 
     if cli.synthesize_only {
         let max_len = cli.max_seq_len.clamp(1, 4);
-        let syn = synthesize_rules(max_len, cli.random_tests);
+        let syn = load_or_synthesize_rules(max_len, cli.random_tests);
         print_synthesized_json(&syn, cli.random_tests);
         return;
     }

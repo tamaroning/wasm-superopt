@@ -15,7 +15,7 @@ use z3::{Config, Context, Sort};
 // Stack types (Wasm operand stack)
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StackTy {
     I32,
 }

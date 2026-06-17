@@ -146,6 +146,45 @@ pub fn stack_to_dag(ops: &[WasmOp]) -> RecExpr<WasmLang> {
     StackToDag::new().build(ops)
 }
 
+/// Convert a `RecExpr` root back to a Wasm basic-block instruction sequence.
+pub fn dag_to_stack(expr: &RecExpr<WasmLang>) -> Vec<WasmOp> {
+    let mut ops = Vec::new();
+    emit_dag(expr, expr.root(), &mut ops);
+    ops
+}
+
+fn emit_dag(expr: &RecExpr<WasmLang>, id: Id, ops: &mut Vec<WasmOp>) {
+    match &expr[id] {
+        WasmLang::I32Const(n) => ops.push(WasmOp::I32Const(*n)),
+        WasmLang::I32Add([a, b]) => {
+            emit_dag(expr, *a, ops);
+            emit_dag(expr, *b, ops);
+            ops.push(WasmOp::I32Add);
+        }
+        WasmLang::I32Mul([a, b]) => {
+            emit_dag(expr, *a, ops);
+            emit_dag(expr, *b, ops);
+            ops.push(WasmOp::I32Mul);
+        }
+        WasmLang::I32DivU([a, b]) => {
+            emit_dag(expr, *a, ops);
+            emit_dag(expr, *b, ops);
+            ops.push(WasmOp::I32DivU);
+        }
+        WasmLang::I32DivS([a, b]) => {
+            emit_dag(expr, *a, ops);
+            emit_dag(expr, *b, ops);
+            ops.push(WasmOp::I32DivS);
+        }
+        WasmLang::I32Shl([a, b]) => {
+            emit_dag(expr, *a, ops);
+            emit_dag(expr, *b, ops);
+            ops.push(WasmOp::I32Shl);
+        }
+        WasmLang::Symbol(sym) => panic!("cannot lower symbolic node {sym}"),
+    }
+}
+
 fn enode_to_pattern(expr: &RecExpr<WasmLang>, id: Id) -> String {
     let node = &expr[id];
     if node.is_leaf() {
