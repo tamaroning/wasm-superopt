@@ -8,6 +8,12 @@
 cargo run --release -- --synthesize-only --max-seq-len 2
 ```
 
+- src/
+    - sema/
+        - defs.rs: Generated from SpecTec AL.
+        - spec.rs: Mapping instructions to reduction rules in AL.
+
+
 Supported ops
 - [x] Binary ops
 - [ ] Locals

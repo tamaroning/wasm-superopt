@@ -78,6 +78,18 @@ fn run_demos(rules: &[Rewrite<WasmLang, ConstantFolding>]) {
         ],
         rules,
     );
+    run_example_ops(
+        "Arithmetic Optimization",
+        &[
+            WasmOp::I32Const(42),
+            WasmOp::I32Const(0),
+            WasmOp::I32Add,
+            WasmOp::I32Const(42),
+            WasmOp::I32Const(0),
+            WasmOp::I32Add,
+        ],
+        rules,
+    );
 }
 
 fn main() {
