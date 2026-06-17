@@ -1,5 +1,5 @@
 //! Concrete (runtime) interpreters for AL IR.
 
 pub mod alspec;
-pub mod meta_fn;
-pub mod meta_step;
+pub mod func;
+pub mod instr;

@@ -4,9 +4,9 @@
 //! state threaded through effectful instructions (mirroring Wasm, not the egg DAG token).
 
 use crate::sema::{
-    STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, derive_meta_binop_spec,
-    exec_al_concrete, exec_al_z3, exec_meta_steps_concrete, exec_meta_steps_z3, meta_steps_for,
-    format_al_pretty, format_meta_binop_pretty, NumType, Sign, WasmBinOp,
+    STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, derive_rule_binop_spec,
+    exec_al_concrete, exec_al_z3, exec_instrs_concrete, exec_instrs_z3, rule_instrs_for,
+    format_al_pretty, format_rule_binop_pretty, NumType, Sign, WasmBinOp,
 };
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
@@ -65,11 +65,11 @@ pub struct InstSpec {
 
 pub fn spec_for(op: &SemOp) -> InstSpec {
     match op {
-        SemOp::I32Add => derive_meta_binop_spec(WasmBinOp::Add),
-        SemOp::I32Mul => derive_meta_binop_spec(WasmBinOp::Mul),
-        SemOp::I32Shl => derive_meta_binop_spec(WasmBinOp::Shl),
-        SemOp::I32DivU => derive_meta_binop_spec(WasmBinOp::Div(Sign::U)),
-        SemOp::I32DivS => derive_meta_binop_spec(WasmBinOp::Div(Sign::S)),
+        SemOp::I32Add => derive_rule_binop_spec(WasmBinOp::Add),
+        SemOp::I32Mul => derive_rule_binop_spec(WasmBinOp::Mul),
+        SemOp::I32Shl => derive_rule_binop_spec(WasmBinOp::Shl),
+        SemOp::I32DivU => derive_rule_binop_spec(WasmBinOp::Div(Sign::U)),
+        SemOp::I32DivS => derive_rule_binop_spec(WasmBinOp::Div(Sign::S)),
         _ => {
             let al = al_spec_for(op);
             derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
@@ -163,8 +163,8 @@ pub struct ConcreteResult {
 }
 
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
-    if let Some(steps) = meta_steps_for(op) {
-        return exec_meta_steps_concrete(&steps, stack);
+    if let Some(steps) = rule_instrs_for(op) {
+        return exec_instrs_concrete(&steps, stack);
     }
     let al = al_spec_for(op);
     exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
@@ -414,8 +414,8 @@ pub fn exec_op<'ctx>(
     state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
 ) -> Bool<'ctx> {
-    if let Some(steps) = meta_steps_for(op) {
-        return exec_meta_steps_z3(ctx, &steps, stack, state, touches, &STRAIGHT_LINE_EMBED);
+    if let Some(steps) = rule_instrs_for(op) {
+        return exec_instrs_z3(ctx, &steps, stack, state, touches, &STRAIGHT_LINE_EMBED);
     }
     let al = al_spec_for(op);
     exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)
@@ -659,7 +659,7 @@ pub fn print_semantics_table() {
             trap,
         );
         for line in match binop_wasm(&op) {
-            Some((nt, binop)) => format_meta_binop_pretty(nt, binop),
+            Some((nt, binop)) => format_rule_binop_pretty(nt, binop),
             None => format_al_pretty(&al_spec_for(&op)),
         }
         .lines()

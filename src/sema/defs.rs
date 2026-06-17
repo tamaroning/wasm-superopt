@@ -1,9 +1,9 @@
 //! SpecTec AL definitions transcribed from [`binop.al`](../../../../binop.al).
 //!
 //! Types and `$fn` bodies from `binop.al` live here. Step templates use
-//! [`AlMetaExpr`](super::meta::AlMetaExpr) for primitive `binop` (`+`, `-`, `*`, …).
+//! [`Expr`](super::ast::Expr) for primitive `binop` (`+`, `-`, `*`, …).
 //! Lowering to flat [`AlSpec`](super::ir::AlSpec) is for hand-written step specs only;
-//! binop `SemOp`s use the meta encoder ([`super::symbolic::meta_fn`], [`super::symbolic::meta_step`]).
+//! binop `SemOp`s use [`super::symbolic::func`] and [`super::symbolic::instr`].
 
 #![allow(dead_code)] // mirrors binop.al; not every def is wired to instantiate yet
 
@@ -167,133 +167,132 @@ pub mod types {
 
 pub use types::*;
 
-use super::meta::{
-    AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
-    AlMetaStep, PopPattern,
+use super::ast::{
+    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred, PopTarget,
 };
 
-const fn mp(name: &'static str, ty: AlMetaParamType) -> AlMetaParam {
-    AlMetaParam { name, ty }
+const fn mp(name: &'static str, ty: ParamType) -> Param {
+    Param { name, ty }
 }
 
-const SIZE_PARAMS: &[AlMetaParam] = &[mp("valtype", AlMetaParamType::ValType)];
-const SIZENN_PARAMS: &[AlMetaParam] = &[mp("nt", AlMetaParamType::NumType)];
-const SIGNED_PARAMS: &[AlMetaParam] = &[
-    mp("N", AlMetaParamType::Nat),
-    mp("i", AlMetaParamType::Nat),
+const SIZE_PARAMS: &[Param] = &[mp("valtype", ParamType::ValType)];
+const SIZENN_PARAMS: &[Param] = &[mp("nt", ParamType::NumType)];
+const SIGNED_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("i", ParamType::Nat),
 ];
-const INV_SIGNED_PARAMS: &[AlMetaParam] = &[
-    mp("N", AlMetaParamType::Nat),
-    mp("i", AlMetaParamType::Int),
+const INV_SIGNED_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("i", ParamType::Int),
 ];
-const LIST_PARAMS: &[AlMetaParam] = &[
-    mp("X", AlMetaParamType::Any),
-    mp("X_opt", AlMetaParamType::Any),
+const LIST_PARAMS: &[Param] = &[
+    mp("X", ParamType::Any),
+    mp("X_opt", ParamType::Any),
 ];
-const IDIV_PARAMS: &[AlMetaParam] = &[
-    mp("N", AlMetaParamType::Nat),
-    mp("sx", AlMetaParamType::Sign),
-    mp("i_1", AlMetaParamType::Nat),
-    mp("i_2", AlMetaParamType::Nat),
+const IDIV_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("sx", ParamType::Sign),
+    mp("i_1", ParamType::Nat),
+    mp("i_2", ParamType::Nat),
 ];
-const IREM_PARAMS: &[AlMetaParam] = &[
-    mp("N", AlMetaParamType::Nat),
-    mp("sx", AlMetaParamType::Sign),
-    mp("i_1", AlMetaParamType::Nat),
-    mp("i_2", AlMetaParamType::Nat),
+const IREM_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("sx", ParamType::Sign),
+    mp("i_1", ParamType::Nat),
+    mp("i_2", ParamType::Nat),
 ];
-const BINOP_PARAMS: &[AlMetaParam] = &[
-    mp("numtype", AlMetaParamType::NumType),
-    mp("binop_", AlMetaParamType::BinOp),
-    mp("iN_1", AlMetaParamType::Nat),
-    mp("iN_2", AlMetaParamType::Nat),
+const BINOP_PARAMS: &[Param] = &[
+    mp("numtype", ParamType::NumType),
+    mp("binop_", ParamType::BinOp),
+    mp("iN_1", ParamType::Nat),
+    mp("iN_2", ParamType::Nat),
 ];
 
-fn p(name: &'static str) -> AlMetaExpr {
-    AlMetaExpr::Param(name)
+fn p(name: &'static str) -> Expr {
+    Expr::VarE(name)
 }
 
-fn nat(n: u32) -> AlMetaExpr {
-    AlMetaExpr::NatLit(n)
+fn nat(n: u32) -> Expr {
+    Expr::NatLit(n)
 }
 
-fn int(n: i32) -> AlMetaExpr {
-    AlMetaExpr::IntLit(n)
+fn int(n: i32) -> Expr {
+    Expr::IntLit(n)
 }
 
-fn call(name: &'static str, args: Vec<AlMetaArg>) -> AlMetaExpr {
-    AlMetaExpr::Call(name, args)
+fn call(name: &'static str, args: Vec<Arg>) -> Expr {
+    Expr::Call(name, args)
 }
 
-fn int_coerce(expr: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::IntCoerce(Box::new(expr))
+fn int_coerce(expr: Expr) -> Expr {
+    Expr::IntCoerce(Box::new(expr))
 }
 
-fn nat_coerce(expr: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::NatCoerce(Box::new(expr))
+fn nat_coerce(expr: Expr) -> Expr {
+    Expr::NatCoerce(Box::new(expr))
 }
 
-fn rat_coerce(expr: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::RatCoerce(Box::new(expr))
+fn rat_coerce(expr: Expr) -> Expr {
+    Expr::RatCoerce(Box::new(expr))
 }
 
-fn truncz(expr: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::TruncZ(Box::new(expr))
+fn truncz(expr: Expr) -> Expr {
+    Expr::TruncZ(Box::new(expr))
 }
 
-fn pow2(exp: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::Pow(Box::new(nat(2)), Box::new(exp))
+fn pow2(exp: Expr) -> Expr {
+    Expr::Pow(Box::new(nat(2)), Box::new(exp))
 }
 
-fn n_minus_1(n: AlMetaExpr) -> AlMetaExpr {
-    nat_coerce(AlMetaExpr::Sub(
+fn n_minus_1(n: Expr) -> Expr {
+    nat_coerce(Expr::Sub(
         Box::new(int_coerce(n)),
         Box::new(int(1)),
     ))
 }
 
-fn half_modulus(n: AlMetaExpr) -> AlMetaExpr {
+fn half_modulus(n: Expr) -> Expr {
     pow2(n_minus_1(n))
 }
 
-fn full_modulus(n: AlMetaExpr) -> AlMetaExpr {
+fn full_modulus(n: Expr) -> Expr {
     pow2(n)
 }
 
-fn eq(a: AlMetaExpr, b: AlMetaExpr) -> AlMetaPred {
-    AlMetaPred::Eq(a, b)
+fn eq(a: Expr, b: Expr) -> Pred {
+    Pred::Eq(a, b)
 }
 
-fn lt(a: AlMetaExpr, b: AlMetaExpr) -> AlMetaPred {
-    AlMetaPred::Lt(a, b)
+fn lt(a: Expr, b: Expr) -> Pred {
+    Pred::Lt(a, b)
 }
 
-fn le(a: AlMetaExpr, b: AlMetaExpr) -> AlMetaPred {
-    AlMetaPred::Le(a, b)
+fn le(a: Expr, b: Expr) -> Pred {
+    Pred::Le(a, b)
 }
 
-fn and(a: AlMetaPred, b: AlMetaPred) -> AlMetaPred {
-    AlMetaPred::And(Box::new(a), Box::new(b))
+fn and(a: Pred, b: Pred) -> Pred {
+    Pred::And(Box::new(a), Box::new(b))
 }
 
-fn wrap_mod(nat_expr: AlMetaExpr, modulus: AlMetaExpr) -> AlMetaExpr {
-    AlMetaExpr::Mod(Box::new(nat_expr), Box::new(modulus))
+fn wrap_mod(nat_expr: Expr, modulus: Expr) -> Expr {
+    Expr::Mod(Box::new(nat_expr), Box::new(modulus))
 }
 
 /// `$((i_1 + i_2) \ (2 ^ N))` — spectec equation, not a separate `$fn` def.
-fn inn_iadd(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+fn inn_iadd(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
     wrap_mod(
-        AlMetaExpr::Add(Box::new(i_1), Box::new(i_2)),
+        Expr::Add(Box::new(i_1), Box::new(i_2)),
         full_modulus(n),
     )
 }
 
 /// `$((2^N + i_1 - i_2) \ 2^N)` — spectec equation.
-fn inn_isub(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+fn inn_isub(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
     let modulus = full_modulus(n);
     nat_coerce(wrap_mod(
-        AlMetaExpr::Sub(
-            Box::new(int_coerce(AlMetaExpr::Add(
+        Expr::Sub(
+            Box::new(int_coerce(Expr::Add(
                 Box::new(modulus.clone()),
                 Box::new(i_1),
             ))),
@@ -304,33 +303,33 @@ fn inn_isub(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
 }
 
 /// `$((i_1 * i_2) \ (2 ^ N))` — spectec equation.
-fn inn_imul(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+fn inn_imul(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
     wrap_mod(
-        AlMetaExpr::Mul(Box::new(i_1), Box::new(i_2)),
+        Expr::Mul(Box::new(i_1), Box::new(i_2)),
         full_modulus(n),
     )
 }
 
 /// `$iand_` / `$ior_` — spectec `hint(builtin)`: `(m op n) & mask(N)`.
-fn inn_iand(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+fn inn_iand(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
     wrap_mod(
-        AlMetaExpr::BitAnd(Box::new(i_1), Box::new(i_2)),
+        Expr::BitAnd(Box::new(i_1), Box::new(i_2)),
         full_modulus(n),
     )
 }
 
-fn inn_ior(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+fn inn_ior(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
     wrap_mod(
-        AlMetaExpr::BitOr(Box::new(i_1), Box::new(i_2)),
+        Expr::BitOr(Box::new(i_1), Box::new(i_2)),
         full_modulus(n),
     )
 }
 
-fn inn_ishl(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
+fn inn_ishl(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
     wrap_mod(
-        AlMetaExpr::Shl(
+        Expr::Shl(
             Box::new(i_1),
-            Box::new(AlMetaExpr::Rem(Box::new(i_2), Box::new(n.clone()))),
+            Box::new(Expr::Rem(Box::new(i_2), Box::new(n.clone()))),
         ),
         full_modulus(n),
     )
@@ -340,32 +339,29 @@ fn inn_ishl(n: AlMetaExpr, i_1: AlMetaExpr, i_2: AlMetaExpr) -> AlMetaExpr {
 // Step_pure/binop nt binop  (binop.al L5–15)
 // =============================================================================
 
-pub fn step_pure_binop_template(nt: NumType, binop: WasmBinOp) -> Vec<AlMetaStep> {
-    let binop_call = AlMetaExpr::Call(
+pub fn step_pure_binop_template(nt: NumType, binop: WasmBinOp) -> Vec<Instr> {
+    let binop_call = Expr::Call(
         "binop_",
         vec![
-            AlMetaArg::NumType(nt),
-            AlMetaArg::BinOp(binop),
-            AlMetaArg::Var("c_1"),
-            AlMetaArg::Var("c_2"),
+            Arg::NumType(nt),
+            Arg::BinOp(binop),
+            Arg::Var("c_1"),
+            Arg::Var("c_2"),
         ],
     );
     vec![
-        AlMetaStep::Assert(AlMetaExpr::TopValue(nt)),
-        AlMetaStep::Pop(PopPattern::NumConst("c_2")),
-        AlMetaStep::Assert(AlMetaExpr::TopValue(nt)),
-        AlMetaStep::Pop(PopPattern::NumConst("c_1")),
-        AlMetaStep::If {
-            cond: AlMetaExpr::OptionalLen(Box::new(binop_call.clone())),
-            then_steps: vec![AlMetaStep::Trap],
+        Instr::AssertI(InstrCond::Expr(Expr::TopValue(nt))),
+        Instr::PopI(PopTarget::NumConst("c_2")),
+        Instr::AssertI(InstrCond::Expr(Expr::TopValue(nt))),
+        Instr::PopI(PopTarget::NumConst("c_1")),
+        Instr::IfI {
+            cond: InstrCond::Expr(Expr::OptionalLen(Box::new(binop_call.clone()))),
+            then_steps: vec![Instr::TrapI],
             else_steps: vec![
-                AlMetaStep::Let {
-                    name: "c",
-                    expr: AlMetaExpr::Choose(Box::new(binop_call)),
-                },
-                AlMetaStep::Push(AlMetaExpr::Call(
+                Instr::LetI { lhs: LetLhs::Var("c"), expr: Expr::Choose(Box::new(binop_call)) },
+                Instr::PushI(Expr::Call(
                     "const",
-                    vec![AlMetaArg::NumType(nt), AlMetaArg::Var("c")],
+                    vec![Arg::NumType(nt), Arg::Var("c")],
                 )),
             ],
         },
@@ -376,19 +372,19 @@ pub fn step_pure_binop_template(nt: NumType, binop: WasmBinOp) -> Vec<AlMetaStep
 // size valtype  (binop.al L17–34)
 // =============================================================================
 
-pub fn size_def() -> AlMetaFnDef {
-    fn ret(v: u32) -> AlMetaFnStep {
-        AlMetaFnStep::Return(nat(v))
+pub fn size_def() -> FuncA {
+    fn ret(v: u32) -> Instr {
+        Instr::ReturnI(nat(v))
     }
-    fn if_valtype(vt: ValType, n: u32) -> AlMetaFnStep {
-        AlMetaFnStep::If {
-            cond: eq(p("valtype"), AlMetaExpr::ValTypeLit(vt)),
+    fn if_valtype(vt: ValType, n: u32) -> Instr {
+        Instr::IfI {
+            cond: InstrCond::Pred(eq(p("valtype"), Expr::ValTypeLit(vt))),
             then_steps: vec![ret(n)],
             else_steps: vec![],
         }
     }
-    AlMetaFnDef {
-        name: "size",
+    FuncA {
+        id: "size",
         params: &SIZE_PARAMS,
         body: vec![
             if_valtype(ValType::I32, 32),
@@ -396,7 +392,7 @@ pub fn size_def() -> AlMetaFnDef {
             if_valtype(ValType::F32, 32),
             if_valtype(ValType::F64, 64),
             if_valtype(ValType::V128, 128),
-            AlMetaFnStep::Fail,
+            Instr::FailI,
         ],
     }
 }
@@ -405,13 +401,13 @@ pub fn size_def() -> AlMetaFnDef {
 // sizenn nt  (binop.al L36–38)
 // =============================================================================
 
-pub fn sizenn_def() -> AlMetaFnDef {
-    AlMetaFnDef {
-        name: "sizenn",
+pub fn sizenn_def() -> FuncA {
+    FuncA {
+        id: "sizenn",
         params: &SIZENN_PARAMS,
-        body: vec![AlMetaFnStep::Return(call(
+        body: vec![Instr::ReturnI(call(
             "size",
-            vec![AlMetaArg::Expr(Box::new(p("nt")))],
+            vec![Arg::ExpA(Box::new(p("nt")))],
         ))],
     }
 }
@@ -420,20 +416,20 @@ pub fn sizenn_def() -> AlMetaFnDef {
 // signed_ N i  (binop.al L41–48)
 // =============================================================================
 
-pub fn signed_def() -> AlMetaFnDef {
+pub fn signed_def() -> FuncA {
     let threshold = half_modulus(p("N"));
-    AlMetaFnDef {
-        name: "signed_",
+    FuncA {
+        id: "signed_",
         params: &SIGNED_PARAMS,
         body: vec![
-            AlMetaFnStep::If {
-                cond: lt(p("i"), threshold.clone()),
-                then_steps: vec![AlMetaFnStep::Return(int_coerce(p("i")))],
+            Instr::IfI {
+            cond: InstrCond::Pred(lt(p("i"), threshold.clone())),
+                then_steps: vec![Instr::ReturnI(int_coerce(p("i")))],
                 else_steps: vec![],
             },
-            AlMetaFnStep::Assert(le(threshold, p("i"))),
-            AlMetaFnStep::Assert(lt(p("i"), full_modulus(p("N")))),
-            AlMetaFnStep::Return(AlMetaExpr::Sub(
+            Instr::AssertI(InstrCond::Pred(le(threshold, p("i")))),
+            Instr::AssertI(InstrCond::Pred(lt(p("i"), full_modulus(p("N"))))),
+            Instr::ReturnI(Expr::Sub(
                 Box::new(int_coerce(p("i"))),
                 Box::new(int_coerce(full_modulus(p("N")))),
             )),
@@ -445,26 +441,26 @@ pub fn signed_def() -> AlMetaFnDef {
 // inv_signed_ N i  (binop.al L51–58)
 // =============================================================================
 
-pub fn inv_signed_def() -> AlMetaFnDef {
+pub fn inv_signed_def() -> FuncA {
     let threshold = half_modulus(p("N"));
-    AlMetaFnDef {
-        name: "inv_signed_",
+    FuncA {
+        id: "inv_signed_",
         params: &INV_SIGNED_PARAMS,
         body: vec![
-            AlMetaFnStep::If {
-                cond: and(
+            Instr::IfI {
+                cond: InstrCond::Pred(and(
                     le(int(0), p("i")),
                     lt(p("i"), threshold.clone()),
-                ),
-                then_steps: vec![AlMetaFnStep::Return(nat_coerce(p("i")))],
+                )),
+                then_steps: vec![Instr::ReturnI(nat_coerce(p("i")))],
                 else_steps: vec![],
             },
-            AlMetaFnStep::Assert(le(
-                AlMetaExpr::Sub(Box::new(int(0)), Box::new(threshold.clone())),
+            Instr::AssertI(InstrCond::Pred(le(
+                Expr::Sub(Box::new(int(0)), Box::new(threshold.clone())),
                 p("i"),
-            )),
-            AlMetaFnStep::Assert(lt(p("i"), int(0))),
-            AlMetaFnStep::Return(nat_coerce(AlMetaExpr::Add(
+            ))),
+            Instr::AssertI(InstrCond::Pred(lt(p("i"), int(0)))),
+            Instr::ReturnI(nat_coerce(Expr::Add(
                 Box::new(p("i")),
                 Box::new(full_modulus(p("N"))),
             ))),
@@ -476,20 +472,17 @@ pub fn inv_signed_def() -> AlMetaFnDef {
 // list_ X X?{X <- X}  (binop.al L60–66)
 // =============================================================================
 
-pub fn list_def() -> AlMetaFnDef {
-    AlMetaFnDef {
-        name: "list_",
+pub fn list_def() -> FuncA {
+    FuncA {
+        id: "list_",
         params: &LIST_PARAMS,
         body: vec![
-            AlMetaFnStep::If {
-                cond: AlMetaPred::OptIsNone(p("X_opt")),
-                then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::EmptyList)],
+            Instr::IfI {
+            cond: InstrCond::Pred(Pred::OptIsNone(p("X_opt"))),
+                then_steps: vec![Instr::ReturnI(Expr::EmptyList)],
                 else_steps: vec![
-                    AlMetaFnStep::Let {
-                        name: "w",
-                        expr: AlMetaExpr::Choose(Box::new(p("X_opt"))),
-                    },
-                    AlMetaFnStep::Return(AlMetaExpr::SingletonList(Box::new(p("w")))),
+                    Instr::LetI { lhs: LetLhs::Var("w"), expr: Expr::Choose(Box::new(p("X_opt"))) },
+                    Instr::ReturnI(Expr::SingletonList(Box::new(p("w")))),
                 ],
             },
         ],
@@ -500,75 +493,75 @@ pub fn list_def() -> AlMetaFnDef {
 // idiv_ N sx i_1 i_2  (wasm-2.0.al L1445–1459)
 // =============================================================================
 
-pub fn idiv_def() -> AlMetaFnDef {
-    let trunc_div = |i_1: AlMetaExpr, i_2: AlMetaExpr| {
-        truncz(AlMetaExpr::Div(
+pub fn idiv_def() -> FuncA {
+    let trunc_div = |i_1: Expr, i_2: Expr| {
+        truncz(Expr::Div(
             Box::new(rat_coerce(i_1)),
             Box::new(rat_coerce(i_2)),
         ))
     };
     let signed_overflow = eq(
-        AlMetaExpr::Div(
+        Expr::Div(
             Box::new(rat_coerce(call(
                 "signed_",
                 vec![
-                    AlMetaArg::Expr(Box::new(p("N"))),
-                    AlMetaArg::Expr(Box::new(p("i_1"))),
+                    Arg::ExpA(Box::new(p("N"))),
+                    Arg::ExpA(Box::new(p("i_1"))),
                 ],
             ))),
             Box::new(rat_coerce(call(
                 "signed_",
                 vec![
-                    AlMetaArg::Expr(Box::new(p("N"))),
-                    AlMetaArg::Expr(Box::new(p("i_2"))),
+                    Arg::ExpA(Box::new(p("N"))),
+                    Arg::ExpA(Box::new(p("i_2"))),
                 ],
             ))),
         ),
         rat_coerce(half_modulus(p("N"))),
     );
-    AlMetaFnDef {
-        name: "idiv_",
+    FuncA {
+        id: "idiv_",
         params: IDIV_PARAMS,
         body: vec![
-            AlMetaFnStep::If {
-                cond: eq(p("sx"), AlMetaExpr::SignLit(Sign::U)),
+            Instr::IfI {
+            cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
                 then_steps: vec![
-                    AlMetaFnStep::If {
-                        cond: eq(p("i_2"), nat(0)),
-                        then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::EmptyOpt)],
-                        else_steps: vec![AlMetaFnStep::Return(AlMetaExpr::SomeOpt(Box::new(
+                    Instr::IfI {
+            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                        then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
+                        else_steps: vec![Instr::ReturnI(Expr::SomeOpt(Box::new(
                             nat_coerce(trunc_div(p("i_1"), p("i_2"))),
                         )))],
                     },
                 ],
                 else_steps: vec![],
             },
-            AlMetaFnStep::Assert(eq(p("sx"), AlMetaExpr::SignLit(Sign::S))),
-            AlMetaFnStep::If {
-                cond: eq(p("i_2"), nat(0)),
-                then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::EmptyOpt)],
+            Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
+            Instr::IfI {
+            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
                 else_steps: vec![],
             },
-            AlMetaFnStep::If {
-                cond: signed_overflow,
-                then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::EmptyOpt)],
-                else_steps: vec![AlMetaFnStep::Return(AlMetaExpr::SomeOpt(Box::new(call(
+            Instr::IfI {
+                cond: InstrCond::Pred(signed_overflow),
+                then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
+                else_steps: vec![Instr::ReturnI(Expr::SomeOpt(Box::new(call(
                     "inv_signed_",
                     vec![
-                        AlMetaArg::Expr(Box::new(p("N"))),
-                        AlMetaArg::Expr(Box::new(trunc_div(
+                        Arg::ExpA(Box::new(p("N"))),
+                        Arg::ExpA(Box::new(trunc_div(
                             call(
                                 "signed_",
                                 vec![
-                                    AlMetaArg::Expr(Box::new(p("N"))),
-                                    AlMetaArg::Expr(Box::new(p("i_1"))),
+                                    Arg::ExpA(Box::new(p("N"))),
+                                    Arg::ExpA(Box::new(p("i_1"))),
                                 ],
                             ),
                             call(
                                 "signed_",
                                 vec![
-                                    AlMetaArg::Expr(Box::new(p("N"))),
-                                    AlMetaArg::Expr(Box::new(p("i_2"))),
+                                    Arg::ExpA(Box::new(p("N"))),
+                                    Arg::ExpA(Box::new(p("i_2"))),
                                 ],
                             ),
                         ))),
@@ -583,27 +576,27 @@ pub fn idiv_def() -> AlMetaFnDef {
 // irem_ N sx i_1 i_2  (wasm-2.0.al L1466–1479; spectec 3-numerics)
 // =============================================================================
 
-pub fn irem_def() -> AlMetaFnDef {
-    let trunc_div = |a: AlMetaExpr, b: AlMetaExpr| {
-        truncz(AlMetaExpr::Div(
+pub fn irem_def() -> FuncA {
+    let trunc_div = |a: Expr, b: Expr| {
+        truncz(Expr::Div(
             Box::new(rat_coerce(a)),
             Box::new(rat_coerce(b)),
         ))
     };
-    AlMetaFnDef {
-        name: "irem_",
+    FuncA {
+        id: "irem_",
         params: IREM_PARAMS,
         body: vec![
-            AlMetaFnStep::If {
-                cond: eq(p("sx"), AlMetaExpr::SignLit(Sign::U)),
+            Instr::IfI {
+            cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
                 then_steps: vec![
-                    AlMetaFnStep::If {
-                        cond: eq(p("i_2"), nat(0)),
-                        then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::EmptyOpt)],
-                        else_steps: vec![AlMetaFnStep::Return(AlMetaExpr::SomeOpt(Box::new(
-                            nat_coerce(AlMetaExpr::Sub(
+                    Instr::IfI {
+            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                        then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
+                        else_steps: vec![Instr::ReturnI(Expr::SomeOpt(Box::new(
+                            nat_coerce(Expr::Sub(
                                 Box::new(int_coerce(p("i_1"))),
-                                Box::new(int_coerce(AlMetaExpr::Mul(
+                                Box::new(int_coerce(Expr::Mul(
                                     Box::new(p("i_2")),
                                     Box::new(nat_coerce(trunc_div(p("i_1"), p("i_2")))),
                                 ))),
@@ -613,38 +606,38 @@ pub fn irem_def() -> AlMetaFnDef {
                 ],
                 else_steps: vec![],
             },
-            AlMetaFnStep::Assert(eq(p("sx"), AlMetaExpr::SignLit(Sign::S))),
-            AlMetaFnStep::If {
-                cond: eq(p("i_2"), nat(0)),
-                then_steps: vec![AlMetaFnStep::Return(AlMetaExpr::EmptyOpt)],
+            Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
+            Instr::IfI {
+            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
                 else_steps: vec![
-                    AlMetaFnStep::Let {
-                        name: "j_1",
+                    Instr::LetI {
+                        lhs: LetLhs::Var("j_1"),
                         expr: call(
                             "signed_",
                             vec![
-                                AlMetaArg::Expr(Box::new(p("N"))),
-                                AlMetaArg::Expr(Box::new(p("i_1"))),
+                                Arg::ExpA(Box::new(p("N"))),
+                                Arg::ExpA(Box::new(p("i_1"))),
                             ],
                         ),
                     },
-                    AlMetaFnStep::Let {
-                        name: "j_2",
+                    Instr::LetI {
+                        lhs: LetLhs::Var("j_2"),
                         expr: call(
                             "signed_",
                             vec![
-                                AlMetaArg::Expr(Box::new(p("N"))),
-                                AlMetaArg::Expr(Box::new(p("i_2"))),
+                                Arg::ExpA(Box::new(p("N"))),
+                                Arg::ExpA(Box::new(p("i_2"))),
                             ],
                         ),
                     },
-                    AlMetaFnStep::Return(AlMetaExpr::SomeOpt(Box::new(call(
+                    Instr::ReturnI(Expr::SomeOpt(Box::new(call(
                         "inv_signed_",
                         vec![
-                            AlMetaArg::Expr(Box::new(p("N"))),
-                            AlMetaArg::Expr(Box::new(AlMetaExpr::Sub(
+                            Arg::ExpA(Box::new(p("N"))),
+                            Arg::ExpA(Box::new(Expr::Sub(
                                 Box::new(int_coerce(p("j_1"))),
-                                Box::new(int_coerce(AlMetaExpr::Mul(
+                                Box::new(int_coerce(Expr::Mul(
                                     Box::new(int_coerce(p("j_2"))),
                                     Box::new(int_coerce(trunc_div(p("j_1"), p("j_2")))),
                                 ))),
@@ -661,44 +654,44 @@ pub fn irem_def() -> AlMetaFnDef {
 // binop_ numtype binop_ iN_1 iN_2  (wasm-2.0.al L1486–1526)
 // =============================================================================
 
-fn singleton_binop(call_expr: AlMetaExpr) -> AlMetaFnStep {
-    AlMetaFnStep::Return(AlMetaExpr::SingletonList(Box::new(call_expr)))
+fn singleton_binop(call_expr: Expr) -> Instr {
+    Instr::ReturnI(Expr::SingletonList(Box::new(call_expr)))
 }
 
-pub fn binop_def() -> AlMetaFnDef {
-    let sizenn_nt = call("sizenn", vec![AlMetaArg::Expr(Box::new(p("numtype")))]);
-    let list_partial = |partial_call: AlMetaExpr| {
-        AlMetaFnStep::Return(call(
+pub fn binop_def() -> FuncA {
+    let sizenn_nt = call("sizenn", vec![Arg::ExpA(Box::new(p("numtype")))]);
+    let list_partial = |partial_call: Expr| {
+        Instr::ReturnI(call(
             "list_",
             vec![
-                AlMetaArg::Expr(Box::new(p("numtype"))),
-                AlMetaArg::Expr(Box::new(partial_call)),
+                Arg::ExpA(Box::new(p("numtype"))),
+                Arg::ExpA(Box::new(partial_call)),
             ],
         ))
     };
     let list_idiv = list_partial(call(
         "idiv_",
         vec![
-            AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
-            AlMetaArg::Expr(Box::new(p("sx"))),
-            AlMetaArg::Expr(Box::new(p("iN_1"))),
-            AlMetaArg::Expr(Box::new(p("iN_2"))),
+            Arg::ExpA(Box::new(sizenn_nt.clone())),
+            Arg::ExpA(Box::new(p("sx"))),
+            Arg::ExpA(Box::new(p("iN_1"))),
+            Arg::ExpA(Box::new(p("iN_2"))),
         ],
     ));
     let list_irem = list_partial(call(
         "irem_",
         vec![
-            AlMetaArg::Expr(Box::new(sizenn_nt.clone())),
-            AlMetaArg::Expr(Box::new(p("sx"))),
-            AlMetaArg::Expr(Box::new(p("iN_1"))),
-            AlMetaArg::Expr(Box::new(p("iN_2"))),
+            Arg::ExpA(Box::new(sizenn_nt.clone())),
+            Arg::ExpA(Box::new(p("sx"))),
+            Arg::ExpA(Box::new(p("iN_1"))),
+            Arg::ExpA(Box::new(p("iN_2"))),
         ],
     ));
     let i_1 = p("iN_1");
     let i_2 = p("iN_2");
     let inn_branch = vec![
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Add),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Add)),
             then_steps: vec![singleton_binop(inn_iadd(
                 sizenn_nt.clone(),
                 i_1.clone(),
@@ -706,8 +699,8 @@ pub fn binop_def() -> AlMetaFnDef {
             ))],
             else_steps: vec![],
         },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Sub),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Sub)),
             then_steps: vec![singleton_binop(inn_isub(
                 sizenn_nt.clone(),
                 i_1.clone(),
@@ -715,8 +708,8 @@ pub fn binop_def() -> AlMetaFnDef {
             ))],
             else_steps: vec![],
         },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Mul),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Mul)),
             then_steps: vec![singleton_binop(inn_imul(
                 sizenn_nt.clone(),
                 i_1.clone(),
@@ -724,32 +717,24 @@ pub fn binop_def() -> AlMetaFnDef {
             ))],
             else_steps: vec![],
         },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpCaseIs(p("binop_"), BinOpCase::Div),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpCaseIs(p("binop_"), BinOpCase::Div)),
             then_steps: vec![
-                AlMetaFnStep::LetBinOpCase {
-                    case: BinOpCase::Div,
-                    sx_name: "sx",
-                    binop: p("binop_"),
-                },
+                Instr::LetI { lhs: LetLhs::BinOpCase(BinOpCase::Div, "sx"), expr: p("binop_") },
                 list_idiv,
             ],
             else_steps: vec![],
         },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpCaseIs(p("binop_"), BinOpCase::Rem),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpCaseIs(p("binop_"), BinOpCase::Rem)),
             then_steps: vec![
-                AlMetaFnStep::LetBinOpCase {
-                    case: BinOpCase::Rem,
-                    sx_name: "sx",
-                    binop: p("binop_"),
-                },
+                Instr::LetI { lhs: LetLhs::BinOpCase(BinOpCase::Rem, "sx"), expr: p("binop_") },
                 list_irem,
             ],
             else_steps: vec![],
         },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::And),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::And)),
             then_steps: vec![singleton_binop(inn_iand(
                 sizenn_nt.clone(),
                 i_1.clone(),
@@ -757,8 +742,8 @@ pub fn binop_def() -> AlMetaFnDef {
             ))],
             else_steps: vec![],
         },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Or),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Or)),
             then_steps: vec![singleton_binop(inn_ior(
                 sizenn_nt.clone(),
                 i_1.clone(),
@@ -766,8 +751,8 @@ pub fn binop_def() -> AlMetaFnDef {
             ))],
             else_steps: vec![],
         },
-        AlMetaFnStep::If {
-            cond: AlMetaPred::BinOpEq(p("binop_"), WasmBinOp::Shl),
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Shl)),
             then_steps: vec![singleton_binop(inn_ishl(
                 sizenn_nt.clone(),
                 i_1.clone(),
@@ -776,21 +761,21 @@ pub fn binop_def() -> AlMetaFnDef {
             else_steps: vec![],
         },
     ];
-    AlMetaFnDef {
-        name: "binop_",
+    FuncA {
+        id: "binop_",
         params: BINOP_PARAMS,
         body: vec![
-            AlMetaFnStep::If {
-                cond: AlMetaPred::TypeIsInn(p("numtype")),
+            Instr::IfI {
+            cond: InstrCond::Pred(Pred::TypeIsInn(p("numtype"))),
                 then_steps: inn_branch,
-                else_steps: vec![AlMetaFnStep::Assert(AlMetaPred::TypeIsFnn(p("numtype")))],
+                else_steps: vec![Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype"))))],
             },
         ],
     }
 }
 
 /// Look up a SpecTec `$fn` definition by name.
-pub fn lookup_fn(name: &str) -> Option<AlMetaFnDef> {
+pub fn lookup_func(name: &str) -> Option<FuncA> {
     Some(match name {
         "size" => size_def(),
         "sizenn" => sizenn_def(),
@@ -811,9 +796,9 @@ mod tests {
     #[test]
     fn size_def_matches_binop_al() {
         let def = size_def();
-        assert_eq!(def.name, "size");
+        assert_eq!(def.id, "size");
         assert_eq!(def.params, SIZE_PARAMS);
-        assert!(matches!(def.body.last(), Some(AlMetaFnStep::Fail)));
+        assert!(matches!(def.body.last(), Some(Instr::FailI)));
     }
 
     #[test]

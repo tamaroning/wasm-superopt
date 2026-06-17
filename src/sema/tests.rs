@@ -1,8 +1,8 @@
 use super::derive::{POPS_0_TEST, POPS_1_TEST, POPS_2_TEST, PUSHES_0_TEST, PUSHES_1_TEST};
 use super::defs::{NumType, Sign, WasmBinOp};
-use super::meta::format_meta_binop_pretty;
+use super::ast::format_rule_binop_pretty;
 use super::policy::STRAIGHT_LINE_EMBED;
-use super::{al_spec_for, derive_inst_spec, derive_meta_binop_spec};
+use super::{al_spec_for, derive_inst_spec, derive_rule_binop_spec};
 use crate::semantics::{spec_for, InstSpec, SemOp, concrete_ops};
 
 fn is_binop(op: &SemOp) -> bool {
@@ -86,16 +86,16 @@ fn expected_inst_spec(op: &SemOp) -> InstSpec {
 }
 
 #[test]
-fn derive_meta_binop_spec_div_s_can_trap() {
-    let spec = derive_meta_binop_spec(WasmBinOp::Div(Sign::S));
+fn derive_rule_binop_spec_div_s_can_trap() {
+    let spec = derive_rule_binop_spec(WasmBinOp::Div(Sign::S));
     assert!(spec.can_trap);
     assert_eq!(spec.pops.len(), 2);
     assert_eq!(spec.pushes.len(), 1);
 }
 
 #[test]
-fn format_meta_binop_pretty_div_s_mentions_binop_call() {
-    let pretty = format_meta_binop_pretty(NumType::I32, WasmBinOp::Div(Sign::S));
+fn format_rule_binop_pretty_div_s_mentions_binop_call() {
+    let pretty = format_rule_binop_pretty(NumType::I32, WasmBinOp::Div(Sign::S));
     assert!(pretty.contains("$binop_"));
     assert!(pretty.contains("trap"));
 }

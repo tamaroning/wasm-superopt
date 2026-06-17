@@ -124,7 +124,7 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
 }
 
 /// Static `InstSpec` for `Step_pure/binop` from meta template shape.
-pub fn derive_meta_binop_spec(binop: WasmBinOp) -> InstSpec {
+pub fn derive_rule_binop_spec(binop: WasmBinOp) -> InstSpec {
     InstSpec {
         pops: POPS_2,
         pushes: PUSHES_1,

@@ -1,7 +1,7 @@
-//! Z3 executor for meta-level [`AlMetaStep`](super::meta::AlMetaStep) templates.
+//! Z3 executor for [`RuleA`](super::super::ast::Algorithm::RuleA) bodies (`instr` in OCaml).
 
-use super::meta_fn::{encode_meta_expr, SymEnv, SymValue};
-use super::super::meta::{AlMetaExpr, AlMetaStep, PopPattern};
+use super::func::{encode_expr, SymEnv, SymValue};
+use super::super::ast::{Expr, Instr, InstrCond, LetLhs, PopTarget};
 use super::super::policy::EmbeddingPolicy;
 use crate::semantics::{I32_BITS, StateTouches, Z3State};
 use z3::Context;
@@ -9,10 +9,10 @@ use z3::ast::{Ast, BV, Bool};
 
 fn sym_if_cond<'ctx>(
     ctx: &'ctx Context,
-    cond: &AlMetaExpr,
+    cond: &Expr,
     env: &SymEnv<'ctx>,
 ) -> Bool<'ctx> {
-    match encode_meta_expr(ctx, cond, env).expect("if cond") {
+    match encode_expr(ctx, cond, env).expect("if cond") {
         SymValue::Nat(bv) => bv._eq(&BV::from_u64(ctx, 0, I32_BITS)),
         other => panic!("if cond expected nat, got {other:?}"),
     }
@@ -37,61 +37,69 @@ fn stack_push_bv<'ctx>(
     }
 }
 
-fn is_trap_else_push_meta(then_steps: &[AlMetaStep], else_steps: &[AlMetaStep]) -> bool {
-    then_steps == [AlMetaStep::Trap]
+fn is_trap_else_push_rule(then_steps: &[Instr], else_steps: &[Instr]) -> bool {
+    then_steps == [Instr::TrapI]
         && else_steps
             .last()
-            .is_some_and(|s| matches!(s, AlMetaStep::Push(_)))
+            .is_some_and(|s| matches!(s, Instr::PushI(_)))
 }
 
-fn exec_meta_step_z3<'ctx>(
+fn exec_instr_z3<'ctx>(
     ctx: &'ctx Context,
-    step: &AlMetaStep,
+    step: &Instr,
     stack: &mut Vec<BV<'ctx>>,
     trap: &mut Bool<'ctx>,
     env: &mut SymEnv<'ctx>,
     policy: &EmbeddingPolicy,
 ) {
     match step {
-        AlMetaStep::Assert(expr) => {
-            if matches!(expr, AlMetaExpr::TopValue(_)) {
+        Instr::AssertI(InstrCond::Expr(expr)) => {
+            if matches!(expr, Expr::TopValue(_)) {
                 return;
             }
-            encode_meta_expr(ctx, expr, env).expect("assert expr");
+            encode_expr(ctx, expr, env).expect("assert expr");
         }
-        AlMetaStep::Pop(pattern) => {
+        Instr::AssertI(InstrCond::Pred(_)) => panic!("pred assert in rule body"),
+        Instr::PopI(pattern) => {
             let name = match pattern {
-                PopPattern::NumConst(n) => *n,
+                PopTarget::NumConst(n) => *n,
             };
             let val = stack.pop().expect("stack underflow");
             env.bind(name, SymValue::nat_from_stack(val));
         }
-        AlMetaStep::Let { name, expr } => {
-            env.bind(name, encode_meta_expr(ctx, expr, env).expect("let expr"));
+        Instr::LetI {
+            lhs: LetLhs::Var(name),
+            expr,
+        } => {
+            env.bind(name, encode_expr(ctx, expr, env).expect("let expr"));
         }
-        AlMetaStep::If {
-            cond,
+        Instr::LetI { .. } => panic!("binop-case let in rule body"),
+        Instr::IfI {
+            cond: InstrCond::Expr(cond),
             then_steps,
             else_steps,
         } => {
-            if policy.trap_dummy_push && is_trap_else_push_meta(then_steps, else_steps) {
+            if policy.trap_dummy_push && is_trap_else_push_rule(then_steps, else_steps) {
                 let is_empty = sym_if_cond(ctx, cond, env);
                 *trap = Bool::or(ctx, &[trap, &is_empty]);
                 let mut else_env = env.clone();
                 for step in else_steps {
                     match step {
-                        AlMetaStep::Let { name, expr } => {
+                        Instr::LetI {
+                            lhs: LetLhs::Var(name),
+                            expr,
+                        } => {
                             else_env.bind(
                                 name,
-                                encode_meta_expr(ctx, expr, &else_env).expect("else let"),
+                                encode_expr(ctx, expr, &else_env).expect("else let"),
                             );
                         }
-                        AlMetaStep::Push(expr) => {
+                        Instr::PushI(expr) => {
                             let val =
-                                encode_meta_expr(ctx, expr, &else_env).expect("else push expr");
+                                encode_expr(ctx, expr, &else_env).expect("else push expr");
                             stack.push(stack_push_bv(ctx, val, Some(&is_empty)));
                         }
-                        other => exec_meta_step_z3(
+                        other => exec_instr_z3(
                             ctx,
                             other,
                             stack,
@@ -111,7 +119,7 @@ fn exec_meta_step_z3<'ctx>(
             let mut trap_e = trap.clone();
             let mut env_t = env.clone();
             let mut env_e = env.clone();
-            exec_meta_steps_inner(
+            exec_instrs_inner(
                 ctx,
                 then_steps,
                 &mut stack_t,
@@ -119,7 +127,7 @@ fn exec_meta_step_z3<'ctx>(
                 &mut env_t,
                 policy,
             );
-            exec_meta_steps_inner(
+            exec_instrs_inner(
                 ctx,
                 else_steps,
                 &mut stack_e,
@@ -147,17 +155,21 @@ fn exec_meta_step_z3<'ctx>(
             }
             *env = env_e;
         }
-        AlMetaStep::Push(expr) => {
-            let val = encode_meta_expr(ctx, expr, env).expect("push expr");
+        Instr::IfI {
+            cond: InstrCond::Pred(_), ..
+        } => panic!("pred if in rule body"),
+        Instr::PushI(expr) => {
+            let val = encode_expr(ctx, expr, env).expect("push expr");
             stack.push(stack_push_bv(ctx, val, None));
         }
-        AlMetaStep::Trap => *trap = Bool::from_bool(ctx, true),
+        Instr::TrapI => *trap = Bool::from_bool(ctx, true),
+        Instr::ReturnI(_) | Instr::FailI => panic!("func instr in rule body"),
     }
 }
 
-fn exec_meta_steps_inner<'ctx>(
+fn exec_instrs_inner<'ctx>(
     ctx: &'ctx Context,
-    steps: &[AlMetaStep],
+    steps: &[Instr],
     stack: &mut Vec<BV<'ctx>>,
     trap: &mut Bool<'ctx>,
     env: &mut SymEnv<'ctx>,
@@ -167,14 +179,14 @@ fn exec_meta_steps_inner<'ctx>(
         if trap.as_bool() == Some(true) {
             return;
         }
-        exec_meta_step_z3(ctx, step, stack, trap, env, policy);
+        exec_instr_z3(ctx, step, stack, trap, env, policy);
     }
 }
 
-/// Z3 execution of a `Step_pure/...` meta template.
-pub fn exec_meta_steps_z3<'ctx>(
+/// Z3 execution of a `Step_pure/...` rule body.
+pub fn exec_instrs_z3<'ctx>(
     ctx: &'ctx Context,
-    steps: &[AlMetaStep],
+    steps: &[Instr],
     stack: &mut Vec<BV<'ctx>>,
     _state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
@@ -182,7 +194,7 @@ pub fn exec_meta_steps_z3<'ctx>(
 ) -> Bool<'ctx> {
     let mut trap = Bool::from_bool(ctx, false);
     let mut env = SymEnv::empty();
-    exec_meta_steps_inner(ctx, steps, stack, &mut trap, &mut env, policy);
+    exec_instrs_inner(ctx, steps, stack, &mut trap, &mut env, policy);
     let _ = touches;
     trap
 }

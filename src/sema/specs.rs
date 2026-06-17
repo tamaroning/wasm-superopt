@@ -2,7 +2,7 @@
 
 use super::defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
 use super::ir::{AlExpr, AlSpec, AlStep};
-use super::meta::AlMetaStep;
+use super::ast::Instr;
 use crate::semantics::SemOp;
 use std::borrow::Cow;
 
@@ -26,7 +26,7 @@ fn steps_drop() -> Vec<AlStep> {
 }
 
 /// Meta-level `Step_pure/...` template for an op, if any.
-pub fn meta_steps_for(op: &SemOp) -> Option<Vec<AlMetaStep>> {
+pub fn rule_instrs_for(op: &SemOp) -> Option<Vec<Instr>> {
     let (nt, binop) = match op {
         SemOp::I32Add => (NumType::I32, WasmBinOp::Add),
         SemOp::I32Mul => (NumType::I32, WasmBinOp::Mul),

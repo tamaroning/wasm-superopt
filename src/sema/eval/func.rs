@@ -1,8 +1,8 @@
-//! Concrete evaluator for meta-level AL `$fn` definitions.
+//! Concrete evaluator for [`FuncA`](super::super::ast::FuncA) bodies (OCaml `FuncA`).
 
-use super::super::defs::{lookup_fn, BinOpCase, NumType, Sign, ValType, WasmBinOp};
-use super::super::meta::{
-    AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
+use super::super::defs::{lookup_func, BinOpCase, NumType, Sign, ValType, WasmBinOp};
+use super::super::ast::{
+    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,22 +26,22 @@ pub enum EvalError {
 
 type EvalResult = Result<AlValue, EvalError>;
 
-pub fn eval_fn(def: &AlMetaFnDef, args: &[(&str, AlValue)]) -> EvalResult {
-    let mut env = MetaEnv::with_args(def.params, args);
+pub fn eval_fn(def: &FuncA, args: &[(&str, AlValue)]) -> EvalResult {
+    let mut env = AlEnv::with_args(def.params, args);
     eval_fn_steps(&def.body, &mut env)
 }
 
-/// Variable environment for `$fn` bodies and `AlMetaStep` templates.
-pub struct MetaEnv {
+/// Variable environment for `$fn` bodies and `Instr` templates.
+pub struct AlEnv {
     vars: Vec<(&'static str, AlValue)>,
 }
 
-impl MetaEnv {
+impl AlEnv {
     pub fn new() -> Self {
         Self { vars: Vec::new() }
     }
 
-    fn with_args(params: &[AlMetaParam], args: &[(&str, AlValue)]) -> Self {
+    fn with_args(params: &[Param], args: &[(&str, AlValue)]) -> Self {
         let mut env = Self::new();
         for param in params {
             let val = args
@@ -71,12 +71,12 @@ impl MetaEnv {
     }
 }
 
-/// Evaluate an `AlMetaExpr` in a step template (Assert / Let / If / Push).
-pub fn eval_meta_expr(expr: &AlMetaExpr, env: &MetaEnv) -> EvalResult {
-    eval_expr(expr, env)
+/// Evaluate an [`Expr`] (rule bodies and [`FuncA`] bodies).
+pub fn eval_expr(expr: &Expr, env: &AlEnv) -> EvalResult {
+    eval_expr_inner(expr, env)
 }
 
-fn eval_fn_steps(steps: &[AlMetaFnStep], env: &mut MetaEnv) -> EvalResult {
+fn eval_fn_steps(steps: &[Instr], env: &mut AlEnv) -> EvalResult {
     for step in steps {
         if let Some(val) = eval_fn_step(step, env)? {
             return Ok(val);
@@ -85,35 +85,38 @@ fn eval_fn_steps(steps: &[AlMetaFnStep], env: &mut MetaEnv) -> EvalResult {
     Err(EvalError::Fail)
 }
 
-fn eval_fn_step(step: &AlMetaFnStep, env: &mut MetaEnv) -> Result<Option<AlValue>, EvalError> {
+fn eval_fn_step(step: &Instr, env: &mut AlEnv) -> Result<Option<AlValue>, EvalError> {
     match step {
-        AlMetaFnStep::Return(expr) => Ok(Some(eval_expr(expr, env)?)),
-        AlMetaFnStep::Fail => Err(EvalError::Fail),
-        AlMetaFnStep::Assert(pred) => {
+        Instr::ReturnI(expr) => Ok(Some(eval_expr_inner(expr, env)?)),
+        Instr::FailI => Err(EvalError::Fail),
+        Instr::AssertI(InstrCond::Pred(pred)) => {
             if !eval_pred(pred, env)? {
                 return Err(EvalError::Assert);
             }
             Ok(None)
         }
-        AlMetaFnStep::Let { name, expr } => {
-            env.bind(name, eval_expr(expr, env)?);
+        Instr::AssertI(InstrCond::Expr(_)) => panic!("expr assert in func body"),
+        Instr::LetI {
+            lhs: LetLhs::Var(name),
+            expr,
+        } => {
+            env.bind(name, eval_expr_inner(expr, env)?);
             Ok(None)
         }
-        AlMetaFnStep::LetBinOpCase {
-            case,
-            sx_name,
-            binop,
+        Instr::LetI {
+            lhs: LetLhs::BinOpCase(case, sx_name),
+            expr: binop,
         } => {
-            let sx = binop_sign(eval_expr(binop, env)?, *case)?;
+            let sx = binop_sign(eval_expr_inner(binop, env)?, *case)?;
             env.bind(sx_name, AlValue::Sign(sx));
             Ok(None)
         }
-        AlMetaFnStep::If {
-            cond,
+        Instr::IfI {
+            cond: InstrCond::Pred(pred),
             then_steps,
             else_steps,
         } => {
-            if eval_pred(cond, env)? {
+            if eval_pred(pred, env)? {
                 eval_fn_steps(then_steps, env).map(Some)
             } else if else_steps.is_empty() {
                 Ok(None)
@@ -121,73 +124,79 @@ fn eval_fn_step(step: &AlMetaFnStep, env: &mut MetaEnv) -> Result<Option<AlValue
                 eval_fn_steps(else_steps, env).map(Some)
             }
         }
+        Instr::IfI {
+            cond: InstrCond::Expr(_), ..
+        } => panic!("expr if in func body"),
+        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI => {
+            panic!("rule instr in func body")
+        }
     }
 }
 
-fn eval_expr(expr: &AlMetaExpr, env: &MetaEnv) -> EvalResult {
+fn eval_expr_inner(expr: &Expr, env: &AlEnv) -> EvalResult {
     match expr {
-        AlMetaExpr::Param(name) => Ok(env.get(name).clone()),
-        AlMetaExpr::NatLit(n) => Ok(AlValue::Nat(*n)),
-        AlMetaExpr::IntLit(n) => Ok(AlValue::Int(*n)),
-        AlMetaExpr::ValTypeLit(vt) => Ok(AlValue::ValType(*vt)),
-        AlMetaExpr::SignLit(sx) => Ok(AlValue::Sign(*sx)),
-        AlMetaExpr::BinOpLit(op) => Ok(AlValue::BinOp(*op)),
-        AlMetaExpr::EmptyOpt => Ok(AlValue::Opt(None)),
-        AlMetaExpr::SomeOpt(inner) => Ok(AlValue::Opt(Some(Box::new(eval_expr(inner, env)?)))),
-        AlMetaExpr::EmptyList => Ok(AlValue::List(vec![])),
-        AlMetaExpr::SingletonList(inner) => Ok(AlValue::List(vec![eval_expr(inner, env)?])),
-        AlMetaExpr::IntCoerce(inner) => Ok(AlValue::Int(as_int(eval_expr(inner, env)?)?)),
-        AlMetaExpr::NatCoerce(inner) => match eval_expr(inner, env)? {
+        Expr::VarE(name) => Ok(env.get(name).clone()),
+        Expr::NatLit(n) => Ok(AlValue::Nat(*n)),
+        Expr::IntLit(n) => Ok(AlValue::Int(*n)),
+        Expr::ValTypeLit(vt) => Ok(AlValue::ValType(*vt)),
+        Expr::SignLit(sx) => Ok(AlValue::Sign(*sx)),
+        Expr::BinOpLit(op) => Ok(AlValue::BinOp(*op)),
+        Expr::EmptyOpt => Ok(AlValue::Opt(None)),
+        Expr::SomeOpt(inner) => Ok(AlValue::Opt(Some(Box::new(eval_expr(inner, env)?)))),
+        Expr::EmptyList => Ok(AlValue::List(vec![])),
+        Expr::SingletonList(inner) => Ok(AlValue::List(vec![eval_expr(inner, env)?])),
+        Expr::IntCoerce(inner) => Ok(AlValue::Int(as_int(eval_expr(inner, env)?)?)),
+        Expr::NatCoerce(inner) => match eval_expr(inner, env)? {
             AlValue::Nat(n) => Ok(AlValue::Nat(n)),
             // `$nat$` reinterprets i32 bit patterns (e.g. `$truncz` of 2^31).
             AlValue::Int(n) => Ok(AlValue::Nat(n as u32)),
             AlValue::Rat(n, d) => Ok(AlValue::Nat((n / d) as u32)),
             other => panic!("nat coerce on {other:?}"),
         },
-        AlMetaExpr::RatCoerce(inner) => as_rat(eval_expr(inner, env)?),
-        AlMetaExpr::TruncZ(inner) => {
+        Expr::RatCoerce(inner) => as_rat(eval_expr(inner, env)?),
+        Expr::TruncZ(inner) => {
             let r = as_rat_pair(eval_expr(inner, env)?)?;
             Ok(AlValue::Int(trunc_rat(r)))
         }
-        AlMetaExpr::Add(a, b) => eval_add(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Sub(a, b) => eval_sub(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Mul(a, b) => eval_mul(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Div(a, b) => eval_div(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Mod(a, b) => eval_mod(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Rem(a, b) => eval_rem(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Shl(a, b) => eval_shl(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::BitAnd(a, b) => eval_bitand(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::BitOr(a, b) => eval_bitor(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::BitXor(a, b) => eval_bitxor(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Pow(a, b) => eval_pow(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaExpr::Neg(inner) => Ok(AlValue::Int(-as_int(eval_expr(inner, env)?)?)),
-        AlMetaExpr::Choose(inner) => eval_choose(eval_expr(inner, env)?),
-        AlMetaExpr::BinOpSignOf(inner) => {
+        Expr::Add(a, b) => eval_add(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Sub(a, b) => eval_sub(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Mul(a, b) => eval_mul(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Div(a, b) => eval_div(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Mod(a, b) => eval_mod(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Rem(a, b) => eval_rem(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Shl(a, b) => eval_shl(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::BitAnd(a, b) => eval_bitand(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::BitOr(a, b) => eval_bitor(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::BitXor(a, b) => eval_bitxor(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Pow(a, b) => eval_pow(eval_expr(a, env)?, eval_expr(b, env)?),
+        Expr::Neg(inner) => Ok(AlValue::Int(-as_int(eval_expr(inner, env)?)?)),
+        Expr::Choose(inner) => eval_choose(eval_expr(inner, env)?),
+        Expr::BinOpSignOf(inner) => {
             Ok(AlValue::Sign(binop_sign_value(as_binop(eval_expr(inner, env)?)?)))
         }
-        AlMetaExpr::Call(name, args) => eval_call(name, args, env),
-        AlMetaExpr::OptionalLen(inner) => {
+        Expr::Call(name, args) => eval_call(name, args, env),
+        Expr::OptionalLen(inner) => {
             Ok(AlValue::Nat(match eval_expr(inner, env)? {
                 AlValue::List(items) if items.is_empty() => 0,
                 AlValue::Opt(None) => 0,
                 _ => 1,
             }))
         }
-        AlMetaExpr::TopValue(nt) => Ok(AlValue::NumType(*nt)),
+        Expr::TopValue(nt) => Ok(AlValue::NumType(*nt)),
     }
 }
 
-fn eval_call(name: &str, args: &[AlMetaArg], env: &MetaEnv) -> EvalResult {
+fn eval_call(name: &str, args: &[Arg], env: &AlEnv) -> EvalResult {
     let mut bound = Vec::new();
     for arg in args {
         bound.push(match arg {
-            AlMetaArg::Var(name) => env.get(name).clone(),
-            AlMetaArg::Nat(n) => AlValue::Nat(*n),
-            AlMetaArg::NumType(nt) => AlValue::NumType(*nt),
-            AlMetaArg::ValType(vt) => AlValue::ValType(*vt),
-            AlMetaArg::Sign(sx) => AlValue::Sign(*sx),
-            AlMetaArg::BinOp(op) => AlValue::BinOp(*op),
-            AlMetaArg::Expr(expr) => eval_expr(expr, env)?,
+            Arg::Var(name) => env.get(name).clone(),
+            Arg::Nat(n) => AlValue::Nat(*n),
+            Arg::NumType(nt) => AlValue::NumType(*nt),
+            Arg::ValType(vt) => AlValue::ValType(*vt),
+            Arg::Sign(sx) => AlValue::Sign(*sx),
+            Arg::BinOp(op) => AlValue::BinOp(*op),
+            Arg::ExpA(expr) => eval_expr(expr, env)?,
         });
     }
 
@@ -196,30 +205,30 @@ fn eval_call(name: &str, args: &[AlMetaArg], env: &MetaEnv) -> EvalResult {
         return Ok(AlValue::Nat(as_nat(bound[1].clone())?));
     }
 
-    let def = lookup_fn(name).unwrap_or_else(|| panic!("unsupported AL call in fn eval: {name}"));
+    let def = lookup_func(name).unwrap_or_else(|| panic!("unsupported AL call in fn eval: {name}"));
     let fn_args = bind_eval_fn_args(&def, bound)?;
     eval_fn(&def, &fn_args)
 }
 
-fn eval_pred(pred: &AlMetaPred, env: &MetaEnv) -> Result<bool, EvalError> {
+fn eval_pred(pred: &Pred, env: &AlEnv) -> Result<bool, EvalError> {
     match pred {
-        AlMetaPred::Eq(a, b) => Ok(eval_eq(eval_expr(a, env)?, eval_expr(b, env)?)),
-        AlMetaPred::Lt(a, b) => cmp_lt(eval_expr(a, env)?, eval_expr(b, env)?),
-        AlMetaPred::Le(a, b) => {
+        Pred::Eq(a, b) => Ok(eval_eq(eval_expr(a, env)?, eval_expr(b, env)?)),
+        Pred::Lt(a, b) => cmp_lt(eval_expr(a, env)?, eval_expr(b, env)?),
+        Pred::Le(a, b) => {
             let av = eval_expr(a, env)?;
             let bv = eval_expr(b, env)?;
             Ok(cmp_lt(av.clone(), bv.clone())? || cmp_eq(av, bv))
         }
-        AlMetaPred::And(a, b) => {
+        Pred::And(a, b) => {
             let left = eval_pred(a, env)?;
             let right = eval_pred(b, env)?;
             Ok(left && right)
         }
-        AlMetaPred::OptIsNone(expr) => Ok(matches!(eval_expr(expr, env)?, AlValue::Opt(None))),
-        AlMetaPred::TypeIsInn(expr) => Ok(matches!(eval_expr(expr, env)?, AlValue::NumType(_))),
-        AlMetaPred::TypeIsFnn(_) => Ok(false),
-        AlMetaPred::BinOpEq(expr, op) => Ok(as_binop(eval_expr(expr, env)?)? == *op),
-        AlMetaPred::BinOpCaseIs(expr, case) => {
+        Pred::OptIsNone(expr) => Ok(matches!(eval_expr(expr, env)?, AlValue::Opt(None))),
+        Pred::TypeIsInn(expr) => Ok(matches!(eval_expr(expr, env)?, AlValue::NumType(_))),
+        Pred::TypeIsFnn(_) => Ok(false),
+        Pred::BinOpEq(expr, op) => Ok(as_binop(eval_expr(expr, env)?)? == *op),
+        Pred::BinOpCaseIs(expr, case) => {
             Ok(binop_case(as_binop(eval_expr(expr, env)?)?, *case))
         }
     }
@@ -363,12 +372,12 @@ fn to_i64(v: AlValue) -> Result<i64, EvalError> {
     })
 }
 
-fn bind_eval_fn_args(def: &AlMetaFnDef, bound: Vec<AlValue>) -> Result<Vec<(&'static str, AlValue)>, EvalError> {
+fn bind_eval_fn_args(def: &FuncA, bound: Vec<AlValue>) -> Result<Vec<(&'static str, AlValue)>, EvalError> {
     assert_eq!(
         def.params.len(),
         bound.len(),
         "arg count mismatch for ${}",
-        def.name
+        def.id
     );
     def.params
         .iter()
@@ -377,15 +386,15 @@ fn bind_eval_fn_args(def: &AlMetaFnDef, bound: Vec<AlValue>) -> Result<Vec<(&'st
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn coerce_al(ty: AlMetaParamType, val: AlValue) -> Result<AlValue, EvalError> {
+fn coerce_al(ty: ParamType, val: AlValue) -> Result<AlValue, EvalError> {
     Ok(match ty {
-        AlMetaParamType::Nat => AlValue::Nat(as_nat(val)?),
-        AlMetaParamType::Int => AlValue::Int(as_int(val)?),
-        AlMetaParamType::ValType => AlValue::ValType(as_valtype(val)?),
-        AlMetaParamType::NumType => AlValue::NumType(as_numtype(val)?),
-        AlMetaParamType::Sign => AlValue::Sign(as_sign(val)?),
-        AlMetaParamType::BinOp => AlValue::BinOp(as_binop(val)?),
-        AlMetaParamType::Any => val,
+        ParamType::Nat => AlValue::Nat(as_nat(val)?),
+        ParamType::Int => AlValue::Int(as_int(val)?),
+        ParamType::ValType => AlValue::ValType(as_valtype(val)?),
+        ParamType::NumType => AlValue::NumType(as_numtype(val)?),
+        ParamType::Sign => AlValue::Sign(as_sign(val)?),
+        ParamType::BinOp => AlValue::BinOp(as_binop(val)?),
+        ParamType::Any => val,
     })
 }
 

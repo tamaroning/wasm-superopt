@@ -1,13 +1,12 @@
-//! Symbolic encoder for meta-level AL `$fn` definitions (Z3).
+//! Symbolic encoder for [`FuncA`](super::super::ast::FuncA) bodies (OCaml `FuncA`).
 
 use std::ops::{Add, Mul, Sub};
 
-use super::super::defs::lookup_fn;
+use super::super::defs::lookup_func;
 use super::super::defs::{NumType, Sign, WasmBinOp};
 use crate::semantics::I32_BITS;
-use super::super::meta::{
-    AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
-    BinOpCase, ValType,
+use super::super::ast::{
+    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred, BinOpCase, ValType,
 };
 use z3::Context;
 use z3::ast::{Ast, BV, Bool, Int};
@@ -40,7 +39,7 @@ type EncodeResult<'ctx> = Result<SymValue<'ctx>, EncodeError>;
 
 pub fn encode_fn<'ctx>(
     ctx: &'ctx Context,
-    def: &AlMetaFnDef,
+    def: &FuncA,
     args: &[(&str, SymValue<'ctx>)],
 ) -> EncodeResult<'ctx> {
     let mut env = SymEnv::new(def.params, args);
@@ -50,19 +49,19 @@ pub fn encode_fn<'ctx>(
 pub fn encode_call<'ctx>(
     ctx: &'ctx Context,
     name: &str,
-    args: &[AlMetaArg],
+    args: &[Arg],
     env: &SymEnv<'ctx>,
 ) -> EncodeResult<'ctx> {
     let mut bound = Vec::new();
     for arg in args {
         bound.push(match arg {
-            AlMetaArg::Var(name) => env.get(name).clone(),
-            AlMetaArg::Nat(n) => SymValue::nat_const(ctx, *n),
-            AlMetaArg::NumType(nt) => SymValue::NumType(*nt),
-            AlMetaArg::ValType(vt) => SymValue::ValType(*vt),
-            AlMetaArg::Sign(sx) => SymValue::Sign(*sx),
-            AlMetaArg::BinOp(op) => SymValue::BinOp(*op),
-            AlMetaArg::Expr(expr) => encode_expr(ctx, expr, env)?,
+            Arg::Var(name) => env.get(name).clone(),
+            Arg::Nat(n) => SymValue::nat_const(ctx, *n),
+            Arg::NumType(nt) => SymValue::NumType(*nt),
+            Arg::ValType(vt) => SymValue::ValType(*vt),
+            Arg::Sign(sx) => SymValue::Sign(*sx),
+            Arg::BinOp(op) => SymValue::BinOp(*op),
+            Arg::ExpA(expr) => encode_expr(ctx, expr, env)?,
         });
     }
 
@@ -71,7 +70,7 @@ pub fn encode_call<'ctx>(
         return Ok(SymValue::Nat(as_nat_bv(ctx, bound[1].clone())?));
     }
 
-    let def = lookup_fn(name).unwrap_or_else(|| panic!("unsupported AL call in sym encode: {name}"));
+    let def = lookup_func(name).unwrap_or_else(|| panic!("unsupported AL call in sym encode: {name}"));
     let fn_args = bind_sym_fn_args(&def, bound)?;
     encode_fn(ctx, &def, &fn_args)
 }
@@ -91,7 +90,7 @@ pub fn sym_is_empty<'ctx>(ctx: &'ctx Context, v: &SymValue<'ctx>) -> Bool<'ctx> 
 /// Extract singleton value from optional/list (Spectec `choose`).
 pub fn encode_choose<'ctx>(
     ctx: &'ctx Context,
-    expr: &AlMetaExpr,
+    expr: &Expr,
     env: &SymEnv<'ctx>,
 ) -> EncodeResult<'ctx> {
     encode_choose_value(ctx, encode_expr(ctx, expr, env)?)
@@ -99,62 +98,62 @@ pub fn encode_choose<'ctx>(
 
 pub fn encode_expr<'ctx>(
     ctx: &'ctx Context,
-    expr: &AlMetaExpr,
+    expr: &Expr,
     env: &SymEnv<'ctx>,
 ) -> EncodeResult<'ctx> {
     match expr {
-        AlMetaExpr::Param(name) => Ok(env.get(name).clone()),
-        AlMetaExpr::NatLit(n) => Ok(SymValue::nat_const(ctx, *n)),
-        AlMetaExpr::IntLit(n) => Ok(SymValue::int_const(ctx, *n)),
-        AlMetaExpr::ValTypeLit(vt) => Ok(SymValue::ValType(*vt)),
-        AlMetaExpr::SignLit(sx) => Ok(SymValue::Sign(*sx)),
-        AlMetaExpr::BinOpLit(op) => Ok(SymValue::BinOp(*op)),
-        AlMetaExpr::EmptyOpt => Ok(SymValue::Opt(None)),
-        AlMetaExpr::SomeOpt(inner) => Ok(SymValue::Opt(Some(Box::new(encode_expr(
+        Expr::VarE(name) => Ok(env.get(name).clone()),
+        Expr::NatLit(n) => Ok(SymValue::nat_const(ctx, *n)),
+        Expr::IntLit(n) => Ok(SymValue::int_const(ctx, *n)),
+        Expr::ValTypeLit(vt) => Ok(SymValue::ValType(*vt)),
+        Expr::SignLit(sx) => Ok(SymValue::Sign(*sx)),
+        Expr::BinOpLit(op) => Ok(SymValue::BinOp(*op)),
+        Expr::EmptyOpt => Ok(SymValue::Opt(None)),
+        Expr::SomeOpt(inner) => Ok(SymValue::Opt(Some(Box::new(encode_expr(
             ctx, inner, env,
         )?)))),
-        AlMetaExpr::EmptyList => Ok(SymValue::List(vec![])),
-        AlMetaExpr::SingletonList(inner) => {
+        Expr::EmptyList => Ok(SymValue::List(vec![])),
+        Expr::SingletonList(inner) => {
             Ok(SymValue::List(vec![encode_expr(ctx, inner, env)?]))
         }
-        AlMetaExpr::IntCoerce(inner) => {
+        Expr::IntCoerce(inner) => {
             Ok(SymValue::Int(int_coerce(ctx, encode_expr(ctx, inner, env)?)?))
         }
-        AlMetaExpr::NatCoerce(inner) => nat_coerce(ctx, encode_expr(ctx, inner, env)?),
-        AlMetaExpr::RatCoerce(inner) => as_rat(ctx, encode_expr(ctx, inner, env)?),
-        AlMetaExpr::TruncZ(inner) => {
+        Expr::NatCoerce(inner) => nat_coerce(ctx, encode_expr(ctx, inner, env)?),
+        Expr::RatCoerce(inner) => as_rat(ctx, encode_expr(ctx, inner, env)?),
+        Expr::TruncZ(inner) => {
             let r = as_rat_pair(encode_expr(ctx, inner, env)?)?;
             Ok(SymValue::Int(trunc_rat(ctx, r)))
         }
-        AlMetaExpr::Add(a, b) => sym_add(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::Sub(a, b) => sym_sub(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::Mul(a, b) => sym_mul(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::Div(a, b) => sym_div(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::Mod(a, b) => sym_mod(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::Rem(a, b) => sym_rem(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::Shl(a, b) => sym_shl(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::BitAnd(a, b) => {
+        Expr::Add(a, b) => sym_add(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::Sub(a, b) => sym_sub(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::Mul(a, b) => sym_mul(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::Div(a, b) => sym_div(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::Mod(a, b) => sym_mod(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::Rem(a, b) => sym_rem(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::Shl(a, b) => sym_shl(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::BitAnd(a, b) => {
             sym_bitand(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?)
         }
-        AlMetaExpr::BitOr(a, b) => {
+        Expr::BitOr(a, b) => {
             sym_bitor(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?)
         }
-        AlMetaExpr::BitXor(a, b) => {
+        Expr::BitXor(a, b) => {
             sym_bitxor(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?)
         }
-        AlMetaExpr::Pow(a, b) => sym_pow(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaExpr::Neg(inner) => Ok(SymValue::Int(
+        Expr::Pow(a, b) => sym_pow(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::Neg(inner) => Ok(SymValue::Int(
             int_coerce(ctx, encode_expr(ctx, inner, env)?)?.bvneg(),
         )),
-        AlMetaExpr::Choose(inner) => encode_choose(ctx, inner, env),
-        AlMetaExpr::BinOpSignOf(inner) => Ok(SymValue::Sign(binop_sign_value(as_binop(
+        Expr::Choose(inner) => encode_choose(ctx, inner, env),
+        Expr::BinOpSignOf(inner) => Ok(SymValue::Sign(binop_sign_value(as_binop(
             encode_expr(ctx, inner, env)?,
         )?))),
-        AlMetaExpr::Call(name, args) => encode_call(ctx, name, args, env),
-        AlMetaExpr::OptionalLen(inner) => {
+        Expr::Call(name, args) => encode_call(ctx, name, args, env),
+        Expr::OptionalLen(inner) => {
             Ok(sym_optional_len(ctx, encode_expr(ctx, inner, env)?))
         }
-        AlMetaExpr::TopValue(nt) => Ok(SymValue::NumType(*nt)),
+        Expr::TopValue(nt) => Ok(SymValue::NumType(*nt)),
     }
 }
 
@@ -170,15 +169,6 @@ fn sym_optional_len<'ctx>(ctx: &'ctx Context, v: SymValue<'ctx>) -> SymValue<'ct
     }
 }
 
-/// Evaluate an `AlMetaExpr` in a step template (Assert / Let / If / Push).
-pub fn encode_meta_expr<'ctx>(
-    ctx: &'ctx Context,
-    expr: &AlMetaExpr,
-    env: &SymEnv<'ctx>,
-) -> EncodeResult<'ctx> {
-    encode_expr(ctx, expr, env)
-}
-
 #[derive(Clone)]
 pub struct SymEnv<'ctx> {
     vars: Vec<(&'static str, SymValue<'ctx>)>,
@@ -189,7 +179,7 @@ impl<'ctx> SymEnv<'ctx> {
         Self { vars: Vec::new() }
     }
 
-    pub fn new(params: &[AlMetaParam], args: &[(&str, SymValue<'ctx>)]) -> Self {
+    pub fn new(params: &[Param], args: &[(&str, SymValue<'ctx>)]) -> Self {
         let mut vars = Vec::new();
         for param in params {
             let val = args
@@ -240,7 +230,7 @@ impl<'ctx> SymValue<'ctx> {
 
 fn encode_fn_steps<'ctx>(
     ctx: &'ctx Context,
-    steps: &[AlMetaFnStep],
+    steps: &[Instr],
     env: &mut SymEnv<'ctx>,
 ) -> EncodeResult<'ctx> {
     encode_fn_steps_from(ctx, steps, env, 0)
@@ -248,7 +238,7 @@ fn encode_fn_steps<'ctx>(
 
 fn encode_fn_steps_from<'ctx>(
     ctx: &'ctx Context,
-    steps: &[AlMetaFnStep],
+    steps: &[Instr],
     env: &mut SymEnv<'ctx>,
     idx: usize,
 ) -> EncodeResult<'ctx> {
@@ -263,40 +253,43 @@ fn encode_fn_steps_from<'ctx>(
 
 fn encode_fn_step<'ctx>(
     ctx: &'ctx Context,
-    step: &AlMetaFnStep,
+    step: &Instr,
     env: &mut SymEnv<'ctx>,
-    steps: &[AlMetaFnStep],
+    steps: &[Instr],
     idx: usize,
 ) -> Result<Option<SymValue<'ctx>>, EncodeError> {
     match step {
-        AlMetaFnStep::Return(expr) => Ok(Some(encode_expr(ctx, expr, env)?)),
-        AlMetaFnStep::Fail => Err(EncodeError::Fail),
-        AlMetaFnStep::Assert(pred) => {
+        Instr::ReturnI(expr) => Ok(Some(encode_expr(ctx, expr, env)?)),
+        Instr::FailI => Err(EncodeError::Fail),
+        Instr::AssertI(InstrCond::Pred(pred)) => {
             match encode_pred_concrete(ctx, pred, env)? {
                 Some(false) => return Err(EncodeError::Assert),
                 Some(true) | None => {}
             }
             Ok(None)
         }
-        AlMetaFnStep::Let { name, expr } => {
+        Instr::AssertI(InstrCond::Expr(_)) => panic!("expr assert in func body"),
+        Instr::LetI {
+            lhs: LetLhs::Var(name),
+            expr,
+        } => {
             env.bind(name, encode_expr(ctx, expr, env)?);
             Ok(None)
         }
-        AlMetaFnStep::LetBinOpCase {
-            case,
-            sx_name,
-            binop,
+        Instr::LetI {
+            lhs: LetLhs::BinOpCase(case, sx_name),
+            expr: binop,
         } => {
             let sx = binop_sign(encode_expr(ctx, binop, env)?, *case)?;
             env.bind(sx_name, SymValue::Sign(sx));
             Ok(None)
         }
-        AlMetaFnStep::If {
-            cond,
+        Instr::IfI {
+            cond: InstrCond::Pred(pred),
             then_steps,
             else_steps,
         } => {
-            if let Some(b) = encode_pred_concrete(ctx, cond, env)? {
+            if let Some(b) = encode_pred_concrete(ctx, pred, env)? {
                 if b {
                     return encode_fn_steps(ctx, then_steps, env).map(Some);
                 }
@@ -305,7 +298,7 @@ fn encode_fn_step<'ctx>(
                 }
                 return encode_fn_steps(ctx, else_steps, env).map(Some);
             }
-            let c = encode_pred_z3(ctx, cond, env)?;
+            let c = encode_pred_z3(ctx, pred, env)?;
             if let Some(b) = z3_bool_definite(&c) {
                 if b {
                     return encode_fn_steps(ctx, then_steps, env).map(Some);
@@ -328,26 +321,30 @@ fn encode_fn_step<'ctx>(
                 Ok(Some(sym_if_else(ctx, c, then_v, else_v)))
             }
         }
+        Instr::IfI {
+            cond: InstrCond::Expr(_), ..
+        } => panic!("expr if in func body"),
+        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI => panic!("rule instr in func body"),
     }
 }
 
 fn encode_pred_concrete<'ctx>(
     ctx: &'ctx Context,
-    pred: &AlMetaPred,
+    pred: &Pred,
     env: &SymEnv<'ctx>,
 ) -> Result<Option<bool>, EncodeError> {
     match pred {
-        AlMetaPred::Eq(a, b) => {
+        Pred::Eq(a, b) => {
             let av = encode_expr(ctx, a, env)?;
             let bv = encode_expr(ctx, b, env)?;
             Ok(sym_eq_concrete(av, bv))
         }
-        AlMetaPred::Lt(a, b) => {
+        Pred::Lt(a, b) => {
             let av = encode_expr(ctx, a, env)?;
             let bv = encode_expr(ctx, b, env)?;
             Ok(sym_cmp_lt_concrete(&av, &bv))
         }
-        AlMetaPred::Le(a, b) => {
+        Pred::Le(a, b) => {
             let av = encode_expr(ctx, a, env)?;
             let bv = encode_expr(ctx, b, env)?;
             match (sym_cmp_lt_concrete(&av, &bv), sym_eq_concrete(av, bv)) {
@@ -355,25 +352,25 @@ fn encode_pred_concrete<'ctx>(
                 _ => Ok(None),
             }
         }
-        AlMetaPred::And(a, b) => match (
+        Pred::And(a, b) => match (
             encode_pred_concrete(ctx, a, env)?,
             encode_pred_concrete(ctx, b, env)?,
         ) {
             (Some(x), Some(y)) => Ok(Some(x && y)),
             _ => Ok(None),
         },
-        AlMetaPred::OptIsNone(expr) => Ok(sym_opt_is_none_concrete(
+        Pred::OptIsNone(expr) => Ok(sym_opt_is_none_concrete(
             &encode_expr(ctx, expr, env)?,
         )),
-        AlMetaPred::TypeIsInn(expr) => Ok(Some(matches!(
+        Pred::TypeIsInn(expr) => Ok(Some(matches!(
             encode_expr(ctx, expr, env)?,
             SymValue::NumType(_)
         ))),
-        AlMetaPred::TypeIsFnn(_) => Ok(Some(false)),
-        AlMetaPred::BinOpEq(expr, op) => Ok(Some(
+        Pred::TypeIsFnn(_) => Ok(Some(false)),
+        Pred::BinOpEq(expr, op) => Ok(Some(
             as_binop(encode_expr(ctx, expr, env)?)? == *op,
         )),
-        AlMetaPred::BinOpCaseIs(expr, case) => Ok(Some(binop_case(
+        Pred::BinOpCaseIs(expr, case) => Ok(Some(binop_case(
             as_binop(encode_expr(ctx, expr, env)?)?,
             *case,
         ))),
@@ -444,13 +441,13 @@ fn sym_opt_is_none_concrete<'ctx>(v: &SymValue<'ctx>) -> Option<bool> {
 
 fn encode_pred_z3<'ctx>(
     ctx: &'ctx Context,
-    pred: &AlMetaPred,
+    pred: &Pred,
     env: &SymEnv<'ctx>,
 ) -> Result<Bool<'ctx>, EncodeError> {
     match pred {
-        AlMetaPred::Eq(a, b) => sym_eq_z3(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaPred::Lt(a, b) => sym_lt_z3(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        AlMetaPred::Le(a, b) => {
+        Pred::Eq(a, b) => sym_eq_z3(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Pred::Lt(a, b) => sym_lt_z3(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Pred::Le(a, b) => {
             let av = encode_expr(ctx, a, env)?;
             let bv = encode_expr(ctx, b, env)?;
             Ok(Bool::or(
@@ -458,24 +455,24 @@ fn encode_pred_z3<'ctx>(
                 &[&sym_lt_z3(ctx, av.clone(), bv.clone())?, &sym_eq_z3(ctx, av, bv)?],
             ))
         }
-        AlMetaPred::And(a, b) => Ok(Bool::and(
+        Pred::And(a, b) => Ok(Bool::and(
             ctx,
             &[
                 &encode_pred_z3(ctx, a, env)?,
                 &encode_pred_z3(ctx, b, env)?,
             ],
         )),
-        AlMetaPred::OptIsNone(expr) => Ok(sym_is_empty(ctx, &encode_expr(ctx, expr, env)?)),
-        AlMetaPred::TypeIsInn(expr) => Ok(Bool::from_bool(
+        Pred::OptIsNone(expr) => Ok(sym_is_empty(ctx, &encode_expr(ctx, expr, env)?)),
+        Pred::TypeIsInn(expr) => Ok(Bool::from_bool(
             ctx,
             matches!(encode_expr(ctx, expr, env)?, SymValue::NumType(_)),
         )),
-        AlMetaPred::TypeIsFnn(_) => Ok(Bool::from_bool(ctx, false)),
-        AlMetaPred::BinOpEq(expr, op) => Ok(Bool::from_bool(
+        Pred::TypeIsFnn(_) => Ok(Bool::from_bool(ctx, false)),
+        Pred::BinOpEq(expr, op) => Ok(Bool::from_bool(
             ctx,
             as_binop(encode_expr(ctx, expr, env)?)? == *op,
         )),
-        AlMetaPred::BinOpCaseIs(expr, case) => Ok(Bool::from_bool(
+        Pred::BinOpCaseIs(expr, case) => Ok(Bool::from_bool(
             ctx,
             binop_case(as_binop(encode_expr(ctx, expr, env)?)?, *case),
         )),
@@ -925,14 +922,14 @@ fn as_nat_u32_concrete<'ctx>(v: &SymValue<'ctx>) -> Result<u32, EncodeError> {
 }
 
 fn bind_sym_fn_args<'ctx>(
-    def: &AlMetaFnDef,
+    def: &FuncA,
     bound: Vec<SymValue<'ctx>>,
 ) -> Result<Vec<(&'static str, SymValue<'ctx>)>, EncodeError> {
     assert_eq!(
         def.params.len(),
         bound.len(),
         "arg count mismatch for ${}",
-        def.name
+        def.id
     );
     def.params
         .iter()
@@ -941,13 +938,13 @@ fn bind_sym_fn_args<'ctx>(
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn coerce_sym<'ctx>(ty: AlMetaParamType, val: SymValue<'ctx>) -> EncodeResult<'ctx> {
+fn coerce_sym<'ctx>(ty: ParamType, val: SymValue<'ctx>) -> EncodeResult<'ctx> {
     Ok(match ty {
-        AlMetaParamType::Nat | AlMetaParamType::Int | AlMetaParamType::Any => val,
-        AlMetaParamType::ValType => SymValue::ValType(as_valtype(val)?),
-        AlMetaParamType::NumType => SymValue::NumType(as_numtype(val)?),
-        AlMetaParamType::Sign => SymValue::Sign(as_sign(val)?),
-        AlMetaParamType::BinOp => SymValue::BinOp(as_binop(val)?),
+        ParamType::Nat | ParamType::Int | ParamType::Any => val,
+        ParamType::ValType => SymValue::ValType(as_valtype(val)?),
+        ParamType::NumType => SymValue::NumType(as_numtype(val)?),
+        ParamType::Sign => SymValue::Sign(as_sign(val)?),
+        ParamType::BinOp => SymValue::BinOp(as_binop(val)?),
     })
 }
 
@@ -1062,7 +1059,7 @@ fn concretize_binop_list<'ctx>(v: SymValue<'ctx>) -> Result<Option<u32>, EncodeE
 mod tests {
     use super::*;
     use crate::sema::defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
-    use crate::sema::eval::meta_step::exec_meta_steps_concrete;
+    use crate::sema::eval::instr::exec_instrs_concrete;
     use crate::semantics::z3_context;
 
     fn meta_binop_concrete(
@@ -1072,7 +1069,7 @@ mod tests {
         i_2: u32,
     ) -> Option<u32> {
         let mut stack = vec![i_1 as i32, i_2 as i32];
-        let trap = exec_meta_steps_concrete(&step_pure_binop_template(nt, binop), &mut stack);
+        let trap = exec_instrs_concrete(&step_pure_binop_template(nt, binop), &mut stack);
         if trap {
             None
         } else {
