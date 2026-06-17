@@ -1,7 +1,7 @@
 //! Concrete evaluator for meta-level AL `$fn` definitions.
 
-use super::al_defs::{lookup_fn, BinOpCase, NumType, Sign, ValType, WasmBinOp};
-use super::meta::{
+use super::super::defs::{lookup_fn, BinOpCase, NumType, Sign, ValType, WasmBinOp};
+use super::super::meta::{
     AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
 };
 

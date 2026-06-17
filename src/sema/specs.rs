@@ -1,9 +1,9 @@
 //! Per-op AL spec definitions (non-binop flat specs; binops use meta AL).
 
-use super::al_defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
+use super::defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
 use super::ir::{AlExpr, AlSpec, AlStep};
 use super::meta::AlMetaStep;
-use super::super::SemOp;
+use crate::semantics::SemOp;
 use std::borrow::Cow;
 
 fn steps_load() -> Vec<AlStep> {

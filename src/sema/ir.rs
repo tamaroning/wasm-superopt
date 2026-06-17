@@ -1,6 +1,6 @@
 //! Flat AL IR for hand-written instruction specs (not binop meta encoding).
 
-pub use super::al_defs::BinOpKind;
+pub use super::defs::BinOpKind;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlSpec {

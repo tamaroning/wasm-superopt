@@ -3,7 +3,7 @@
 //! Types and `$fn` bodies from `binop.al` live here. Step templates use
 //! [`AlMetaExpr`](super::meta::AlMetaExpr) for primitive `binop` (`+`, `-`, `*`, …).
 //! Lowering to flat [`AlSpec`](super::ir::AlSpec) is for hand-written step specs only;
-//! binop `SemOp`s use the meta encoder ([`super::encode_sym`], [`super::exec_step_z3`]).
+//! binop `SemOp`s use the meta encoder ([`super::symbolic::meta_fn`], [`super::symbolic::meta_step`]).
 
 #![allow(dead_code)] // mirrors binop.al; not every def is wired to instantiate yet
 

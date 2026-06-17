@@ -2,13 +2,13 @@
 //!
 //! Types for representing SpecTec AL steps and expressions before lowering to
 //! flat [`AlSpec`](super::ir::AlSpec). Definitions from `binop.al` live in
-//! [`super::al_defs`].
+//! [`super::defs`].
 //!
 //! [`AlMetaExpr`] arithmetic/bitwise variants (`Add`, `Sub`, `Mul`, `Mod`, `Rem`,
 //! `Shl`, `BitAnd`, `BitOr`, …) encode only what `Language.md` treats as primitive
 //! `binop` / `unop` — not thin spectec helper `$fn`s like `$iadd_`.
 
-pub use super::al_defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp};
+pub use super::defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp};
 
 /// Argument to a meta-level `$fn(...)` call.
 #[derive(Clone, Debug, PartialEq, Eq)]

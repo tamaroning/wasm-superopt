@@ -2,10 +2,10 @@
 
 use std::ops::{Add, Mul, Sub};
 
-use super::al_defs::lookup_fn;
-use super::al_defs::{NumType, Sign, WasmBinOp};
-use super::super::I32_BITS;
-use super::meta::{
+use super::super::defs::lookup_fn;
+use super::super::defs::{NumType, Sign, WasmBinOp};
+use crate::semantics::I32_BITS;
+use super::super::meta::{
     AlMetaArg, AlMetaExpr, AlMetaFnDef, AlMetaFnStep, AlMetaParam, AlMetaParamType, AlMetaPred,
     BinOpCase, ValType,
 };
@@ -85,24 +85,6 @@ pub fn sym_is_empty<'ctx>(ctx: &'ctx Context, v: &SymValue<'ctx>) -> Bool<'ctx> 
         SymValue::Opt(Some(_)) => Bool::from_bool(ctx, false),
         SymValue::Partial { empty, .. } => empty.clone(),
         other => panic!("sym_is_empty on {other:?}"),
-    }
-}
-
-/// Spectec `choose` — extract singleton nat BV from list/opt.
-///
-/// Empty list/opt return a dummy zero; callers that branch on `sym_is_empty`
-/// must use `is_empty.ite(&zero, &sym_choose_nat(...))` (see `exec_step_z3`).
-pub fn sym_choose_nat<'ctx>(ctx: &'ctx Context, v: SymValue<'ctx>) -> BV<'ctx> {
-    let zero = BV::from_u64(ctx, 0, I32_BITS);
-    match v {
-        SymValue::Opt(None) => zero,
-        SymValue::List(items) if items.is_empty() => zero,
-        SymValue::Opt(Some(inner)) => as_nat_bv_direct(ctx, *inner),
-        SymValue::List(items) if items.len() == 1 => as_nat_bv_direct(ctx, items[0].clone()),
-        SymValue::Partial { empty, value } => {
-            empty.ite(&zero, &as_nat_bv_direct(ctx, *value))
-        }
-        other => panic!("sym_choose_nat on {other:?}"),
     }
 }
 
@@ -1032,7 +1014,7 @@ pub fn encode_binop_stack<'ctx>(
     i_1: BV<'ctx>,
     i_2: BV<'ctx>,
 ) -> Result<SymValue<'ctx>, EncodeError> {
-    use super::al_defs::binop_def;
+    use super::super::defs::binop_def;
     encode_fn(
         ctx,
         &binop_def(),
@@ -1079,8 +1061,8 @@ fn concretize_binop_list<'ctx>(v: SymValue<'ctx>) -> Result<Option<u32>, EncodeE
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::al::al_defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
-    use crate::semantics::al::exec_step_concrete::exec_meta_steps_concrete;
+    use crate::sema::defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
+    use crate::sema::eval::meta_step::exec_meta_steps_concrete;
     use crate::semantics::z3_context;
 
     fn meta_binop_concrete(

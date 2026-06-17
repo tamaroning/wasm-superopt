@@ -1,6 +1,7 @@
 //! Loop/jump-free WebAssembly basic blocks → Acyclic E-graph (AEG) optimization pipeline.
 
 mod lang;
+mod sema;
 mod semantics;
 mod stack;
 mod synthesis;

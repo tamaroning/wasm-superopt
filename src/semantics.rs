@@ -3,9 +3,7 @@
 //! Operand stack holds i32 values only. Locals and linear memory are implicit machine
 //! state threaded through effectful instructions (mirroring Wasm, not the egg DAG token).
 
-mod al;
-
-use al::{
+use crate::sema::{
     STRAIGHT_LINE_EMBED, al_spec_for, derive_inst_spec, derive_meta_binop_spec,
     exec_al_concrete, exec_al_z3, exec_meta_steps_concrete, exec_meta_steps_z3, meta_steps_for,
     format_al_pretty, format_meta_binop_pretty, NumType, Sign, WasmBinOp,

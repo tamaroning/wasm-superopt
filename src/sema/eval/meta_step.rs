@@ -1,7 +1,7 @@
 //! Concrete executor for meta-level [`AlMetaStep`](super::meta::AlMetaStep) templates.
 
-use super::eval::{eval_meta_expr, AlValue, MetaEnv};
-use super::meta::{AlMetaExpr, AlMetaStep, PopPattern};
+use super::meta_fn::{eval_meta_expr, AlValue, MetaEnv};
+use super::super::meta::{AlMetaExpr, AlMetaStep, PopPattern};
 
 fn push_stack(stack: &mut Vec<i32>, val: AlValue) {
     match val {
@@ -81,7 +81,7 @@ pub fn exec_meta_steps_concrete(steps: &[AlMetaStep], stack: &mut Vec<i32>) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::al::al_defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
+    use crate::sema::defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
 
     fn run_binop(binop: WasmBinOp, i_1: u32, i_2: u32) -> Option<u32> {
         let mut stack = vec![i_1 as i32, i_2 as i32];

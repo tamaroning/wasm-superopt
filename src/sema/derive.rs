@@ -1,7 +1,7 @@
 //! Derive static `InstSpec` from AL definitions.
 
-use super::super::{InstSpec, StackTy};
-use super::al_defs::WasmBinOp;
+use crate::semantics::{InstSpec, StackTy};
+use super::defs::WasmBinOp;
 use super::ir::{AlCond, AlExpr, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
