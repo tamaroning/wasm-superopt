@@ -28,7 +28,6 @@ pub enum SemOp {
     I32DivU,
     I32DivS,
     I32Shl,
-    Drop,
 }
 
 impl SemOp {
@@ -40,7 +39,6 @@ impl SemOp {
             SemOp::I32DivU => "i32.div_u",
             SemOp::I32DivS => "i32.div_s",
             SemOp::I32Shl => "i32.shl",
-            SemOp::Drop => "drop",
         }
     }
 }
@@ -60,11 +58,6 @@ pub fn spec_for(op: &SemOp) -> InstSpec {
         SemOp::I32Shl => derive_rule_binop_spec(WasmBinOp::Shl),
         SemOp::I32DivU => derive_rule_binop_spec(WasmBinOp::Div(Sign::U)),
         SemOp::I32DivS => derive_rule_binop_spec(WasmBinOp::Div(Sign::S)),
-        SemOp::Drop => InstSpec {
-            pops: &[StackTy::I32],
-            pushes: &[],
-            can_trap: false,
-        },
         _ => {
             let al = al_spec_for(op);
             derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
@@ -90,7 +83,6 @@ pub fn concrete_ops() -> Vec<SemOp> {
         SemOp::I32DivU,
         SemOp::I32DivS,
         SemOp::I32Shl,
-        SemOp::Drop,
     ];
     for c in [0, 1, 2, 3, 4, 8, 16, -1, i32::MIN, i32::MAX] {
         ops.push(SemOp::I32Const(c));
@@ -130,10 +122,6 @@ pub struct ConcreteResult {
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
     if let Some(steps) = rule_instrs_for(op) {
         return exec_instrs_concrete(&steps, stack);
-    }
-    if matches!(op, SemOp::Drop) {
-        stack.pop();
-        return false;
     }
     let al = al_spec_for(op);
     exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
@@ -361,10 +349,6 @@ pub fn exec_op<'ctx>(
 ) -> Bool<'ctx> {
     if let Some(steps) = rule_instrs_for(op) {
         return exec_instrs_z3(ctx, &steps, stack, state, touches, &STRAIGHT_LINE_EMBED);
-    }
-    if matches!(op, SemOp::Drop) {
-        stack.pop();
-        return Bool::from_bool(ctx, false);
     }
     let al = al_spec_for(op);
     exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)
@@ -606,12 +590,9 @@ pub fn print_semantics_table() {
             spec.pushes.len(),
             trap,
         );
-        for line in match op {
-            SemOp::Drop => "pop _".to_string(),
-            _ => match binop_wasm(&op) {
-                Some((nt, binop)) => format_rule_binop_pretty(nt, binop),
-                None => format_al_pretty(&al_spec_for(&op)),
-            },
+        for line in match binop_wasm(&op) {
+            Some((nt, binop)) => format_rule_binop_pretty(nt, binop),
+            None => format_al_pretty(&al_spec_for(&op)),
         }
         .lines()
         {
@@ -647,10 +628,10 @@ mod tests {
     #[test]
     fn same_stack_effect_rejects_invalid_pairs() {
         let input = vec![StackTy::I32];
-        let valid = vec![SemOp::Drop];
-        let invalid = vec![SemOp::I32Add];
-        assert!(!same_stack_effect(&input, &valid, &invalid));
-        assert!(!same_stack_effect(&input, &invalid, &invalid));
+        let pushes = vec![SemOp::I32Const(0)];
+        let underflow = vec![SemOp::I32Add];
+        assert!(!same_stack_effect(&input, &pushes, &underflow));
+        assert!(!same_stack_effect(&input, &underflow, &underflow));
     }
 
     #[test]

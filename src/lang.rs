@@ -11,10 +11,6 @@ define_language! {
         "i32.div_s" = I32DivS([Id; 2]),
         "i32.shl"   = I32Shl([Id; 2]),
         Symbol(Symbol),
-        "init" = Init,
-        "state_seq" = StateSeq([Id; 2]),
-        "drop" = Drop([Id; 2]),
-        "call" = Call([Id; 2]),
     }
 }
 

@@ -14,7 +14,6 @@ pub enum WasmOp {
     I32DivU,
     I32DivS,
     I32Shl,
-    Drop,
 }
 
 impl From<&SemOp> for WasmOp {
@@ -26,7 +25,6 @@ impl From<&SemOp> for WasmOp {
             SemOp::I32DivU => WasmOp::I32DivU,
             SemOp::I32DivS => WasmOp::I32DivS,
             SemOp::I32Shl => WasmOp::I32Shl,
-            SemOp::Drop => WasmOp::Drop,
         }
     }
 }
@@ -40,7 +38,6 @@ impl Display for WasmOp {
             WasmOp::I32DivU => write!(f, "i32.div_u"),
             WasmOp::I32DivS => write!(f, "i32.div_s"),
             WasmOp::I32Shl => write!(f, "i32.shl"),
-            WasmOp::Drop => write!(f, "drop"),
         }
     }
 }
@@ -56,17 +53,13 @@ pub fn format_wasm_block(ops: &[WasmOp]) -> String {
 pub struct StackToDag {
     expr: RecExpr<WasmLang>,
     stack: Vec<Id>,
-    state: Id,
 }
 
 impl StackToDag {
     pub fn new() -> Self {
-        let mut expr = RecExpr::default();
-        let state = expr.add(WasmLang::Init);
         Self {
-            expr,
+            expr: RecExpr::default(),
             stack: Vec::new(),
-            state,
         }
     }
 
@@ -78,7 +71,6 @@ impl StackToDag {
             WasmOp::I32DivU => self.apply_sem(&SemOp::I32DivU),
             WasmOp::I32DivS => self.apply_sem(&SemOp::I32DivS),
             WasmOp::I32Shl => self.apply_sem(&SemOp::I32Shl),
-            WasmOp::Drop => self.apply_sem(&SemOp::Drop),
         }
     }
 
@@ -120,10 +112,6 @@ impl StackToDag {
                 let a = self.stack.pop().expect("i32.shl");
                 self.stack.push(self.expr.add(WasmLang::I32Shl([a, b])));
             }
-            SemOp::Drop => {
-                let value = self.stack.pop().expect("drop");
-                self.state = self.expr.add(WasmLang::Drop([self.state, value]));
-            }
         }
     }
 
@@ -146,21 +134,12 @@ impl StackToDag {
             .collect()
     }
 
-    fn seed_state_symbol(&mut self) {
-        let id = self.expr.add(WasmLang::Symbol("?s".parse().unwrap()));
-        self.state = id;
-    }
-
     /// Build an s-expression pattern for the value on top of the operand stack.
     pub fn pattern_from_stack_top(&self) -> Option<String> {
         let id = *self.stack.last()?;
         Some(enode_to_pattern(&self.expr, id))
     }
 
-    /// Pattern for the current implicit state token (after effectful sequence).
-    pub fn pattern_from_state(&self) -> Option<String> {
-        Some(format!("{}", self.expr[self.state]))
-    }
 }
 
 pub fn stack_to_dag(ops: &[WasmOp]) -> RecExpr<WasmLang> {
@@ -184,7 +163,6 @@ fn enode_to_pattern(expr: &RecExpr<WasmLang>, id: Id) -> String {
 
 pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<String> {
     let mut dag = StackToDag::new();
-    dag.seed_state_symbol();
     for _ in input {
         dag.seed_symbolic_i32(1);
     }
@@ -194,8 +172,6 @@ pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<Strin
     let out = crate::semantics::simulate_stack_effect(input, ops)?;
     if out.len() == 1 {
         dag.pattern_from_stack_top()
-    } else if out.is_empty() {
-        dag.pattern_from_state()
     } else {
         None
     }

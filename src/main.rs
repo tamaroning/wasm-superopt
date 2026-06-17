@@ -88,24 +88,6 @@ fn run_demos(rules: &[Rewrite<WasmLang, ConstantFolding>]) {
     );
 
     run_example_ops(
-        "Pure Drop Elimination",
-        &[
-            WasmOp::I32Const(3),
-            WasmOp::I32Const(4),
-            WasmOp::I32Add,
-            WasmOp::Drop,
-        ],
-        rules,
-    );
-
-    run_example(
-        "Impure Drop (preserved)",
-        "call f; drop",
-        &parse_dag("(drop init (call f init))"),
-        rules,
-    );
-
-    run_example_ops(
         "Self Division (non-zero constant)",
         &[WasmOp::I32Const(42), WasmOp::I32Const(42), WasmOp::I32DivU],
         rules,
