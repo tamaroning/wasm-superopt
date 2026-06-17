@@ -105,14 +105,3 @@ pub fn derive_rule_binop_spec(binop: WasmBinOp) -> InstSpec {
         can_trap: binop.is_partial(),
     }
 }
-
-#[cfg(test)]
-pub(crate) const POPS_0_TEST: &[StackTy] = POPS_0;
-#[cfg(test)]
-pub(crate) const POPS_1_TEST: &[StackTy] = POPS_1;
-#[cfg(test)]
-pub(crate) const POPS_2_TEST: &[StackTy] = POPS_2;
-#[cfg(test)]
-pub(crate) const PUSHES_0_TEST: &[StackTy] = PUSHES_0;
-#[cfg(test)]
-pub(crate) const PUSHES_1_TEST: &[StackTy] = PUSHES_1;
