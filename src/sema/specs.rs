@@ -7,7 +7,7 @@ use crate::semantics::SemOp;
 use std::borrow::Cow;
 
 /// Meta-level `Step_pure/...` template for an op, if any.
-pub fn rule_instrs_for(op: &SemOp) -> Option<Vec<Instr>> {
+fn rule_instrs_for(op: &SemOp) -> Option<Vec<Instr>> {
     let (nt, binop) = match op {
         SemOp::I32Add => (NumType::I32, WasmBinOp::Add),
         SemOp::I32Mul => (NumType::I32, WasmBinOp::Mul),

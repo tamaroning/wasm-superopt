@@ -8,24 +8,23 @@
 //! - [`eval::instr`](eval/instr.rs) / [`symbolic::instr`](symbolic/instr.rs) — `Instr` templates
 //! - [`eval::alspec`](eval/alspec.rs) / [`symbolic::alspec`](symbolic/alspec.rs) — flat [`AlSpec`](ir::AlSpec)
 
+mod ast;
 mod defs;
 mod derive;
 mod env;
 mod eval;
 mod ir;
-mod ast;
 mod policy;
 mod specs;
 mod symbolic;
 mod util;
 
+pub use ast::format_rule_binop_pretty;
+pub use defs::{NumType, Sign, WasmBinOp};
 pub use derive::{derive_inst_spec, derive_rule_binop_spec};
 pub use eval::alspec::exec_al_concrete;
-pub use eval::instr::exec_instrs_concrete;
+pub use ir::format_al_pretty;
+pub use policy::STRAIGHT_LINE_EMBED;
+pub use specs::al_spec_for;
 pub use symbolic::alspec::exec_al_z3;
 pub use symbolic::instr::exec_instrs_z3;
-pub use policy::STRAIGHT_LINE_EMBED;
-pub use specs::{al_spec_for, rule_instrs_for};
-pub use defs::{NumType, Sign, WasmBinOp};
-pub use ir::format_al_pretty;
-pub use ast::format_rule_binop_pretty;
