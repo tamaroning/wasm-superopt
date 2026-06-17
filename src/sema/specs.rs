@@ -6,25 +6,6 @@ use super::ast::Instr;
 use crate::semantics::SemOp;
 use std::borrow::Cow;
 
-fn steps_load() -> Vec<AlStep> {
-    vec![AlStep::Pop("addr"), AlStep::Push(AlExpr::MemLoad("addr"))]
-}
-
-fn steps_store() -> Vec<AlStep> {
-    vec![
-        AlStep::Pop("val"),
-        AlStep::Pop("addr"),
-        AlStep::StoreMem {
-            addr: "addr",
-            val: "val",
-        },
-    ]
-}
-
-fn steps_drop() -> Vec<AlStep> {
-    vec![AlStep::Pop("_")]
-}
-
 /// Meta-level `Step_pure/...` template for an op, if any.
 pub fn rule_instrs_for(op: &SemOp) -> Option<Vec<Instr>> {
     let (nt, binop) = match op {
@@ -46,20 +27,6 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         SemOp::I32Add | SemOp::I32Mul | SemOp::I32Shl | SemOp::I32DivU | SemOp::I32DivS => {
             panic!("binop {op:?} uses meta AL (Step_pure/binop), not flat AlSpec")
         }
-        SemOp::LocalGet(i) => Cow::Owned(AlSpec {
-            steps: vec![AlStep::Push(AlExpr::LocalGet(*i))],
-        }),
-        SemOp::LocalSet(i) => Cow::Owned(AlSpec {
-            steps: vec![AlStep::Pop("v"), AlStep::SetLocal { idx: *i, var: "v" }],
-        }),
-        SemOp::I32Load => Cow::Owned(AlSpec {
-            steps: steps_load(),
-        }),
-        SemOp::I32Store => Cow::Owned(AlSpec {
-            steps: steps_store(),
-        }),
-        SemOp::Drop => Cow::Owned(AlSpec {
-            steps: steps_drop(),
-        }),
+        _ => panic!("{op:?} has no flat AlSpec"),
     }
 }

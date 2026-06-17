@@ -28,10 +28,6 @@ pub enum SemOp {
     I32DivU,
     I32DivS,
     I32Shl,
-    LocalGet(u32),
-    LocalSet(u32),
-    I32Load,
-    I32Store,
     Drop,
 }
 
@@ -44,10 +40,6 @@ impl SemOp {
             SemOp::I32DivU => "i32.div_u",
             SemOp::I32DivS => "i32.div_s",
             SemOp::I32Shl => "i32.shl",
-            SemOp::LocalGet(_) => "local.get",
-            SemOp::LocalSet(_) => "local.set",
-            SemOp::I32Load => "i32.load",
-            SemOp::I32Store => "i32.store",
             SemOp::Drop => "drop",
         }
     }
@@ -57,8 +49,6 @@ impl SemOp {
 pub struct InstSpec {
     pub pops: &'static [StackTy],
     pub pushes: &'static [StackTy],
-    /// Reads or writes implicit machine state (locals / memory).
-    pub touches_state: bool,
     /// Whether this instruction may trap (trap kind is not distinguished).
     pub can_trap: bool,
 }
@@ -70,6 +60,11 @@ pub fn spec_for(op: &SemOp) -> InstSpec {
         SemOp::I32Shl => derive_rule_binop_spec(WasmBinOp::Shl),
         SemOp::I32DivU => derive_rule_binop_spec(WasmBinOp::Div(Sign::U)),
         SemOp::I32DivS => derive_rule_binop_spec(WasmBinOp::Div(Sign::S)),
+        SemOp::Drop => InstSpec {
+            pops: &[StackTy::I32],
+            pushes: &[],
+            can_trap: false,
+        },
         _ => {
             let al = al_spec_for(op);
             derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
@@ -95,16 +90,10 @@ pub fn concrete_ops() -> Vec<SemOp> {
         SemOp::I32DivU,
         SemOp::I32DivS,
         SemOp::I32Shl,
-        SemOp::I32Load,
-        SemOp::I32Store,
         SemOp::Drop,
     ];
     for c in [0, 1, 2, 3, 4, 8, 16, -1, i32::MIN, i32::MAX] {
         ops.push(SemOp::I32Const(c));
-    }
-    for i in 0..3 {
-        ops.push(SemOp::LocalGet(i));
-        ops.push(SemOp::LocalSet(i));
     }
     ops
 }
@@ -129,30 +118,6 @@ impl ConcreteState {
     pub fn new(locals: [i32; LOCAL_SLOTS as usize], memory: [i32; MEM_SLOTS as usize]) -> Self {
         Self { locals, memory }
     }
-
-    pub(crate) fn store_local(&self, idx: u32, val: i32) -> Self {
-        let mut next = self.clone();
-        if (idx as usize) < next.locals.len() {
-            next.locals[idx as usize] = val;
-        }
-        next
-    }
-
-    pub(crate) fn load_local(&self, idx: u32) -> i32 {
-        self.locals.get(idx as usize).copied().unwrap_or(0)
-    }
-
-    pub(crate) fn store_mem(&self, addr: i32, val: i32) -> Self {
-        let mut next = self.clone();
-        let slot = addr.rem_euclid(MEM_SLOTS as i32) as usize;
-        next.memory[slot] = val;
-        next
-    }
-
-    pub(crate) fn load_mem(&self, addr: i32) -> i32 {
-        let slot = addr.rem_euclid(MEM_SLOTS as i32) as usize;
-        self.memory[slot]
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,6 +130,10 @@ pub struct ConcreteResult {
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
     if let Some(steps) = rule_instrs_for(op) {
         return exec_instrs_concrete(&steps, stack);
+    }
+    if matches!(op, SemOp::Drop) {
+        stack.pop();
+        return false;
     }
     let al = al_spec_for(op);
     exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
@@ -367,30 +336,6 @@ impl<'ctx> Z3State<'ctx> {
         let memory = Array::fresh_const(ctx, &format!("{prefix}_mem"), &idx_sort, &i32_sort);
         Self { locals, memory }
     }
-
-    pub fn store_local(&self, ctx: &'ctx Context, idx: u32, val: &BV<'ctx>) -> Self {
-        let idx_bv = BV::from_u64(ctx, idx as u64, I32_BITS);
-        Self {
-            locals: self.locals.store(&idx_bv, val),
-            memory: self.memory.clone(),
-        }
-    }
-
-    pub fn load_local(&self, ctx: &'ctx Context, idx: u32) -> BV<'ctx> {
-        let idx_bv = BV::from_u64(ctx, idx as u64, I32_BITS);
-        self.locals.select(&idx_bv).as_bv().unwrap()
-    }
-
-    pub fn store_mem(&self, addr: &BV<'ctx>, val: &BV<'ctx>) -> Self {
-        Self {
-            locals: self.locals.clone(),
-            memory: self.memory.store(addr, val),
-        }
-    }
-
-    pub fn load_mem(&self, addr: &BV<'ctx>) -> BV<'ctx> {
-        self.memory.select(addr).as_bv().unwrap()
-    }
 }
 
 /// Locals / memory slots written during execution (reads affect the stack only).
@@ -416,6 +361,10 @@ pub fn exec_op<'ctx>(
 ) -> Bool<'ctx> {
     if let Some(steps) = rule_instrs_for(op) {
         return exec_instrs_z3(ctx, &steps, stack, state, touches, &STRAIGHT_LINE_EMBED);
+    }
+    if matches!(op, SemOp::Drop) {
+        stack.pop();
+        return Bool::from_bool(ctx, false);
     }
     let al = al_spec_for(op);
     exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)
@@ -651,16 +600,18 @@ pub fn print_semantics_table() {
         let spec = spec_for(&op);
         let trap = if spec.can_trap { "yes" } else { "no" };
         println!(
-            "{}  pop={} push={} state={} trap={}",
+            "{}  pop={} push={} trap={}",
             op.name(),
             spec.pops.len(),
             spec.pushes.len(),
-            if spec.touches_state { "yes" } else { "no" },
             trap,
         );
-        for line in match binop_wasm(&op) {
-            Some((nt, binop)) => format_rule_binop_pretty(nt, binop),
-            None => format_al_pretty(&al_spec_for(&op)),
+        for line in match op {
+            SemOp::Drop => "pop _".to_string(),
+            _ => match binop_wasm(&op) {
+                Some((nt, binop)) => format_rule_binop_pretty(nt, binop),
+                None => format_al_pretty(&al_spec_for(&op)),
+            },
         }
         .lines()
         {
@@ -696,7 +647,7 @@ mod tests {
     #[test]
     fn same_stack_effect_rejects_invalid_pairs() {
         let input = vec![StackTy::I32];
-        let valid = vec![SemOp::LocalSet(0)];
+        let valid = vec![SemOp::Drop];
         let invalid = vec![SemOp::I32Add];
         assert!(!same_stack_effect(&input, &valid, &invalid));
         assert!(!same_stack_effect(&input, &invalid, &invalid));

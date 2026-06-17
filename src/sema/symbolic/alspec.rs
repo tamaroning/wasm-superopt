@@ -18,12 +18,7 @@ fn eval_cond<'ctx>(ctx: &'ctx Context, cond: &AlCond, env: &AlEnv<BV<'ctx>>) -> 
     }
 }
 
-fn eval_expr<'ctx>(
-    ctx: &'ctx Context,
-    expr: &AlExpr,
-    env: &AlEnv<BV<'ctx>>,
-    state: &Z3State<'ctx>,
-) -> BV<'ctx> {
+fn eval_expr<'ctx>(ctx: &'ctx Context, expr: &AlExpr, env: &AlEnv<BV<'ctx>>) -> BV<'ctx> {
     match expr {
         AlExpr::ConstI32(n) => BV::from_i64(ctx, *n as i64, I32_BITS),
         AlExpr::Var(name) => env.get(name).clone(),
@@ -32,8 +27,6 @@ fn eval_expr<'ctx>(
             let b = env.get(rhs).clone();
             eval_binop(ctx, *kind, &a, &b)
         }
-        AlExpr::LocalGet(idx) => state.load_local(ctx, *idx),
-        AlExpr::MemLoad(addr) => state.load_mem(env.get(addr)),
     }
 }
 
@@ -66,22 +59,7 @@ fn exec_step<'ctx>(
     policy: &EmbeddingPolicy,
 ) {
     match step {
-        AlStep::Pop(name) => {
-            let val = stack.pop().expect("stack underflow");
-            env.bind(name, val);
-        }
-        AlStep::Push(expr) => stack.push(eval_expr(ctx, expr, env, state)),
-        AlStep::SetLocal { idx, var } => {
-            let val = env.get(var).clone();
-            touches.local_writes.insert(*idx);
-            *state = state.store_local(ctx, *idx, &val);
-        }
-        AlStep::StoreMem { addr, val } => {
-            let a = env.get(addr).clone();
-            let v = env.get(val).clone();
-            touches.mem_writes.push(a.clone());
-            *state = state.store_mem(&a, &v);
-        }
+        AlStep::Push(expr) => stack.push(eval_expr(ctx, expr, env)),
         AlStep::If {
             cond,
             then_steps,
@@ -91,7 +69,7 @@ fn exec_step<'ctx>(
                 let c = eval_cond(ctx, cond, env);
                 *trap = Bool::or(ctx, &[trap, &c]);
                 let zero = BV::from_i64(ctx, 0, I32_BITS);
-                let result = eval_expr(ctx, else_push_expr(else_steps), env, state);
+                let result = eval_expr(ctx, else_push_expr(else_steps), env);
                 stack.push(c.ite(&zero, &result));
             } else {
                 let c = eval_cond(ctx, cond, env);

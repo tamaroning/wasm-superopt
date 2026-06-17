@@ -2,7 +2,7 @@
 
 use crate::semantics::{InstSpec, StackTy};
 use super::defs::WasmBinOp;
-use super::ir::{AlCond, AlExpr, AlSpec, AlStep};
+use super::ir::{AlCond, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
 
@@ -17,7 +17,6 @@ fn count_pops(steps: &[AlStep]) -> usize {
     let mut n = 0;
     for step in steps {
         match step {
-            AlStep::Pop(_) => n += 1,
             AlStep::If {
                 then_steps,
                 else_steps,
@@ -25,7 +24,7 @@ fn count_pops(steps: &[AlStep]) -> usize {
             } => {
                 n += count_pops(then_steps) + count_pops(else_steps);
             }
-            AlStep::Push(_) | AlStep::SetLocal { .. } | AlStep::StoreMem { .. } | AlStep::Trap => {}
+            AlStep::Push(_) | AlStep::Trap => {}
         }
     }
     n
@@ -49,34 +48,10 @@ fn count_pushes(steps: &[AlStep], policy: &EmbeddingPolicy) -> usize {
                     n += then_p + else_p;
                 }
             }
-            AlStep::Pop(_) | AlStep::SetLocal { .. } | AlStep::StoreMem { .. } | AlStep::Trap => {}
+            AlStep::Trap => {}
         }
     }
     n
-}
-
-fn touches_state(steps: &[AlStep]) -> bool {
-    for step in steps {
-        match step {
-            AlStep::SetLocal { .. } | AlStep::StoreMem { .. } => return true,
-            AlStep::Push(expr) => {
-                if matches!(expr, AlExpr::LocalGet(_) | AlExpr::MemLoad(_)) {
-                    return true;
-                }
-            }
-            AlStep::If {
-                then_steps,
-                else_steps,
-                ..
-            } => {
-                if touches_state(then_steps) || touches_state(else_steps) {
-                    return true;
-                }
-            }
-            AlStep::Pop(_) | AlStep::Trap => {}
-        }
-    }
-    false
 }
 
 fn derive_can_trap(steps: &[AlStep]) -> bool {
@@ -118,7 +93,6 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
     InstSpec {
         pops: pops_slice(pop_n),
         pushes: pushes_slice(push_n),
-        touches_state: touches_state(&al.steps),
         can_trap: derive_can_trap(&al.steps),
     }
 }
@@ -128,7 +102,6 @@ pub fn derive_rule_binop_spec(binop: WasmBinOp) -> InstSpec {
     InstSpec {
         pops: POPS_2,
         pushes: PUSHES_1,
-        touches_state: false,
         can_trap: binop.is_partial(),
     }
 }

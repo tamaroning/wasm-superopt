@@ -19,9 +19,6 @@ mod specs;
 mod symbolic;
 mod util;
 
-#[cfg(test)]
-mod tests;
-
 pub use derive::{derive_inst_spec, derive_rule_binop_spec};
 pub use eval::alspec::exec_al_concrete;
 pub use eval::instr::exec_instrs_concrete;

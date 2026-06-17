@@ -9,16 +9,7 @@ pub struct AlSpec {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AlStep {
-    Pop(&'static str),
     Push(AlExpr),
-    SetLocal {
-        idx: u32,
-        var: &'static str,
-    },
-    StoreMem {
-        addr: &'static str,
-        val: &'static str,
-    },
     If {
         cond: AlCond,
         then_steps: Vec<AlStep>,
@@ -33,8 +24,6 @@ pub enum AlExpr {
     #[allow(dead_code)]
     Var(&'static str),
     BinOp(BinOpKind, &'static str, &'static str),
-    LocalGet(u32),
-    MemLoad(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -54,14 +43,7 @@ pub fn format_al_pretty(al: &AlSpec) -> String {
 fn format_step_pretty(step: &AlStep, indent: usize, lines: &mut Vec<String>) {
     let pad = "  ".repeat(indent);
     match step {
-        AlStep::Pop(name) => lines.push(format!("{pad}pop {name}")),
         AlStep::Push(expr) => lines.push(format!("{pad}push {}", format_expr_pretty(expr))),
-        AlStep::SetLocal { idx, var } => {
-            lines.push(format!("{pad}set local[{idx}] = {var}"))
-        }
-        AlStep::StoreMem { addr, val } => {
-            lines.push(format!("{pad}store memory[{addr}] = {val}"))
-        }
         AlStep::If {
             cond,
             then_steps,
@@ -93,7 +75,5 @@ fn format_expr_pretty(expr: &AlExpr) -> String {
         AlExpr::ConstI32(n) => format!("const {n}"),
         AlExpr::Var(name) => (*name).to_string(),
         AlExpr::BinOp(kind, lhs, rhs) => format!("{}({lhs}, {rhs})", kind.label()),
-        AlExpr::LocalGet(idx) => format!("local[{idx}]"),
-        AlExpr::MemLoad(addr) => format!("memory[{addr}]"),
     }
 }

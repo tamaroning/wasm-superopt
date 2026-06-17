@@ -25,16 +25,6 @@ fn eval_expr(expr: &AlExpr, env: &AlEnv<i32>) -> i32 {
             let b = *env.get(rhs);
             eval_binop(*kind, a, b)
         }
-        AlExpr::LocalGet(_idx) => panic!("LocalGet in eval_expr requires state"),
-        AlExpr::MemLoad(_) => panic!("MemLoad in eval_expr requires state"),
-    }
-}
-
-fn eval_push_expr(expr: &AlExpr, env: &AlEnv<i32>, state: &ConcreteState) -> i32 {
-    match expr {
-        AlExpr::LocalGet(idx) => state.load_local(*idx),
-        AlExpr::MemLoad(addr) => state.load_mem(*env.get(addr)),
-        _ => eval_expr(expr, env),
     }
 }
 
@@ -62,20 +52,7 @@ fn exec_step(
     policy: &EmbeddingPolicy,
 ) {
     match step {
-        AlStep::Pop(name) => {
-            let val = stack.pop().expect("stack underflow");
-            env.bind(name, val);
-        }
-        AlStep::Push(expr) => stack.push(eval_push_expr(expr, env, state)),
-        AlStep::SetLocal { idx, var } => {
-            let val = *env.get(var);
-            *state = state.store_local(*idx, val);
-        }
-        AlStep::StoreMem { addr, val } => {
-            let a = *env.get(addr);
-            let v = *env.get(val);
-            *state = state.store_mem(a, v);
-        }
+        AlStep::Push(expr) => stack.push(eval_expr(expr, env)),
         AlStep::If {
             cond,
             then_steps,
@@ -87,7 +64,7 @@ fn exec_step(
                 let result = if cond_val {
                     0
                 } else {
-                    eval_push_expr(else_push_expr(else_steps), env, state)
+                    eval_expr(else_push_expr(else_steps), env)
                 };
                 stack.push(result);
             } else if eval_cond(cond, env) {
