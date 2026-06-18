@@ -245,6 +245,18 @@ fn enode_to_pattern(expr: &RecExpr<WasmLang>, id: Id) -> String {
     }
 }
 
+/// Replace the rightmost `stack.end` with `?rest` so a rule matches any stack suffix.
+pub fn pattern_with_rest(pattern: &str) -> String {
+    match pattern.rfind("stack.end") {
+        Some(pos) => {
+            let mut out = pattern.to_string();
+            out.replace_range(pos..pos + "stack.end".len(), "?rest");
+            out
+        }
+        None => pattern.to_string(),
+    }
+}
+
 pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<String> {
     if ops.iter().any(|op| op.is_effectful()) {
         return None;
@@ -257,7 +269,7 @@ pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<Strin
         dag.apply_sem(op);
     }
     crate::semantics::simulate_stack_effect(input, ops)?;
-    Some(dag.pattern_from_stack())
+    Some(pattern_with_rest(&dag.pattern_from_stack()))
 }
 
 pub fn parse_dag(s: &str) -> RecExpr<WasmLang> {
@@ -283,6 +295,18 @@ mod tests {
         assert_eq!(
             dag.to_string(),
             "(stack.slot (i32.add 42 0) (stack.slot (i32.add 42 0) stack.end))"
+        );
+    }
+
+    #[test]
+    fn pattern_with_rest_generalizes_stack_tail() {
+        assert_eq!(
+            pattern_with_rest("(stack.slot (i32.add ?a 0) stack.end)"),
+            "(stack.slot (i32.add ?a 0) ?rest)"
+        );
+        assert_eq!(
+            pattern_with_rest("(stack.slot ?a (stack.slot (i32.add ?b 0) stack.end))"),
+            "(stack.slot ?a (stack.slot (i32.add ?b 0) ?rest))"
         );
     }
 

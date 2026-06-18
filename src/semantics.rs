@@ -586,7 +586,9 @@ pub fn enumerate_sequences_by_output(
     let mut work = vec![(input.to_vec(), Vec::new())];
 
     while let Some((stack, seq)) = work.pop() {
-        if !seq.is_empty() && is_type_valid(input, &seq) && uses_all_input_slots(input, &seq) {
+        let is_candidate = is_type_valid(input, &seq)
+            && (seq.is_empty() || uses_all_input_slots(input, &seq));
+        if is_candidate {
             by_output
                 .entry(StackSig {
                     stack: stack.clone(),
@@ -671,9 +673,29 @@ mod tests {
                     Some(&sig.stack),
                     "seq={seq:?}"
                 );
-                exec_sequence_concrete(seq, vec![0], state.clone());
+                if !seq.is_empty() {
+                    exec_sequence_concrete(seq, vec![0], state.clone());
+                }
             }
         }
+    }
+
+    #[test]
+    fn enumerate_includes_empty_identity_sequence() {
+        let input = vec![StackTy::I32];
+        let catalog = OpCatalog::from_ops(&concrete_ops());
+        let by_output = enumerate_sequences_by_output(&input, &catalog, 2);
+        assert!(by_output.values().any(|seqs| seqs.iter().any(|seq| seq.is_empty())));
+    }
+
+    #[test]
+    fn add_const0_equivalent_to_identity() {
+        let ctx = z3_context();
+        let input = vec![StackTy::I32];
+        let add = vec![SemOp::I32Const(0), SemOp::I32Add];
+        let identity = vec![];
+        assert!(sequences_valid_rewrite_random(&input, &add, &identity, 200));
+        assert!(sequences_valid_rewrite_z3(&ctx, &input, &add, &identity));
     }
 
     #[test]

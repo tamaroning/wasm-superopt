@@ -2,7 +2,7 @@
 
 use crate::lang::WasmLang;
 use crate::semantics::{
-    OpCatalog, StackTy, concrete_ops, enumerate_sequences_by_output, exploration_inputs,
+    OpCatalog, SemOp, StackTy, concrete_ops, enumerate_sequences_by_output, exploration_inputs,
     is_type_valid, same_stack_effect, sequences_valid_rewrite_random, sequences_valid_rewrite_z3,
     uses_all_input_slots, z3_context,
 };
@@ -42,7 +42,7 @@ fn rules_cache_path(max_len: usize) -> PathBuf {
     PathBuf::from(format!("rules-len{max_len}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 2;
+const RULES_CACHE_FORMAT_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct CachedRules {
@@ -119,7 +119,7 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
             .values()
             .map(|seqs| {
                 let n = seqs.len();
-                n.saturating_mul(n.saturating_sub(1)) / 2
+                n.saturating_mul(n.saturating_sub(1))
             })
             .sum();
 
@@ -131,16 +131,13 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
         let mut pairs_in_input = 0usize;
         for (out_sig, seqs) in &by_output {
             for i in 0..seqs.len() {
-                for j in (i + 1)..seqs.len() {
+                for j in 0..seqs.len() {
+                    if i == j {
+                        continue;
+                    }
                     let lhs = &seqs[i];
                     let rhs = &seqs[j];
-                    if lhs == rhs
-                        || !is_type_valid(input, lhs)
-                        || !is_type_valid(input, rhs)
-                        || !uses_all_input_slots(input, lhs)
-                        || !uses_all_input_slots(input, rhs)
-                        || !same_stack_effect(input, lhs, rhs)
-                    {
+                    if !is_rewrite_pair(input, lhs, rhs) {
                         continue;
                     }
                     pairs_checked += 1;
@@ -203,6 +200,26 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
     ));
 
     proven
+}
+
+/// LHS must consume all inputs; RHS may be the empty (identity) sequence.
+fn is_rewrite_pair(input: &[StackTy], lhs: &[SemOp], rhs: &[SemOp]) -> bool {
+    if lhs == rhs {
+        return false;
+    }
+    if lhs.is_empty() {
+        return false;
+    }
+    if !is_type_valid(input, lhs) || !is_type_valid(input, rhs) {
+        return false;
+    }
+    if !uses_all_input_slots(input, lhs) {
+        return false;
+    }
+    if !rhs.is_empty() && !uses_all_input_slots(input, rhs) {
+        return false;
+    }
+    same_stack_effect(input, lhs, rhs)
 }
 
 fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
