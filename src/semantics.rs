@@ -5,8 +5,10 @@
 
 use crate::sema::{
     NumType, STRAIGHT_LINE_EMBED, Sign, WasmBinOp, al_spec_for, derive_inst_spec,
-    derive_rule_binop_spec, exec_al_concrete, exec_al_z3, exec_instrs_concrete,
-    exec_instrs_z3, format_al_pretty, format_rule_binop_pretty, rule_instrs_for,
+    derive_rule_binop_spec, derive_rule_local_get_spec, derive_rule_local_set_spec,
+    derive_rule_local_tee_spec, exec_al_concrete, exec_al_z3, exec_instrs_concrete,
+    exec_instrs_z3, format_al_pretty, format_rule_binop_pretty, format_rule_local_pretty,
+    rule_instrs_for,
 };
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
@@ -28,6 +30,9 @@ pub enum SemOp {
     I32DivU,
     I32DivS,
     I32Shl,
+    LocalGet(u32),
+    LocalSet(u32),
+    LocalTee(u32),
 }
 
 impl SemOp {
@@ -39,7 +44,33 @@ impl SemOp {
             SemOp::I32DivU => "i32.div_u",
             SemOp::I32DivS => "i32.div_s",
             SemOp::I32Shl => "i32.shl",
+            SemOp::LocalGet(x) => local_op_name("local.get", *x),
+            SemOp::LocalSet(x) => local_op_name("local.set", *x),
+            SemOp::LocalTee(x) => local_op_name("local.tee", *x),
         }
+    }
+
+    /// Whether this op reads or writes implicit machine state (not representable in the egg DAG).
+    pub fn is_effectful(&self) -> bool {
+        matches!(
+            self,
+            SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_)
+        )
+    }
+}
+
+fn local_op_name(kind: &'static str, x: u32) -> &'static str {
+    match (kind, x) {
+        ("local.get", 0) => "local.get 0",
+        ("local.get", 1) => "local.get 1",
+        ("local.get", 2) => "local.get 2",
+        ("local.set", 0) => "local.set 0",
+        ("local.set", 1) => "local.set 1",
+        ("local.set", 2) => "local.set 2",
+        ("local.tee", 0) => "local.tee 0",
+        ("local.tee", 1) => "local.tee 1",
+        ("local.tee", 2) => "local.tee 2",
+        _ => panic!("local op name only defined for indices 0..2"),
     }
 }
 
@@ -58,6 +89,9 @@ pub fn spec_for(op: &SemOp) -> InstSpec {
         SemOp::I32Shl => derive_rule_binop_spec(WasmBinOp::Shl),
         SemOp::I32DivU => derive_rule_binop_spec(WasmBinOp::Div(Sign::U)),
         SemOp::I32DivS => derive_rule_binop_spec(WasmBinOp::Div(Sign::S)),
+        SemOp::LocalGet(_) => derive_rule_local_get_spec(),
+        SemOp::LocalSet(_) => derive_rule_local_set_spec(),
+        SemOp::LocalTee(_) => derive_rule_local_tee_spec(),
         _ => {
             let al = al_spec_for(op);
             derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
@@ -86,6 +120,11 @@ pub fn concrete_ops() -> Vec<SemOp> {
     ];
     for c in [0, 1, 2, 3, 4, 8, 16, -1, i32::MIN, i32::MAX] {
         ops.push(SemOp::I32Const(c));
+    }
+    for x in 0..3 {
+        ops.push(SemOp::LocalGet(x));
+        ops.push(SemOp::LocalSet(x));
+        ops.push(SemOp::LocalTee(x));
     }
     ops
 }
@@ -121,8 +160,7 @@ pub struct ConcreteResult {
 
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
     if let Some(steps) = rule_instrs_for(op) {
-        let _ = state;
-        return exec_instrs_concrete(&steps, stack);
+        return exec_instrs_concrete(&steps, stack, state);
     }
     let al = al_spec_for(op);
     exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
@@ -259,7 +297,8 @@ pub fn uses_all_input_slots(input: &[StackTy], ops: &[SemOp]) -> bool {
 /// - **δ_s ⇒ δ_t**: if source is defined (no trap), target must also be defined.
 /// - **Trap preservation**: if source traps, target must trap (e.g. div-by-zero on
 ///   both sides); together with δ_s ⇒ δ_t this is trap equivalence.
-/// - **Defined-domain equality**: when both are defined, stack and machine state match.
+/// - **Defined-domain equality**: when both are defined, operand stack and machine
+///   state (locals, memory) must match.
 fn concrete_valid_rewrite(source: &ConcreteResult, target: &ConcreteResult) -> bool {
     if source.trap != target.trap {
         return false;
@@ -267,7 +306,9 @@ fn concrete_valid_rewrite(source: &ConcreteResult, target: &ConcreteResult) -> b
     if source.trap {
         return true;
     }
-    source.stack == target.stack && source.state == target.state
+    source.stack == target.stack
+        && source.state.locals == target.state.locals
+        && source.state.memory == target.state.memory
 }
 
 /// Fast filter: returns `false` if a concrete counterexample is found.
@@ -388,9 +429,7 @@ fn state_diff_z3<'ctx>(
         diff = Bool::or(ctx, &[&diff, &l._eq(r).not()]);
     }
 
-    let mut local_writes = lhs.touches.local_writes.clone();
-    local_writes.extend(&rhs.touches.local_writes);
-    for idx in local_writes {
+    for idx in 0..LOCAL_SLOTS {
         let idx_bv = BV::from_u64(ctx, idx as u64, I32_BITS);
         diff = Bool::or(
             ctx,
@@ -399,7 +438,15 @@ fn state_diff_z3<'ctx>(
                 &lhs.state
                     .locals
                     .select(&idx_bv)
-                    ._eq(&rhs.state.locals.select(&idx_bv))
+                    .as_bv()
+                    .expect("locals array stores i32")
+                    ._eq(
+                        &rhs.state
+                            .locals
+                            .select(&idx_bv)
+                            .as_bv()
+                            .expect("locals array stores i32"),
+                    )
                     .not(),
             ],
         );
@@ -593,6 +640,9 @@ pub fn print_semantics_table() {
         );
         for line in match binop_wasm(&op) {
             Some((nt, binop)) => format_rule_binop_pretty(nt, binop),
+            None if op.is_effectful() => {
+                format_rule_local_pretty(&op)
+            }
             None => format_al_pretty(&al_spec_for(&op)),
         }
         .lines()
@@ -697,5 +747,53 @@ mod tests {
         let add = vec![SemOp::I32Const(0), SemOp::I32Add];
         assert!(sequences_valid_rewrite_random(&input, &div_u, &add, 200));
         assert!(sequences_valid_rewrite_z3(&ctx, &input, &div_u, &add));
+    }
+
+    #[test]
+    fn local_get_pushes_state_concrete() {
+        let state = ConcreteState::new([42; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
+        let mut stack = vec![];
+        exec_op_concrete(&SemOp::LocalGet(0), &mut stack, &mut state.clone());
+        assert_eq!(stack, vec![42]);
+    }
+
+    #[test]
+    fn local_set_writes_state_concrete() {
+        let mut state = ConcreteState::new([0; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
+        let mut stack = vec![99];
+        exec_op_concrete(&SemOp::LocalSet(0), &mut stack, &mut state);
+        assert_eq!(stack, Vec::<i32>::new());
+        assert_eq!(state.locals[0], 99);
+    }
+
+    #[test]
+    fn local_tee_preserves_stack_concrete() {
+        let mut state = ConcreteState::new([0; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
+        let mut stack = vec![77];
+        exec_op_concrete(&SemOp::LocalTee(1), &mut stack, &mut state);
+        assert_eq!(stack, vec![77]);
+        assert_eq!(state.locals[1], 77);
+    }
+
+    #[test]
+    fn local_tee_not_equivalent_to_nop_via_rewrite_checks() {
+        let ctx = z3_context();
+        let input = vec![StackTy::I32];
+        let tee = vec![SemOp::LocalTee(0)];
+        let nop = vec![];
+        assert!(same_stack_effect(&input, &tee, &nop));
+        assert!(!sequences_valid_rewrite_random(&input, &tee, &nop, 100));
+        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &tee, &nop));
+    }
+
+    #[test]
+    fn local_get_not_equivalent_to_const0_via_z3() {
+        let ctx = z3_context();
+        let input = vec![];
+        let get = vec![SemOp::LocalGet(0)];
+        let c0 = vec![SemOp::I32Const(0)];
+        assert!(same_stack_effect(&input, &get, &c0));
+        assert!(!sequences_valid_rewrite_random(&input, &get, &c0, 100));
+        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &get, &c0));
     }
 }

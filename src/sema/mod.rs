@@ -20,8 +20,12 @@ mod symbolic;
 mod util;
 
 pub use ast::format_rule_binop_pretty;
+pub use defs::format_rule_local_pretty;
 pub use defs::{NumType, Sign, WasmBinOp};
-pub use derive::{derive_inst_spec, derive_rule_binop_spec};
+pub use derive::{
+    derive_inst_spec, derive_rule_binop_spec, derive_rule_local_get_spec,
+    derive_rule_local_set_spec, derive_rule_local_tee_spec,
+};
 pub use eval::alspec::exec_al_concrete;
 pub use eval::instr::exec_instrs_concrete;
 pub use ir::format_al_pretty;

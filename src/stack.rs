@@ -25,6 +25,9 @@ impl From<&SemOp> for WasmOp {
             SemOp::I32DivU => WasmOp::I32DivU,
             SemOp::I32DivS => WasmOp::I32DivS,
             SemOp::I32Shl => WasmOp::I32Shl,
+            SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) => {
+                panic!("effectful local ops are not supported in WasmOp conversion")
+            }
         }
     }
 }
@@ -111,6 +114,9 @@ impl StackToDag {
                 let b = self.stack.pop().expect("i32.shl");
                 let a = self.stack.pop().expect("i32.shl");
                 self.stack.push(self.expr.add(WasmLang::I32Shl([a, b])));
+            }
+            SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) => {
+                panic!("effectful local ops are not supported in DAG conversion");
             }
         }
     }
@@ -240,6 +246,9 @@ fn enode_to_pattern(expr: &RecExpr<WasmLang>, id: Id) -> String {
 }
 
 pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<String> {
+    if ops.iter().any(|op| op.is_effectful()) {
+        return None;
+    }
     let mut dag = StackToDag::new();
     for _ in input {
         dag.seed_symbolic_i32(1);

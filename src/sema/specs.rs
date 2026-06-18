@@ -1,22 +1,33 @@
 //! Per-op AL spec definitions (non-binop flat specs; binops use meta AL).
 
-use super::defs::{step_pure_binop_template, NumType, Sign, WasmBinOp};
+use super::defs::{
+    step_local_set_template, step_pure_binop_template, step_pure_local_tee_template,
+    step_read_local_get_template, NumType, Sign, WasmBinOp,
+};
 use super::ir::{AlExpr, AlSpec, AlStep};
 use super::ast::Instr;
 use crate::semantics::SemOp;
 use std::borrow::Cow;
 
-/// Meta-level `Step_pure/...` template for an op, if any.
+/// Meta-level `Step_...` template for an op, if any.
 pub fn rule_instrs_for(op: &SemOp) -> Option<Vec<Instr>> {
-    let (nt, binop) = match op {
-        SemOp::I32Add => (NumType::I32, WasmBinOp::Add),
-        SemOp::I32Mul => (NumType::I32, WasmBinOp::Mul),
-        SemOp::I32Shl => (NumType::I32, WasmBinOp::Shl),
-        SemOp::I32DivU => (NumType::I32, WasmBinOp::Div(Sign::U)),
-        SemOp::I32DivS => (NumType::I32, WasmBinOp::Div(Sign::S)),
-        _ => return None,
-    };
-    Some(step_pure_binop_template(nt, binop))
+    match op {
+        SemOp::I32Add => Some(step_pure_binop_template(NumType::I32, WasmBinOp::Add)),
+        SemOp::I32Mul => Some(step_pure_binop_template(NumType::I32, WasmBinOp::Mul)),
+        SemOp::I32Shl => Some(step_pure_binop_template(NumType::I32, WasmBinOp::Shl)),
+        SemOp::I32DivU => Some(step_pure_binop_template(
+            NumType::I32,
+            WasmBinOp::Div(Sign::U),
+        )),
+        SemOp::I32DivS => Some(step_pure_binop_template(
+            NumType::I32,
+            WasmBinOp::Div(Sign::S),
+        )),
+        SemOp::LocalGet(x) => Some(step_read_local_get_template(*x)),
+        SemOp::LocalSet(x) => Some(step_local_set_template(*x)),
+        SemOp::LocalTee(x) => Some(step_pure_local_tee_template(*x)),
+        _ => None,
+    }
 }
 
 pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
@@ -27,6 +38,8 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         SemOp::I32Add | SemOp::I32Mul | SemOp::I32Shl | SemOp::I32DivU | SemOp::I32DivS => {
             panic!("binop {op:?} uses meta AL (Step_pure/binop), not flat AlSpec")
         }
-        _ => panic!("{op:?} has no flat AlSpec"),
+        SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) => {
+            panic!("local {op:?} uses meta AL (Step_read/local.*), not flat AlSpec")
+        }
     }
 }

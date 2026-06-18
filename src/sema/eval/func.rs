@@ -62,7 +62,7 @@ impl AlEnv {
         }
     }
 
-    fn get(&self, name: &str) -> &AlValue {
+    pub fn get(&self, name: &str) -> &AlValue {
         self.vars
             .iter()
             .find(|(n, _)| *n == name)
@@ -127,7 +127,8 @@ fn eval_fn_step(step: &Instr, env: &mut AlEnv) -> Result<Option<AlValue>, EvalEr
         Instr::IfI {
             cond: InstrCond::Expr(_), ..
         } => panic!("expr if in func body"),
-        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI => {
+        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI | Instr::ExecuteI(_) | Instr::PerformI(_, _)
+        | Instr::ReplaceI { .. } => {
             panic!("rule instr in func body")
         }
     }
@@ -183,6 +184,9 @@ fn eval_expr_inner(expr: &Expr, env: &AlEnv) -> EvalResult {
             }))
         }
         Expr::TopValue(nt) => Ok(AlValue::NumType(*nt)),
+        Expr::TopValueAny => Ok(AlValue::Nat(0)),
+        Expr::CaseE(..) => panic!("CaseE in fn eval"),
+        Expr::AccE(..) => panic!("AccE in fn eval"),
     }
 }
 

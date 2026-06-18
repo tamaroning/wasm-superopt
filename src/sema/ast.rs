@@ -64,6 +64,10 @@ pub enum Expr {
     Choose(Box<Expr>),
     /// `TopValueE` — stack-top type assertion (`top_value(nt)`).
     TopValue(NumType),
+    /// `TopValueE` with no type — `top_value()`.
+    TopValueAny,
+    /// `CaseE` — Wasm instruction or constructor (`LOCAL.SET x`, …).
+    CaseE(&'static str, Vec<Expr>),
     /// `VarE` — bound variable reference.
     VarE(&'static str),
     /// `NumE` — natural literal.
@@ -118,6 +122,17 @@ pub enum Expr {
     Neg(Box<Expr>),
     /// Extract `sx` from a case binop (`DIV sx`, `REM sx`, `SHR sx`).
     BinOpSignOf(Box<Expr>),
+    /// Field / index access (`expr.path` / `expr[idx]`).
+    AccE(Box<Expr>, Path),
+}
+
+/// Path segment in [`Expr::AccE`] (`f.LOCALS`, `arr[i]`, …).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Path {
+    /// `.atom`
+    Dot(&'static str),
+    /// `[expr]`
+    Idx(Box<Expr>),
 }
 
 /// Predicate for [`FuncA`] `IfI` / `AssertI` conditions.
@@ -169,6 +184,8 @@ pub enum LetLhs {
 pub enum PopTarget {
     /// Pop a numeric stack value into `name` (`numtype_0.CONST name`).
     NumConst(&'static str),
+    /// Pop any stack value into `name` (`Pop val`).
+    Val(&'static str),
 }
 
 /// AL instruction (`instr'` in OCaml). Shared by [`Algorithm::RuleA`] and [`FuncA`] bodies.
@@ -196,6 +213,16 @@ pub enum Instr {
     },
     /// `push expr` (`PushI of expr`).
     PushI(Expr),
+    /// `execute expr` (`ExecuteI of expr`) — e.g. `Execute (LOCAL.SET x)`.
+    ExecuteI(Expr),
+    /// `perform id args` (`PerformI`) — e.g. `$with_local(z, x, val)`.
+    PerformI(&'static str, Vec<Arg>),
+    /// `replace expr -> path with expr` (`ReplaceI`) — e.g. `f.LOCALS[x] := v`.
+    ReplaceI {
+        target: Expr,
+        path: Path,
+        value: Expr,
+    },
     /// `trap` — abort execution (`TrapI`).
     TrapI,
     /// `return expr` (`ReturnI of expr option`; expression always present here).

@@ -154,6 +154,9 @@ pub fn encode_expr<'ctx>(
             Ok(sym_optional_len(ctx, encode_expr(ctx, inner, env)?))
         }
         Expr::TopValue(nt) => Ok(SymValue::NumType(*nt)),
+        Expr::TopValueAny => Ok(SymValue::Nat(BV::from_u64(ctx, 0, I32_BITS))),
+        Expr::CaseE(..) => panic!("CaseE in sym encode"),
+        Expr::AccE(..) => panic!("AccE in sym encode"),
     }
 }
 
@@ -324,7 +327,10 @@ fn encode_fn_step<'ctx>(
         Instr::IfI {
             cond: InstrCond::Expr(_), ..
         } => panic!("expr if in func body"),
-        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI => panic!("rule instr in func body"),
+        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI | Instr::ExecuteI(_) | Instr::PerformI(_, _)
+        | Instr::ReplaceI { .. } => {
+            panic!("rule instr in func body")
+        }
     }
 }
 

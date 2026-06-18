@@ -1,11 +1,12 @@
-//! SpecTec AL definitions transcribed from [`binop.al`](../../../../binop.al).
+//! SpecTec AL definitions transcribed from [`spectec/binop.al`](../../spectec/binop.al)
+//! and [`spectec/local.al`](../../spectec/local.al).
 //!
-//! Types and `$fn` bodies from `binop.al` live here. Step templates use
+//! Types and `$fn` bodies from those files live here. Step templates use
 //! [`Expr`](super::ast::Expr) for primitive `binop` (`+`, `-`, `*`, …).
 //! Lowering to flat [`AlSpec`](super::ir::AlSpec) is for hand-written step specs only;
-//! binop `SemOp`s use [`super::symbolic::func`] and [`super::symbolic::instr`].
+//! binop / local `SemOp`s use [`super::symbolic::func`] and [`super::symbolic::instr`].
 
-#![allow(dead_code)] // mirrors binop.al; not every def is wired to instantiate yet
+#![allow(dead_code)] // mirrors spectec/*.al; not every def is wired to instantiate yet
 
 pub mod types {
     use crate::semantics::I32_BITS;
@@ -168,7 +169,7 @@ pub mod types {
 pub use types::*;
 
 use super::ast::{
-    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred, PopTarget,
+    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Path, Pred, PopTarget,
 };
 
 const fn mp(name: &'static str, ty: ParamType) -> Param {
@@ -207,6 +208,20 @@ const BINOP_PARAMS: &[Param] = &[
     mp("iN_1", ParamType::Nat),
     mp("iN_2", ParamType::Nat),
 ];
+const LOCAL_PARAMS: &[Param] = &[
+    mp("s", ParamType::Any),
+    mp("f", ParamType::Any),
+    mp("x", ParamType::Nat),
+];
+const WITH_LOCAL_PARAMS: &[Param] = &[
+    mp("s", ParamType::Any),
+    mp("f", ParamType::Any),
+    mp("x", ParamType::Nat),
+    mp("v", ParamType::Any),
+];
+
+/// Store parameter in [`local.al`](../../spectec/local.al) step rules (`z`).
+pub const STORE_PARAM: &str = "z";
 
 fn p(name: &'static str) -> Expr {
     Expr::VarE(name)
@@ -366,6 +381,107 @@ pub fn step_pure_binop_template(nt: NumType, binop: WasmBinOp) -> Vec<Instr> {
             ],
         },
     ]
+}
+
+// =============================================================================
+// Step_read/local.get, Step_pure/local.tee, Step/local.set  (local.al L1–18)
+// =============================================================================
+
+fn case_e(op: &'static str, args: Vec<Expr>) -> Expr {
+    Expr::CaseE(op, args)
+}
+
+fn frame_locals(frame: &'static str) -> Expr {
+    Expr::AccE(
+        Box::new(Expr::VarE(frame)),
+        Path::Dot("LOCALS"),
+    )
+}
+
+fn frame_local_at(frame: &'static str, idx: Expr) -> Expr {
+    Expr::AccE(
+        Box::new(frame_locals(frame)),
+        Path::Idx(Box::new(idx)),
+    )
+}
+
+fn local_call_args(x: u32) -> Vec<Arg> {
+    vec![Arg::Var(STORE_PARAM), Arg::Nat(x)]
+}
+
+fn with_local_call_args(x: u32) -> Vec<Arg> {
+    vec![Arg::Var(STORE_PARAM), Arg::Nat(x), Arg::Var("val")]
+}
+
+/// `Step_read/local.get x { Push $local(z, x) }` (local.al L1–3)
+pub fn step_read_local_get_template(x: u32) -> Vec<Instr> {
+    vec![Instr::PushI(Expr::Call(
+        "local",
+        local_call_args(x),
+    ))]
+}
+
+/// `Step_pure/local.tee x { … }` (local.al L6–12)
+pub fn step_pure_local_tee_template(x: u32) -> Vec<Instr> {
+    vec![
+        Instr::AssertI(InstrCond::Expr(Expr::TopValueAny)),
+        Instr::PopI(PopTarget::Val("val")),
+        Instr::PushI(Expr::VarE("val")),
+        Instr::PushI(Expr::VarE("val")),
+        Instr::ExecuteI(case_e("LOCAL.SET", vec![Expr::NatLit(x)])),
+    ]
+}
+
+/// `Step/local.set x { Assert (top_value()); Pop val; $with_local(z, x, val) }` (local.al L14–18)
+pub fn step_local_set_template(x: u32) -> Vec<Instr> {
+    vec![
+        Instr::AssertI(InstrCond::Expr(Expr::TopValueAny)),
+        Instr::PopI(PopTarget::Val("val")),
+        Instr::PerformI("with_local", with_local_call_args(x)),
+    ]
+}
+
+// =============================================================================
+// with_local, local  (local.al L20–26)
+// =============================================================================
+
+/// `with_local (s, f) x v { f.LOCALS[x] := v }` (local.al L20–22)
+pub fn with_local_def() -> FuncA {
+    FuncA {
+        id: "with_local",
+        params: WITH_LOCAL_PARAMS,
+        body: vec![Instr::ReplaceI {
+            target: frame_locals("f"),
+            path: Path::Idx(Box::new(p("x"))),
+            value: p("v"),
+        }],
+    }
+}
+
+/// `local (s, f) x { Return f.LOCALS[x] }` (local.al L24–26)
+pub fn local_def() -> FuncA {
+    FuncA {
+        id: "local",
+        params: LOCAL_PARAMS,
+        body: vec![Instr::ReturnI(frame_local_at("f", p("x")))],
+    }
+}
+
+/// Pretty-print local step templates (for `--print-semantics`).
+pub fn format_rule_local_pretty(op: &crate::semantics::SemOp) -> String {
+    use crate::semantics::SemOp;
+    match op {
+        SemOp::LocalGet(x) => format!(
+            "Step_read/local.get {x}\n  push $local(z, {x})"
+        ),
+        SemOp::LocalSet(x) => format!(
+            "Step/local.set {x}\n  assert top_value()\n  pop val\n  $with_local(z, {x}, val)"
+        ),
+        SemOp::LocalTee(x) => format!(
+            "Step_pure/local.tee {x}\n  assert top_value()\n  pop val\n  push val\n  push val\n  execute (LOCAL.SET {x})"
+        ),
+        _ => panic!("not a local op: {op:?}"),
+    }
 }
 
 // =============================================================================
@@ -785,6 +901,8 @@ pub fn lookup_func(name: &str) -> Option<FuncA> {
         "idiv_" => idiv_def(),
         "irem_" => irem_def(),
         "binop_" => binop_def(),
+        "local" => local_def(),
+        "with_local" => with_local_def(),
         _ => return None,
     })
 }
@@ -799,6 +917,22 @@ mod tests {
         assert_eq!(def.id, "size");
         assert_eq!(def.params, SIZE_PARAMS);
         assert!(matches!(def.body.last(), Some(Instr::FailI)));
+    }
+
+    #[test]
+    fn local_def_matches_local_al() {
+        let def = local_def();
+        assert_eq!(def.id, "local");
+        assert_eq!(def.params, LOCAL_PARAMS);
+        assert!(matches!(def.body.last(), Some(Instr::ReturnI(_))));
+    }
+
+    #[test]
+    fn with_local_def_matches_local_al() {
+        let def = with_local_def();
+        assert_eq!(def.id, "with_local");
+        assert_eq!(def.params, WITH_LOCAL_PARAMS);
+        assert!(matches!(def.body.last(), Some(Instr::ReplaceI { .. })));
     }
 
     #[test]

@@ -105,3 +105,30 @@ pub fn derive_rule_binop_spec(binop: WasmBinOp) -> InstSpec {
         can_trap: binop.is_partial(),
     }
 }
+
+/// `Step_read/local.get` — push only.
+pub fn derive_rule_local_get_spec() -> InstSpec {
+    InstSpec {
+        pops: POPS_0,
+        pushes: PUSHES_1,
+        can_trap: false,
+    }
+}
+
+/// `Step/local.set` — pop one value, no push.
+pub fn derive_rule_local_set_spec() -> InstSpec {
+    InstSpec {
+        pops: POPS_1,
+        pushes: PUSHES_0,
+        can_trap: false,
+    }
+}
+
+/// `Step_pure/local.tee` — pop one, push one (via duplicate + `LOCAL.SET`).
+pub fn derive_rule_local_tee_spec() -> InstSpec {
+    InstSpec {
+        pops: POPS_1,
+        pushes: PUSHES_1,
+        can_trap: false,
+    }
+}
