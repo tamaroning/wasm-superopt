@@ -1,30 +1,35 @@
 //! Loop/jump-free WebAssembly basic blocks → backward goal search + e-graph rules.
 
 mod canon;
+mod forward;
 mod goal;
 mod heuristic;
 mod inverse;
 mod lang;
+mod optimize;
 mod search;
 mod sema;
 mod semantics;
 mod stack;
 mod synthesis;
 mod value;
+mod wasm;
 
 use clap::{Parser, ValueEnum};
-use egg::*;
 use lang::ValueLang;
 use semantics::DEFAULT_RANDOM_TESTS;
 use synthesis::{
     load_or_synthesize_rules, print_synthesized, print_synthesized_json, synthesized_to_rewrites,
 };
-use value::parse_value_expr;
 
 #[derive(Parser, Debug)]
-#[command(name = "egraph", about = "Wasm backward goal search + value e-graph rules")]
+#[command(name = "egraph", about = "Optimize loop/jump-free Wasm segments via backward goal search")]
 struct Cli {
-    /// Only run synthesis (print verified rules); skip demo examples.
+    /// Wasm module to optimize.
+    #[arg(value_name = "WASM", required_unless_present_any = ["synthesize_only", "print_semantics"])]
+    input: Option<std::path::PathBuf>,
+
+    /// Only run synthesis (print verified rules as JSON).
     #[arg(long)]
     synthesize_only: bool,
 
@@ -40,17 +45,27 @@ struct Cli {
     #[arg(long, default_value_t = DEFAULT_RANDOM_TESTS)]
     random_tests: usize,
 
-    /// Run the built-in backward-search example instead of value-saturation demos.
-    #[arg(long)]
-    solve_example: bool,
-
-    /// Search strategy when `--solve-example` is set.
-    #[arg(long, value_enum, default_value_t = SolverKind::Bfs)]
+    /// Search strategy for backward search.
+    #[arg(long, value_enum, default_value_t = SolverKind::Astar)]
     solver: SolverKind,
+
+    /// Only list extracted segments without running the optimizer.
+    #[arg(long)]
+    segments_only: bool,
 
     /// Maximum peel depth (instruction window) for backward search.
     #[arg(long, default_value_t = search::DEFAULT_MAX_DEPTH)]
     window: usize,
+}
+
+impl From<SolverKind> for optimize::SolverKind {
+    fn from(k: SolverKind) -> Self {
+        match k {
+            SolverKind::Bfs => optimize::SolverKind::Bfs,
+            SolverKind::Greedy => optimize::SolverKind::Greedy,
+            SolverKind::Astar => optimize::SolverKind::Astar,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -64,66 +79,45 @@ enum SolverKind {
     Astar,
 }
 
-fn run_example(
-    name: &str,
-    dag: &RecExpr<ValueLang>,
-    rules: &[Rewrite<ValueLang, ()>],
-) {
-    let before_cost = AstSize.cost_rec(dag);
-    let runner = Runner::default().with_expr(dag).run(rules);
-    let root = runner.roots[0];
-    let extractor = Extractor::new(&runner.egraph, AstSize);
-    let (after_cost, best_expr) = extractor.find_best(root);
+fn run_wasm(cli: &Cli, path: &std::path::Path, rules: &[egg::Rewrite<ValueLang, ()>]) {
+    use search::{format_ops, SearchConfig};
+    use wasm::parse_wasm_file;
 
-    println!("=== {name} ===");
-    println!("Input Value DAG:  {dag}");
-    println!("Best cost:  {before_cost} -> {after_cost}");
-    println!("Output Value DAG: {best_expr}");
-    println!();
-}
+    let info = parse_wasm_file(path).unwrap_or_else(|e| {
+        eprintln!("error parsing {}: {e}", path.display());
+        std::process::exit(1);
+    });
 
-fn load_rules(cli: &Cli) -> Vec<Rewrite<ValueLang, ()>> {
-    let max_len = cli.max_seq_len.clamp(1, 4);
-    let syn = load_or_synthesize_rules(max_len, cli.random_tests);
-    print_synthesized(&syn, cli.random_tests);
-    synthesized_to_rewrites(&syn)
-}
-
-fn run_demos(rules: &[Rewrite<ValueLang, ()>]) {
-    run_example(
-        "Mul-by-4 to Shl-by-2",
-        &parse_value_expr("(i32.mul ?a 4)"),
-        rules,
+    println!(
+        "Parsed {} — {} straight-line segment(s)\n",
+        path.display(),
+        info.segments.len()
     );
-    run_example(
-        "Add-zero elimination",
-        &parse_value_expr("(i32.add ?a 0)"),
-        rules,
-    );
-}
 
-fn run_solve_example(cli: &Cli, rules: &[Rewrite<ValueLang, ()>]) {
-    use goal::{example_fin, example_init};
-    use search::{format_ops, solve_astar, solve_bfs, solve_greedy_inv, verify_forward, SearchConfig};
+    if cli.segments_only {
+        for seg in &info.segments {
+            println!(
+                "func {} segment {} ({} instr): {}",
+                seg.func_index,
+                seg.segment_index,
+                seg.original_len(),
+                format_ops(&seg.ops)
+            );
+        }
+        return;
+    }
 
-    let init = example_init();
-    let fin = example_fin();
     let cfg = SearchConfig {
         max_depth: cli.window,
     };
-    let ops = match cli.solver {
-        SolverKind::Bfs => solve_bfs(&init, &fin, rules, &cfg),
-        SolverKind::Greedy => solve_greedy_inv(&init, &fin, rules, &cfg),
-        SolverKind::Astar => solve_astar(&init, &fin, rules, &cfg),
-    };
-    let Some(ops) = ops else {
-        println!("No solution within window {}", cli.window);
-        return;
-    };
-    println!("=== solve-example (solver: {:?}) ===", cli.solver);
-    println!("Length: {}", ops.len());
-    println!("Ops: {}", format_ops(&ops));
-    println!("Verify l0=42: {}", verify_forward(&fin, &ops, 42));
+    let results = optimize::optimize_segments(&info.segments, rules, &cfg, cli.solver.into());
+    optimize::print_results(&results, cli.solver.into());
+    let (orig, opt, improved) = optimize::summarize(&results);
+    println!(
+        "Total: {orig} -> {opt} instructions across {} segment(s) ({} improved)",
+        results.len(),
+        improved
+    );
 }
 
 fn main() {
@@ -131,9 +125,11 @@ fn main() {
 
     if cli.print_semantics {
         semantics::print_semantics_table();
+        if cli.input.is_none() {
+            return;
+        }
     }
 
-    // Synthesis-only mode: emit verified rules as JSON and exit.
     if cli.synthesize_only {
         let max_len = cli.max_seq_len.clamp(1, 4);
         let syn = load_or_synthesize_rules(max_len, cli.random_tests);
@@ -141,21 +137,12 @@ fn main() {
         return;
     }
 
-    // Backward goal search on the built-in init/fin example.
-    if cli.solve_example {
-        let max_len = cli.max_seq_len.clamp(1, 4);
-        let syn = load_or_synthesize_rules(max_len, cli.random_tests);
-        let rules = synthesized_to_rewrites(&syn);
-        run_solve_example(&cli, &rules);
-        return;
+    let path = cli.input.clone().expect("WASM path required");
+    let max_len = cli.max_seq_len.clamp(1, 4);
+    let syn = load_or_synthesize_rules(max_len, cli.random_tests);
+    if !cli.segments_only {
+        print_synthesized(&syn, cli.random_tests);
     }
-
-    if cli.print_semantics {
-        return;
-    }
-
-    // Default: load rules and run value-level equality-saturation demos.
-    let rules = load_rules(&cli);
-    println!("Running demos with {} synthesized rules.\n", rules.len());
-    run_demos(&rules);
+    let rules = synthesized_to_rewrites(&syn);
+    run_wasm(&cli, &path, &rules);
 }

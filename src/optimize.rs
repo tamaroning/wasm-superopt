@@ -1,0 +1,153 @@
+//! Optimize extracted straight-line Wasm segments via backward goal search.
+
+use crate::lang::ValueLang;
+use crate::search::{
+    format_ops, solve_astar, solve_bfs, solve_greedy_inv, verify_forward, SearchConfig,
+};
+use crate::semantics::SemOp;
+use crate::wasm::StraightSegment;
+use egg::Rewrite;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum SolverKind {
+    Bfs,
+    Greedy,
+    #[default]
+    Astar,
+}
+
+#[derive(Clone, Debug)]
+pub struct SegmentOptResult {
+    pub segment: StraightSegment,
+    pub optimized: Option<Vec<SemOp>>,
+}
+
+impl SegmentOptResult {
+    pub fn saved(&self) -> usize {
+        let orig = self.segment.original_len();
+        self.optimized
+            .as_ref()
+            .map(|o| orig.saturating_sub(o.len()))
+            .unwrap_or(0)
+    }
+}
+
+pub fn optimize_segment(
+    segment: &StraightSegment,
+    rules: &[Rewrite<ValueLang, ()>],
+    cfg: &SearchConfig,
+    solver: SolverKind,
+) -> Option<Vec<SemOp>> {
+    if segment.ops.is_empty() {
+        return None;
+    }
+    if !segment.init.validate_bounds() || !segment.fin.validate_bounds() {
+        return None;
+    }
+    match solver {
+        SolverKind::Bfs => solve_bfs(&segment.init, &segment.fin, rules, cfg),
+        SolverKind::Greedy => solve_greedy_inv(&segment.init, &segment.fin, rules, cfg),
+        SolverKind::Astar => solve_astar(&segment.init, &segment.fin, rules, cfg),
+    }
+}
+
+pub fn optimize_segments(
+    segments: &[StraightSegment],
+    rules: &[Rewrite<ValueLang, ()>],
+    cfg: &SearchConfig,
+    solver: SolverKind,
+) -> Vec<SegmentOptResult> {
+    segments
+        .iter()
+        .map(|segment| SegmentOptResult {
+            optimized: optimize_segment(segment, rules, cfg, solver),
+            segment: segment.clone(),
+        })
+        .collect()
+}
+
+pub fn print_results(results: &[SegmentOptResult], solver: SolverKind) {
+    println!("=== Wasm segment optimization (solver: {solver:?}) ===\n");
+    for result in results {
+        let seg = &result.segment;
+        println!(
+            "func {} segment {} — original {} instr",
+            seg.func_index,
+            seg.segment_index,
+            seg.original_len()
+        );
+        println!("  in : {}", format_ops(&seg.ops));
+        match &result.optimized {
+            Some(ops) => {
+                println!("  out: {}", format_ops(ops));
+                println!(
+                    "  len: {} -> {} (saved {}) verify l0=42: {}",
+                    seg.original_len(),
+                    ops.len(),
+                    result.saved(),
+                    verify_forward(&seg.fin, ops, 42)
+                );
+            }
+            None => println!("  out: (no shorter solution within window)"),
+        }
+        println!();
+    }
+}
+
+pub fn summarize(results: &[SegmentOptResult]) -> (usize, usize, usize) {
+    let mut total_orig = 0usize;
+    let mut total_opt = 0usize;
+    let mut improved = 0usize;
+    for r in results {
+        total_orig += r.segment.original_len();
+        if let Some(ops) = &r.optimized {
+            total_opt += ops.len();
+            if ops.len() < r.segment.original_len() {
+                improved += 1;
+            }
+        } else {
+            total_opt += r.segment.original_len();
+        }
+    }
+    (total_orig, total_opt, improved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synthesis::{load_or_synthesize_rules, synthesized_to_rewrites};
+    use crate::wasm::parse_wasm_bytes;
+
+    fn rules() -> Vec<Rewrite<ValueLang, ()>> {
+        synthesized_to_rewrites(&load_or_synthesize_rules(2, 10))
+    }
+
+    #[test]
+    fn optimizes_example_like_segment() {
+        let wasm = wat::parse_str(
+            r#"(module
+                (func (param i32) (result i32)
+                  local.get 0
+                  i32.const 1
+                  i32.add
+                  local.tee 0
+                  i32.const 4
+                  i32.mul
+                  local.get 0
+                )
+            )"#,
+        )
+        .unwrap();
+        let info = parse_wasm_bytes(&wasm).unwrap();
+        assert_eq!(info.segments.len(), 1);
+        let results = optimize_segments(
+            &info.segments,
+            &rules(),
+            &SearchConfig::default(),
+            SolverKind::Astar,
+        );
+        let opt = results[0].optimized.as_ref().expect("optimized");
+        assert!(opt.len() <= info.segments[0].original_len());
+        assert!(verify_forward(&info.segments[0].fin, opt, 42));
+    }
+}
