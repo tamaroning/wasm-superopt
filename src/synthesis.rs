@@ -1,6 +1,6 @@
 //! Exhaustive rule candidate generation and Z3 equivalence checking.
 
-use crate::lang::{ConstantFolding, WasmLang};
+use crate::lang::WasmLang;
 use crate::semantics::{
     OpCatalog, StackTy, concrete_ops, enumerate_sequences_by_output, exploration_inputs,
     is_type_valid, same_stack_effect, sequences_valid_rewrite_random, sequences_valid_rewrite_z3,
@@ -215,7 +215,7 @@ fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
 
 pub fn synthesized_to_rewrites(
     rules: &[SynthesizedRule],
-) -> Vec<Rewrite<WasmLang, ConstantFolding>> {
+) -> Vec<Rewrite<WasmLang, ()>> {
     rules
         .iter()
         .filter_map(|r| parse_rewrite(&r.name, &r.lhs, &r.rhs).ok())
@@ -226,7 +226,7 @@ fn parse_rewrite(
     name: &str,
     lhs: &str,
     rhs: &str,
-) -> Result<Rewrite<WasmLang, ConstantFolding>, String> {
+) -> Result<Rewrite<WasmLang, ()>, String> {
     let lhs_pat: Pattern<WasmLang> = lhs.parse().map_err(|e| format!("lhs {lhs}: {e}"))?;
     let rhs_pat: Pattern<WasmLang> = rhs.parse().map_err(|e| format!("rhs {rhs}: {e}"))?;
     Rewrite::new(name.to_string(), lhs_pat, rhs_pat).map_err(|e| e.to_string())

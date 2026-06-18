@@ -8,7 +8,7 @@ mod synthesis;
 
 use clap::Parser;
 use egg::*;
-use lang::{ConstantFolding, WasmLang};
+use lang::WasmLang;
 use semantics::DEFAULT_RANDOM_TESTS;
 use stack::{WasmOp, dag_to_stack, format_wasm_block, parse_dag, stack_to_dag};
 use synthesis::{
@@ -39,7 +39,7 @@ fn run_example(
     name: &str,
     wasm: &str,
     dag: &RecExpr<WasmLang>,
-    rules: &[Rewrite<WasmLang, ConstantFolding>],
+    rules: &[Rewrite<WasmLang, ()>],
 ) {
     let before_cost = AstSize.cost_rec(dag);
     let runner = Runner::default().with_expr(dag).run(rules);
@@ -56,18 +56,18 @@ fn run_example(
     println!();
 }
 
-fn run_example_ops(name: &str, ops: &[WasmOp], rules: &[Rewrite<WasmLang, ConstantFolding>]) {
+fn run_example_ops(name: &str, ops: &[WasmOp], rules: &[Rewrite<WasmLang, ()>]) {
     run_example(name, &format_wasm_block(ops), &stack_to_dag(ops), rules);
 }
 
-fn load_rules(cli: &Cli) -> Vec<Rewrite<WasmLang, ConstantFolding>> {
+fn load_rules(cli: &Cli) -> Vec<Rewrite<WasmLang, ()>> {
     let max_len = cli.max_seq_len.clamp(1, 4);
     let syn = load_or_synthesize_rules(max_len, cli.random_tests);
     print_synthesized(&syn, cli.random_tests);
     synthesized_to_rewrites(&syn)
 }
 
-fn run_demos(rules: &[Rewrite<WasmLang, ConstantFolding>]) {
+fn run_demos(rules: &[Rewrite<WasmLang, ()>]) {
     run_example_ops(
         "Arithmetic Optimization",
         &[
