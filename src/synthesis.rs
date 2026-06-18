@@ -42,8 +42,11 @@ fn rules_cache_path(max_len: usize) -> PathBuf {
     PathBuf::from(format!("rules-len{max_len}.cache"))
 }
 
+const RULES_CACHE_FORMAT_VERSION: u32 = 2;
+
 #[derive(Serialize, Deserialize)]
 struct CachedRules {
+    format_version: u32,
     max_seq_len: usize,
     random_tests: usize,
     rules: Vec<SynthesizedRule>,
@@ -53,7 +56,7 @@ pub fn load_cached_rules(max_len: usize) -> Option<Vec<SynthesizedRule>> {
     let path = rules_cache_path(max_len);
     let data = fs::read_to_string(&path).ok()?;
     let cached: CachedRules = serde_json::from_str(&data).ok()?;
-    if cached.max_seq_len != max_len {
+    if cached.format_version != RULES_CACHE_FORMAT_VERSION || cached.max_seq_len != max_len {
         return None;
     }
     report_progress(&format!(
@@ -67,6 +70,7 @@ pub fn load_cached_rules(max_len: usize) -> Option<Vec<SynthesizedRule>> {
 fn save_cached_rules(max_len: usize, random_tests: usize, rules: &[SynthesizedRule]) {
     let path = rules_cache_path(max_len);
     let cached = CachedRules {
+        format_version: RULES_CACHE_FORMAT_VERSION,
         max_seq_len: max_len,
         random_tests,
         rules: rules.to_vec(),

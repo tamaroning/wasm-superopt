@@ -6,7 +6,7 @@ use egg::{Id, Language, RecExpr};
 use std::fmt::{self, Display};
 
 /// Minimal Wasm opcode set for straight-line basic blocks.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WasmOp {
     I32Const(i32),
     I32Add,
@@ -119,7 +119,21 @@ impl StackToDag {
         for op in ops {
             self.apply(op);
         }
+        self.finish_stack_root();
         self.expr
+    }
+
+    /// Wrap the current operand stack as the `RecExpr` root (bottom-to-top `stack.slot` chain).
+    fn finish_stack_root(&mut self) {
+        let _ = self.build_stack_chain(&self.stack.clone());
+    }
+
+    fn build_stack_chain(&mut self, slots: &[Id]) -> Id {
+        if slots.is_empty() {
+            return self.expr.add(WasmLang::StackEnd);
+        }
+        let rest = self.build_stack_chain(&slots[1..]);
+        self.expr.add(WasmLang::StackSlot([slots[0], rest]))
     }
 
     /// Seed the stack with pattern variables `?a`, `?b`, … for synthesis.
@@ -134,10 +148,9 @@ impl StackToDag {
             .collect()
     }
 
-    /// Build an s-expression pattern for the value on top of the operand stack.
-    pub fn pattern_from_stack_top(&self) -> Option<String> {
-        let id = *self.stack.last()?;
-        Some(enode_to_pattern(&self.expr, id))
+    /// Build an s-expression pattern for the full operand stack state.
+    pub fn pattern_from_stack(&self) -> String {
+        stack_ids_to_pattern(&self.expr, &self.stack)
     }
 
 }
@@ -149,8 +162,22 @@ pub fn stack_to_dag(ops: &[WasmOp]) -> RecExpr<WasmLang> {
 /// Convert a `RecExpr` root back to a Wasm basic-block instruction sequence.
 pub fn dag_to_stack(expr: &RecExpr<WasmLang>) -> Vec<WasmOp> {
     let mut ops = Vec::new();
-    emit_dag(expr, expr.root(), &mut ops);
+    match &expr[expr.root()] {
+        WasmLang::StackEnd | WasmLang::StackSlot(_) => emit_stack(expr, expr.root(), &mut ops),
+        _ => emit_dag(expr, expr.root(), &mut ops),
+    }
     ops
+}
+
+fn emit_stack(expr: &RecExpr<WasmLang>, id: Id, ops: &mut Vec<WasmOp>) {
+    match &expr[id] {
+        WasmLang::StackEnd => {}
+        WasmLang::StackSlot([bottom, rest]) => {
+            emit_dag(expr, *bottom, ops);
+            emit_stack(expr, *rest, ops);
+        }
+        other => panic!("expected stack.end / stack.slot, got {other}"),
+    }
 }
 
 fn emit_dag(expr: &RecExpr<WasmLang>, id: Id, ops: &mut Vec<WasmOp>) {
@@ -181,8 +208,20 @@ fn emit_dag(expr: &RecExpr<WasmLang>, id: Id, ops: &mut Vec<WasmOp>) {
             emit_dag(expr, *b, ops);
             ops.push(WasmOp::I32Shl);
         }
+        WasmLang::StackEnd | WasmLang::StackSlot(_) => {
+            panic!("stack nodes must be lowered via emit_stack, not emit_dag")
+        }
         WasmLang::Symbol(sym) => panic!("cannot lower symbolic node {sym}"),
     }
+}
+
+fn stack_ids_to_pattern(expr: &RecExpr<WasmLang>, slots: &[Id]) -> String {
+    if slots.is_empty() {
+        return "stack.end".to_string();
+    }
+    let bottom = enode_to_pattern(expr, slots[0]);
+    let rest = stack_ids_to_pattern(expr, &slots[1..]);
+    format!("(stack.slot {bottom} {rest})")
 }
 
 fn enode_to_pattern(expr: &RecExpr<WasmLang>, id: Id) -> String {
@@ -208,14 +247,45 @@ pub fn sem_sequence_to_pattern(input: &[StackTy], ops: &[SemOp]) -> Option<Strin
     for op in ops {
         dag.apply_sem(op);
     }
-    let out = crate::semantics::simulate_stack_effect(input, ops)?;
-    if out.len() == 1 {
-        dag.pattern_from_stack_top()
-    } else {
-        None
-    }
+    crate::semantics::simulate_stack_effect(input, ops)?;
+    Some(dag.pattern_from_stack())
 }
 
 pub fn parse_dag(s: &str) -> RecExpr<WasmLang> {
     s.parse().expect("invalid RecExpr")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stack_to_dag_wraps_full_stack_state() {
+        let ops = [
+            WasmOp::I32Const(42),
+            WasmOp::I32Const(0),
+            WasmOp::I32Add,
+            WasmOp::I32Const(42),
+            WasmOp::I32Const(0),
+            WasmOp::I32Add,
+        ];
+        let dag = stack_to_dag(&ops);
+        assert!(matches!(&dag[dag.root()], WasmLang::StackSlot(_)));
+        assert_eq!(
+            dag.to_string(),
+            "(stack.slot (i32.add 42 0) (stack.slot (i32.add 42 0) stack.end))"
+        );
+    }
+
+    #[test]
+    fn dag_to_stack_round_trips_multi_slot_stack() {
+        let ops = [
+            WasmOp::I32Const(1),
+            WasmOp::I32Const(2),
+            WasmOp::I32Add,
+            WasmOp::I32Const(3),
+        ];
+        let round = dag_to_stack(&stack_to_dag(&ops));
+        assert_eq!(round, ops.as_slice());
+    }
 }

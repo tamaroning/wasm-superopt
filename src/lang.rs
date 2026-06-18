@@ -10,6 +10,8 @@ define_language! {
         "i32.div_u" = I32DivU([Id; 2]),
         "i32.div_s" = I32DivS([Id; 2]),
         "i32.shl"   = I32Shl([Id; 2]),
+        "stack.end"  = StackEnd,
+        "stack.slot" = StackSlot([Id; 2]),
         Symbol(Symbol),
     }
 }
@@ -49,7 +51,8 @@ impl Analysis<WasmLang> for ConstantFolding {
                 }
             }
             WasmLang::I32Shl([a, b]) => Some(x(a)?.wrapping_shl(x(b)? as u32 & 31)),
-            _ => None,
+            WasmLang::StackEnd | WasmLang::StackSlot(_) => None,
+            WasmLang::Symbol(_) => None,
         }
     }
 

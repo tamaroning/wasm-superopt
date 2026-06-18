@@ -49,8 +49,9 @@ fn run_example(
 
     println!("=== {name} ===");
     println!("Input Wasm: {wasm}");
-    println!("Stack DAG:  {dag}");
+    println!("Input Stack DAG:  {dag}");
     println!("Best cost:  {before_cost} -> {after_cost}");
+    println!("Output Stack DAG: {best_expr}");
     println!("Output Wasm: {}", format_wasm_block(&dag_to_stack(&best_expr)));
     println!();
 }

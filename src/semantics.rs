@@ -5,8 +5,8 @@
 
 use crate::sema::{
     NumType, STRAIGHT_LINE_EMBED, Sign, WasmBinOp, al_spec_for, derive_inst_spec,
-    derive_rule_binop_spec, exec_al_concrete, exec_al_z3, format_al_pretty,
-    format_rule_binop_pretty,
+    derive_rule_binop_spec, exec_al_concrete, exec_al_z3, exec_instrs_concrete,
+    exec_instrs_z3, format_al_pretty, format_rule_binop_pretty, rule_instrs_for,
 };
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
@@ -120,6 +120,10 @@ pub struct ConcreteResult {
 }
 
 pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
+    if let Some(steps) = rule_instrs_for(op) {
+        let _ = state;
+        return exec_instrs_concrete(&steps, stack);
+    }
     let al = al_spec_for(op);
     exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
 }
@@ -344,6 +348,9 @@ pub fn exec_op<'ctx>(
     state: &mut Z3State<'ctx>,
     touches: &mut StateTouches<'ctx>,
 ) -> Bool<'ctx> {
+    if let Some(steps) = rule_instrs_for(op) {
+        return exec_instrs_z3(ctx, &steps, stack, state, touches, &STRAIGHT_LINE_EMBED);
+    }
     let al = al_spec_for(op);
     exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)
 }
