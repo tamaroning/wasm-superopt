@@ -82,9 +82,9 @@ pub enum InstKind {
     I32DivU,
     I32DivS,
     I32Shl,
-    LocalGet,
-    LocalSet,
-    LocalTee,
+    LocalGet(u32),
+    LocalSet(u32),
+    LocalTee(u32),
 }
 
 impl InstKind {
@@ -96,9 +96,9 @@ impl InstKind {
             SemOp::I32DivU => InstKind::I32DivU,
             SemOp::I32DivS => InstKind::I32DivS,
             SemOp::I32Shl => InstKind::I32Shl,
-            SemOp::LocalGet(_) => InstKind::LocalGet,
-            SemOp::LocalSet(_) => InstKind::LocalSet,
-            SemOp::LocalTee(_) => InstKind::LocalTee,
+            SemOp::LocalGet(x) => InstKind::LocalGet(*x),
+            SemOp::LocalSet(x) => InstKind::LocalSet(*x),
+            SemOp::LocalTee(x) => InstKind::LocalTee(*x),
         }
     }
 
@@ -113,6 +113,13 @@ impl InstKind {
         )
     }
 
+    pub fn is_local(self) -> bool {
+        matches!(
+            self,
+            InstKind::LocalGet(_) | InstKind::LocalSet(_) | InstKind::LocalTee(_)
+        )
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             InstKind::I32Const => "i32.const",
@@ -121,9 +128,18 @@ impl InstKind {
             InstKind::I32DivU => "i32.div_u",
             InstKind::I32DivS => "i32.div_s",
             InstKind::I32Shl => "i32.shl",
-            InstKind::LocalGet => "local.get",
-            InstKind::LocalSet => "local.set",
-            InstKind::LocalTee => "local.tee",
+            InstKind::LocalGet(0) => "local.get 0",
+            InstKind::LocalGet(1) => "local.get 1",
+            InstKind::LocalGet(2) => "local.get 2",
+            InstKind::LocalSet(0) => "local.set 0",
+            InstKind::LocalSet(1) => "local.set 1",
+            InstKind::LocalSet(2) => "local.set 2",
+            InstKind::LocalTee(0) => "local.tee 0",
+            InstKind::LocalTee(1) => "local.tee 1",
+            InstKind::LocalTee(2) => "local.tee 2",
+            InstKind::LocalGet(_) | InstKind::LocalSet(_) | InstKind::LocalTee(_) => {
+                panic!("InstKind::name only defined for local slots 0..2")
+            }
         }
     }
 }
@@ -174,7 +190,7 @@ pub fn dag_stack_step(
             };
             Some(DagStackStep::PushConst(*n))
         }
-        InstKind::LocalGet | InstKind::LocalSet | InstKind::LocalTee => None,
+        InstKind::LocalGet(_) | InstKind::LocalSet(_) | InstKind::LocalTee(_) => None,
         kind => {
             let mut args = Vec::with_capacity(spec.pops.len());
             for _ in 0..spec.pops.len() {
@@ -217,9 +233,9 @@ pub fn spec_for(op: &SemOp) -> InstSpec {
         SemOp::I32Shl => derive_rule_binop_spec(InstKind::I32Shl),
         SemOp::I32DivU => derive_rule_binop_spec(InstKind::I32DivU),
         SemOp::I32DivS => derive_rule_binop_spec(InstKind::I32DivS),
-        SemOp::LocalGet(_) => derive_rule_local_get_spec(),
-        SemOp::LocalSet(_) => derive_rule_local_set_spec(),
-        SemOp::LocalTee(_) => derive_rule_local_tee_spec(),
+        SemOp::LocalGet(x) => derive_rule_local_get_spec(*x),
+        SemOp::LocalSet(x) => derive_rule_local_set_spec(*x),
+        SemOp::LocalTee(x) => derive_rule_local_tee_spec(*x),
         _ => {
             let al = al_spec_for(op);
             derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)

@@ -109,9 +109,9 @@ pub fn derive_rule_binop_spec(kind: InstKind) -> InstSpec {
 }
 
 /// `Step_read/local.get` — push only.
-pub fn derive_rule_local_get_spec() -> InstSpec {
+pub fn derive_rule_local_get_spec(slot: u32) -> InstSpec {
     InstSpec {
-        kind: InstKind::LocalGet,
+        kind: InstKind::LocalGet(slot),
         pops: POPS_0,
         pushes: PUSHES_1,
         can_trap: false,
@@ -119,9 +119,9 @@ pub fn derive_rule_local_get_spec() -> InstSpec {
 }
 
 /// `Step/local.set` — pop one value, no push.
-pub fn derive_rule_local_set_spec() -> InstSpec {
+pub fn derive_rule_local_set_spec(slot: u32) -> InstSpec {
     InstSpec {
-        kind: InstKind::LocalSet,
+        kind: InstKind::LocalSet(slot),
         pops: POPS_1,
         pushes: PUSHES_0,
         can_trap: false,
@@ -129,9 +129,9 @@ pub fn derive_rule_local_set_spec() -> InstSpec {
 }
 
 /// `Step_pure/local.tee` — pop one, push one (via duplicate + `LOCAL.SET`).
-pub fn derive_rule_local_tee_spec() -> InstSpec {
+pub fn derive_rule_local_tee_spec(slot: u32) -> InstSpec {
     InstSpec {
-        kind: InstKind::LocalTee,
+        kind: InstKind::LocalTee(slot),
         pops: POPS_1,
         pushes: PUSHES_1,
         can_trap: false,
