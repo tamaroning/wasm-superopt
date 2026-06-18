@@ -1,7 +1,6 @@
 //! Derive static `InstSpec` from AL definitions.
 
-use crate::semantics::{InstSpec, StackTy};
-use super::defs::WasmBinOp;
+use crate::semantics::{InstKind, InstSpec, StackTy};
 use super::ir::{AlCond, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
@@ -91,6 +90,7 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
     let pop_n = count_pops(&al.steps);
     let push_n = count_pushes(&al.steps, policy);
     InstSpec {
+        kind: InstKind::I32Const,
         pops: pops_slice(pop_n),
         pushes: pushes_slice(push_n),
         can_trap: derive_can_trap(&al.steps),
@@ -98,17 +98,20 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
 }
 
 /// Static `InstSpec` for `Step_pure/binop` from meta template shape.
-pub fn derive_rule_binop_spec(binop: WasmBinOp) -> InstSpec {
+pub fn derive_rule_binop_spec(kind: InstKind) -> InstSpec {
+    assert!(kind.is_i32_binop(), "derive_rule_binop_spec: {kind:?}");
     InstSpec {
+        kind,
         pops: POPS_2,
         pushes: PUSHES_1,
-        can_trap: binop.is_partial(),
+        can_trap: matches!(kind, InstKind::I32DivU | InstKind::I32DivS),
     }
 }
 
 /// `Step_read/local.get` — push only.
 pub fn derive_rule_local_get_spec() -> InstSpec {
     InstSpec {
+        kind: InstKind::LocalGet,
         pops: POPS_0,
         pushes: PUSHES_1,
         can_trap: false,
@@ -118,6 +121,7 @@ pub fn derive_rule_local_get_spec() -> InstSpec {
 /// `Step/local.set` — pop one value, no push.
 pub fn derive_rule_local_set_spec() -> InstSpec {
     InstSpec {
+        kind: InstKind::LocalSet,
         pops: POPS_1,
         pushes: PUSHES_0,
         can_trap: false,
@@ -127,6 +131,7 @@ pub fn derive_rule_local_set_spec() -> InstSpec {
 /// `Step_pure/local.tee` — pop one, push one (via duplicate + `LOCAL.SET`).
 pub fn derive_rule_local_tee_spec() -> InstSpec {
     InstSpec {
+        kind: InstKind::LocalTee,
         pops: POPS_1,
         pushes: PUSHES_1,
         can_trap: false,

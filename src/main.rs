@@ -5,15 +5,16 @@ mod sema;
 mod semantics;
 mod stack;
 mod synthesis;
+mod value;
 
 use clap::Parser;
 use egg::*;
-use lang::WasmLang;
+use lang::ValueLang;
 use semantics::DEFAULT_RANDOM_TESTS;
-use stack::{WasmOp, dag_to_stack, format_wasm_block, parse_dag, stack_to_dag};
 use synthesis::{
     load_or_synthesize_rules, print_synthesized, print_synthesized_json, synthesized_to_rewrites,
 };
+use value::parse_value_expr;
 
 #[derive(Parser, Debug)]
 #[command(name = "egraph", about = "Wasm basic-block e-graph optimizer")]
@@ -37,9 +38,8 @@ struct Cli {
 
 fn run_example(
     name: &str,
-    wasm: &str,
-    dag: &RecExpr<WasmLang>,
-    rules: &[Rewrite<WasmLang, ()>],
+    dag: &RecExpr<ValueLang>,
+    rules: &[Rewrite<ValueLang, ()>],
 ) {
     let before_cost = AstSize.cost_rec(dag);
     let runner = Runner::default().with_expr(dag).run(rules);
@@ -48,47 +48,33 @@ fn run_example(
     let (after_cost, best_expr) = extractor.find_best(root);
 
     println!("=== {name} ===");
-    println!("Input Wasm: {wasm}");
-    println!("Input Stack DAG:  {dag}");
+    println!("Input Value DAG:  {dag}");
     println!("Best cost:  {before_cost} -> {after_cost}");
-    println!("Output Stack DAG: {best_expr}");
-    println!("Output Wasm: {}", format_wasm_block(&dag_to_stack(&best_expr)));
+    println!("Output Value DAG: {best_expr}");
     println!();
 }
 
-fn run_example_ops(name: &str, ops: &[WasmOp], rules: &[Rewrite<WasmLang, ()>]) {
-    run_example(name, &format_wasm_block(ops), &stack_to_dag(ops), rules);
-}
-
-fn load_rules(cli: &Cli) -> Vec<Rewrite<WasmLang, ()>> {
+fn load_rules(cli: &Cli) -> Vec<Rewrite<ValueLang, ()>> {
     let max_len = cli.max_seq_len.clamp(1, 4);
     let syn = load_or_synthesize_rules(max_len, cli.random_tests);
     print_synthesized(&syn, cli.random_tests);
     synthesized_to_rewrites(&syn)
 }
 
-fn run_demos(rules: &[Rewrite<WasmLang, ()>]) {
-    run_example_ops(
-        "Arithmetic Optimization",
-        &[
-            WasmOp::I32Const(42),
-            WasmOp::I32Const(0),
-            WasmOp::I32Add,
-            WasmOp::I32Const(1),
-            WasmOp::I32Mul,
-        ],
+fn run_demos(rules: &[Rewrite<ValueLang, ()>]) {
+    run_example(
+        "Mul-by-4 to Shl-by-2",
+        &parse_value_expr("(i32.mul ?a 4)"),
         rules,
     );
-    run_example_ops(
-        "Arithmetic Optimization",
-        &[
-            WasmOp::I32Const(42),
-            WasmOp::I32Const(0),
-            WasmOp::I32Add,
-            WasmOp::I32Const(42),
-            WasmOp::I32Const(0),
-            WasmOp::I32Add,
-        ],
+    run_example(
+        "Mul-by-4 inside add (idea.md stack value shape)",
+        &parse_value_expr("(i32.mul (i32.add ?L0 1) 4)"),
+        rules,
+    );
+    run_example(
+        "Add-zero elimination",
+        &parse_value_expr("(i32.add ?a 0)"),
         rules,
     );
 }

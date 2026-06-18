@@ -1,7 +1,7 @@
 //! Stack-to-DAG conversion driven by centralized semantics.
 
 use crate::lang::WasmLang;
-use crate::semantics::{SemOp, StackTy, spec_for};
+use crate::semantics::{DagStackStep, SemOp, StackTy, dag_stack_step, spec_for, wasm_lang_from_kind};
 use egg::{Id, Language, RecExpr};
 use std::fmt::{self, Display};
 
@@ -80,43 +80,16 @@ impl StackToDag {
     /// Apply using semantics table for stack signature validation.
     pub fn apply_sem(&mut self, op: &SemOp) {
         let spec = spec_for(op);
-        assert!(
-            spec.pops.len() <= self.stack.len(),
-            "stack underflow applying {:?}",
-            op
-        );
-
-        match op {
-            SemOp::I32Const(n) => {
-                self.stack.push(self.expr.add(WasmLang::I32Const(*n)));
+        let step = dag_stack_step(op, &spec, &mut self.stack).unwrap_or_else(|| {
+            panic!("effectful or unsupported op in DAG conversion: {op:?}")
+        });
+        match step {
+            DagStackStep::PushConst(n) => {
+                self.stack.push(self.expr.add(WasmLang::I32Const(n)));
             }
-            SemOp::I32Add => {
-                let b = self.stack.pop().expect("i32.add");
-                let a = self.stack.pop().expect("i32.add");
-                self.stack.push(self.expr.add(WasmLang::I32Add([a, b])));
-            }
-            SemOp::I32Mul => {
-                let b = self.stack.pop().expect("i32.mul");
-                let a = self.stack.pop().expect("i32.mul");
-                self.stack.push(self.expr.add(WasmLang::I32Mul([a, b])));
-            }
-            SemOp::I32DivU => {
-                let b = self.stack.pop().expect("i32.div_u");
-                let a = self.stack.pop().expect("i32.div_u");
-                self.stack.push(self.expr.add(WasmLang::I32DivU([a, b])));
-            }
-            SemOp::I32DivS => {
-                let b = self.stack.pop().expect("i32.div_s");
-                let a = self.stack.pop().expect("i32.div_s");
-                self.stack.push(self.expr.add(WasmLang::I32DivS([a, b])));
-            }
-            SemOp::I32Shl => {
-                let b = self.stack.pop().expect("i32.shl");
-                let a = self.stack.pop().expect("i32.shl");
-                self.stack.push(self.expr.add(WasmLang::I32Shl([a, b])));
-            }
-            SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) => {
-                panic!("effectful local ops are not supported in DAG conversion");
+            DagStackStep::Push { kind, args } => {
+                self.stack
+                    .push(self.expr.add(wasm_lang_from_kind(kind, &args)));
             }
         }
     }

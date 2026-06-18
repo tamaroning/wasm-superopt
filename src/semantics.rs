@@ -74,21 +74,149 @@ fn local_op_name(kind: &'static str, x: u32) -> &'static str {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InstKind {
+    I32Const,
+    I32Add,
+    I32Mul,
+    I32DivU,
+    I32DivS,
+    I32Shl,
+    LocalGet,
+    LocalSet,
+    LocalTee,
+}
+
+impl InstKind {
+    pub fn from_sem_op(op: &SemOp) -> Self {
+        match op {
+            SemOp::I32Const(_) => InstKind::I32Const,
+            SemOp::I32Add => InstKind::I32Add,
+            SemOp::I32Mul => InstKind::I32Mul,
+            SemOp::I32DivU => InstKind::I32DivU,
+            SemOp::I32DivS => InstKind::I32DivS,
+            SemOp::I32Shl => InstKind::I32Shl,
+            SemOp::LocalGet(_) => InstKind::LocalGet,
+            SemOp::LocalSet(_) => InstKind::LocalSet,
+            SemOp::LocalTee(_) => InstKind::LocalTee,
+        }
+    }
+
+    pub fn is_i32_binop(self) -> bool {
+        matches!(
+            self,
+            InstKind::I32Add
+                | InstKind::I32Mul
+                | InstKind::I32DivU
+                | InstKind::I32DivS
+                | InstKind::I32Shl
+        )
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            InstKind::I32Const => "i32.const",
+            InstKind::I32Add => "i32.add",
+            InstKind::I32Mul => "i32.mul",
+            InstKind::I32DivU => "i32.div_u",
+            InstKind::I32DivS => "i32.div_s",
+            InstKind::I32Shl => "i32.shl",
+            InstKind::LocalGet => "local.get",
+            InstKind::LocalSet => "local.set",
+            InstKind::LocalTee => "local.tee",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstSpec {
+    pub kind: InstKind,
     pub pops: &'static [StackTy],
     pub pushes: &'static [StackTy],
     /// Whether this instruction may trap (trap kind is not distinguished).
     pub can_trap: bool,
 }
 
+impl InstSpec {
+    pub fn kind_name(&self) -> &'static str {
+        self.kind.name()
+    }
+}
+
+/// Stack effect of a pure DAG-representable op.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DagStackStep {
+    /// `i32.const` — immediate carried here (pop 0).
+    PushConst(i32),
+    /// Any other op: popped operands in stack order (bottom-first), then one push.
+    Push {
+        kind: InstKind,
+        args: Vec<egg::Id>,
+    },
+}
+
+/// Apply `InstSpec` stack effect; `I32Const` reads its immediate from `op`.
+pub fn dag_stack_step(
+    op: &SemOp,
+    spec: &InstSpec,
+    stack: &mut Vec<egg::Id>,
+) -> Option<DagStackStep> {
+    if stack.len() < spec.pops.len() {
+        return None;
+    }
+    if spec.pushes.len() != 1 {
+        return None;
+    }
+    match spec.kind {
+        InstKind::I32Const => {
+            let SemOp::I32Const(n) = op else {
+                return None;
+            };
+            Some(DagStackStep::PushConst(*n))
+        }
+        InstKind::LocalGet | InstKind::LocalSet | InstKind::LocalTee => None,
+        kind => {
+            let mut args = Vec::with_capacity(spec.pops.len());
+            for _ in 0..spec.pops.len() {
+                args.push(stack.pop()?);
+            }
+            args.reverse();
+            Some(DagStackStep::Push { kind, args })
+        }
+    }
+}
+
+pub fn value_lang_from_kind(kind: InstKind, args: &[egg::Id]) -> crate::lang::ValueLang {
+    use crate::lang::ValueLang;
+    match (kind, args) {
+        (InstKind::I32Add, [a, b]) => ValueLang::I32Add([*a, *b]),
+        (InstKind::I32Mul, [a, b]) => ValueLang::I32Mul([*a, *b]),
+        (InstKind::I32Shl, [a, b]) => ValueLang::I32Shl([*a, *b]),
+        (InstKind::I32DivU, [a, b]) => ValueLang::I32DivU([*a, *b]),
+        (InstKind::I32DivS, [a, b]) => ValueLang::I32DivS([*a, *b]),
+        _ => panic!("unsupported value DAG op {kind:?} arity {}", args.len()),
+    }
+}
+
+pub fn wasm_lang_from_kind(kind: InstKind, args: &[egg::Id]) -> crate::lang::WasmLang {
+    use crate::lang::WasmLang;
+    match (kind, args) {
+        (InstKind::I32Add, [a, b]) => WasmLang::I32Add([*a, *b]),
+        (InstKind::I32Mul, [a, b]) => WasmLang::I32Mul([*a, *b]),
+        (InstKind::I32Shl, [a, b]) => WasmLang::I32Shl([*a, *b]),
+        (InstKind::I32DivU, [a, b]) => WasmLang::I32DivU([*a, *b]),
+        (InstKind::I32DivS, [a, b]) => WasmLang::I32DivS([*a, *b]),
+        _ => panic!("unsupported wasm DAG op {kind:?} arity {}", args.len()),
+    }
+}
+
 pub fn spec_for(op: &SemOp) -> InstSpec {
     match op {
-        SemOp::I32Add => derive_rule_binop_spec(WasmBinOp::Add),
-        SemOp::I32Mul => derive_rule_binop_spec(WasmBinOp::Mul),
-        SemOp::I32Shl => derive_rule_binop_spec(WasmBinOp::Shl),
-        SemOp::I32DivU => derive_rule_binop_spec(WasmBinOp::Div(Sign::U)),
-        SemOp::I32DivS => derive_rule_binop_spec(WasmBinOp::Div(Sign::S)),
+        SemOp::I32Add => derive_rule_binop_spec(InstKind::I32Add),
+        SemOp::I32Mul => derive_rule_binop_spec(InstKind::I32Mul),
+        SemOp::I32Shl => derive_rule_binop_spec(InstKind::I32Shl),
+        SemOp::I32DivU => derive_rule_binop_spec(InstKind::I32DivU),
+        SemOp::I32DivS => derive_rule_binop_spec(InstKind::I32DivS),
         SemOp::LocalGet(_) => derive_rule_local_get_spec(),
         SemOp::LocalSet(_) => derive_rule_local_set_spec(),
         SemOp::LocalTee(_) => derive_rule_local_tee_spec(),
@@ -127,6 +255,14 @@ pub fn concrete_ops() -> Vec<SemOp> {
         ops.push(SemOp::LocalTee(x));
     }
     ops
+}
+
+/// Pure arithmetic ops for value-level rule synthesis (no locals).
+pub fn pure_arithmetic_ops() -> Vec<SemOp> {
+    concrete_ops()
+        .into_iter()
+        .filter(|op| !op.is_effectful())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

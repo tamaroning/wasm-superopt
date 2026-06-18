@@ -1,12 +1,12 @@
 //! Exhaustive rule candidate generation and Z3 equivalence checking.
 
-use crate::lang::WasmLang;
+use crate::lang::ValueLang;
 use crate::semantics::{
-    OpCatalog, SemOp, StackTy, concrete_ops, enumerate_sequences_by_output, exploration_inputs,
-    is_type_valid, same_stack_effect, sequences_valid_rewrite_random, sequences_valid_rewrite_z3,
-    uses_all_input_slots, z3_context,
+    OpCatalog, SemOp, StackTy, enumerate_sequences_by_output, exploration_inputs,
+    is_type_valid, pure_arithmetic_ops, same_stack_effect, sequences_valid_rewrite_random,
+    sequences_valid_rewrite_z3, uses_all_input_slots, z3_context,
 };
-use crate::stack::sem_sequence_to_pattern;
+use crate::value::sem_sequence_to_value_pattern;
 use egg::{Pattern, Rewrite};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -42,7 +42,7 @@ fn rules_cache_path(max_len: usize) -> PathBuf {
     PathBuf::from(format!("rules-len{max_len}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 4;
+const RULES_CACHE_FORMAT_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct CachedRules {
@@ -91,7 +91,7 @@ pub fn load_or_synthesize_rules(max_len: usize, random_tests: usize) -> Vec<Synt
 
 pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedRule> {
     let ctx = z3_context();
-    let ops = concrete_ops();
+    let ops = pure_arithmetic_ops();
     let catalog = OpCatalog::from_ops(&ops);
     let inputs = exploration_inputs();
     let mut proven = Vec::new();
@@ -161,10 +161,10 @@ pub fn synthesize_rules(max_len: usize, random_tests: usize) -> Vec<SynthesizedR
                     if !sequences_valid_rewrite_z3(&ctx, input, lhs, rhs) {
                         continue;
                     }
-                    let Some(lhs_pat) = sem_sequence_to_pattern(input, lhs) else {
+                    let Some(lhs_pat) = sem_sequence_to_value_pattern(input, lhs) else {
                         continue;
                     };
-                    let Some(rhs_pat) = sem_sequence_to_pattern(input, rhs) else {
+                    let Some(rhs_pat) = sem_sequence_to_value_pattern(input, rhs) else {
                         continue;
                     };
                     let key = canonical_key(&lhs_pat, &rhs_pat);
@@ -232,7 +232,7 @@ fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
 
 pub fn synthesized_to_rewrites(
     rules: &[SynthesizedRule],
-) -> Vec<Rewrite<WasmLang, ()>> {
+) -> Vec<Rewrite<ValueLang, ()>> {
     rules
         .iter()
         .filter_map(|r| parse_rewrite(&r.name, &r.lhs, &r.rhs).ok())
@@ -243,9 +243,9 @@ fn parse_rewrite(
     name: &str,
     lhs: &str,
     rhs: &str,
-) -> Result<Rewrite<WasmLang, ()>, String> {
-    let lhs_pat: Pattern<WasmLang> = lhs.parse().map_err(|e| format!("lhs {lhs}: {e}"))?;
-    let rhs_pat: Pattern<WasmLang> = rhs.parse().map_err(|e| format!("rhs {rhs}: {e}"))?;
+) -> Result<Rewrite<ValueLang, ()>, String> {
+    let lhs_pat: Pattern<ValueLang> = lhs.parse().map_err(|e| format!("lhs {lhs}: {e}"))?;
+    let rhs_pat: Pattern<ValueLang> = rhs.parse().map_err(|e| format!("rhs {rhs}: {e}"))?;
     Rewrite::new(name.to_string(), lhs_pat, rhs_pat).map_err(|e| e.to_string())
 }
 
@@ -274,4 +274,19 @@ pub fn print_synthesized_json(rules: &[SynthesizedRule], random_tests: usize) {
     };
     let json = serde_json::to_string_pretty(&output).expect("serialize synthesized rules");
     println!("{json}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::semantics::{StackTy, SemOp};
+
+    #[test]
+    fn value_pattern_for_mul_const2_equiv() {
+        let input = vec![StackTy::I32];
+        let mul_seq = vec![SemOp::I32Const(2), SemOp::I32Mul];
+        let pat = sem_sequence_to_value_pattern(&input, &mul_seq).expect("pattern");
+        assert_eq!(pat, "(i32.mul ?a 2)");
+        assert!(!pat.contains("stack"));
+    }
 }
