@@ -67,34 +67,6 @@ impl MachineState {
     }
 }
 
-pub fn symbol_l0() -> ValueExpr {
-    parse_value_expr("?L0")
-}
-
-/// Initial machine state for the built-in search example: empty stack, local 0 = ?L0.
-pub fn example_init() -> MachineState {
-    let mut locals = BTreeMap::new();
-    locals.insert(0, LocalReq::Need(symbol_l0()));
-    MachineState {
-        stack: vec![],
-        locals,
-    }
-}
-
-/// Final machine state for the built-in search example: stack [(L+1)*2, L+1], local 0 = L+1.
-pub fn example_fin() -> MachineState {
-    let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
-    let mut locals = BTreeMap::new();
-    locals.insert(0, LocalReq::Need(l_plus_1.clone()));
-    MachineState {
-        stack: vec![
-            parse_value_expr("(i32.mul (i32.add ?L0 1) 2)"),
-            l_plus_1,
-        ],
-        locals,
-    }
-}
-
 /// Concrete evaluation for forward verification (`?L0` only).
 pub fn eval_value(expr: &ValueExpr, l0: i32) -> i32 {
     eval_id(expr, expr.root(), l0)
@@ -206,13 +178,3 @@ pub fn all_subtree_exprs(expr: &ValueExpr) -> Vec<ValueExpr> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn example_init_fin_bounds() {
-        assert!(example_init().validate_bounds());
-        assert!(example_fin().validate_bounds());
-    }
-}

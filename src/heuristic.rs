@@ -126,7 +126,7 @@ pub fn h_goal(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::goal::{example_fin, example_init};
+    use crate::example::{fin, init};
     use crate::synthesis::{
         load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
     };
@@ -141,24 +141,24 @@ mod tests {
 
     #[test]
     fn h_dep_zero_at_init() {
-        let init = example_init();
+        let init = init();
         let mut canon = canonizer();
         assert_eq!(h_dep(&init, &init, &mut canon), 0);
     }
 
     #[test]
     fn h_dep_deep_chain_on_example_fin() {
-        let init = example_init();
-        let fin = example_fin();
+        let init = init();
+        let fin = fin();
         let mut canon = canonizer();
         let dep = h_dep(&fin, &init, &mut canon);
-        assert!(dep >= 2, "mul→add chain should depth ≥ 2, got {dep}");
+        assert!(dep >= 1, "shl/mul chain should depth ≥ 1, got {dep}");
         assert!(dep <= 7, "must stay admissible vs optimal 7-instr solution");
     }
 
     #[test]
     fn h_dep_can_exceed_h_node_on_single_deep_expr() {
-        let init = example_init();
+        let init = init();
         let mut canon = canonizer();
         let deep = parse_value_expr("(i32.mul (i32.add (i32.add ?L0 1) 1) 2)");
         let g = MachineState {
@@ -173,8 +173,8 @@ mod tests {
 
     #[test]
     fn h_goal_includes_h_dep() {
-        let init = example_init();
-        let fin = example_fin();
+        let init = init();
+        let fin = fin();
         let mut canon = canonizer();
         let goal = h_goal(&fin, &init, &mut canon);
         let dep = h_dep(&fin, &init, &mut canon);

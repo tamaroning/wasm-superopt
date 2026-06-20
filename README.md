@@ -25,14 +25,14 @@ Loop/jump-free WebAssembly basic blocks are optimized via backward residual-goal
 # Synthesize rules only (JSON to stdout)
 cargo run --release -- --synthesize-only --max-ast-size 3
 
-# Optimize a Wasm module
-cargo run --release -- examples/example.wasm
+# Optimize a Wasm module (.wat or .wasm)
+cargo run --release -- examples/example.wat
 
 # A* with peel depth 16 (default)
-cargo run --release -- examples/example.wasm --solver astar --window 16
+cargo run --release -- examples/example.wat --solver astar --window 16
 
 # List extracted segments without optimizing
-cargo run --release -- examples/example.wasm --segments-only
+cargo run --release -- examples/example.wat --segments-only
 ```
 
 ## Supported features
@@ -64,6 +64,7 @@ cargo run --release -- examples/example.wasm --segments-only
 - `src/forward.rs` — forward symbolic execution
 - `src/wasm/` — Wasm parsing and segment extraction
 - `src/sema/` — SpecTec AL semantics
-- `idea.md` — design slides
+- `src/example.rs` — loads `examples/example.wat` for tests and docs
+- `examples/` — running example (`example.wat`) and SMT-LIB sample (`smt-lib.md`)
 
-See also [encoding.md](encoding.md) and [idea.md](idea.md).
+See also [encoding.md](encoding.md), [idea.md](idea.md), and [examples/README.md](examples/README.md).

@@ -1,6 +1,6 @@
 //! Backward goal search: BFS, greedy inverse, and A*.
 
-use crate::canon::{Canonizer, NormalGoal};
+use crate::canon::Canonizer;
 use crate::goal::{concrete_local, MachineState, MAX_LOCAL_SLOT};
 use crate::heuristic::h_goal;
 use crate::inverse::{applicable_peels, PeelAction};
@@ -65,20 +65,19 @@ pub fn solve_bfs(
 ) -> Option<Vec<SemOp>> {
     let mut canon = Canonizer::new(rules.to_vec());
     let mut queue = VecDeque::new();
-    let mut memo: HashMap<NormalGoal, usize> = HashMap::new();
     queue.push_back((fin.clone(), Vec::new(), 0usize));
     while let Some((g, path, depth)) = queue.pop_front() {
         if g.is_grounded(init, &mut canon) {
-            return Some(reverse_ops(&path));
+            let candidate = reverse_ops(&path);
+            if verify_forward(fin, &candidate, 42) {
+                return Some(candidate);
+            }
+            continue;
         }
         if depth >= cfg.max_depth {
             continue;
         }
-        let key = canon.normal_goal(&g);
-        if memo.get(&key).is_some_and(|&d| d <= depth) {
-            continue;
-        }
-        memo.insert(key, depth);
+        // Memo disabled: symbolic canon can collide across semantically distinct goals.
         for (PeelAction::Forward(op), next) in applicable_peels(&g, &mut canon) {
             let mut next_path = path.clone();
             next_path.push(op);
@@ -147,9 +146,12 @@ pub fn solve_astar(
 ) -> Option<Vec<SemOp>> {
     let mut canon = Canonizer::new(rules.to_vec());
     let mut best_path = solve_greedy_inv(init, fin, rules, cfg);
-    let mut best = best_path.as_ref().map(|p| p.len()).unwrap_or(cfg.max_depth);
+    let mut best = best_path
+        .as_ref()
+        .filter(|p| verify_forward(fin, p, 42))
+        .map(|p| p.len())
+        .unwrap_or(cfg.max_depth);
 
-    let mut memo: HashMap<NormalGoal, usize> = HashMap::new();
     let mut heap = BinaryHeap::new();
     let h0 = h_goal(fin, init, &mut canon);
     heap.push(AstarNode {
@@ -164,26 +166,21 @@ pub fn solve_astar(
             continue;
         }
         if goal.is_grounded(init, &mut canon) {
-            if g < best {
+            let candidate = reverse_ops(&path);
+            if verify_forward(fin, &candidate, 42) && g <= best {
                 best = g;
-                best_path = Some(reverse_ops(&path));
+                best_path = Some(candidate);
             }
             continue;
         }
         if g >= cfg.max_depth.min(best) {
             continue;
         }
-        let key = canon.normal_goal(&goal);
-        if memo.get(&key).is_some_and(|&d| d <= g) {
-            continue;
-        }
-        memo.insert(key, g);
-
         for (PeelAction::Forward(op), next) in applicable_peels(&goal, &mut canon) {
             let ng = g + 1;
             let nh = h_goal(&next, init, &mut canon);
             let nf = ng + nh;
-            if nf < best {
+            if nf <= best {
                 let mut npath = path.clone();
                 npath.push(op);
                 heap.push(AstarNode {
@@ -201,7 +198,7 @@ pub fn solve_astar(
 
 pub fn format_ops(ops: &[SemOp]) -> String {
     ops.iter()
-        .map(SemOp::name)
+        .map(|op| op.to_string())
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -209,7 +206,7 @@ pub fn format_ops(ops: &[SemOp]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::goal::{example_fin, example_init};
+    use crate::example::{fin, init};
     use crate::synthesis::{
         load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
     };
@@ -220,18 +217,19 @@ mod tests {
 
     #[test]
     fn solve_example_bfs() {
-        let init = example_init();
-        let fin = example_fin();
+        let init = init();
+        let fin = fin();
         let rules = test_rules();
         let ops = solve_bfs(&init, &fin, &rules, &SearchConfig::default()).expect("solution");
         assert_eq!(ops.len(), 7, "ops: {}", format_ops(&ops));
+        assert!(format_ops(&ops).contains("i32.const 3"));
         assert!(verify_forward(&fin, &ops, 42));
     }
 
     #[test]
     fn solve_example_astar() {
-        let init = example_init();
-        let fin = example_fin();
+        let init = init();
+        let fin = fin();
         let rules = test_rules();
         let ops = solve_astar(&init, &fin, &rules, &SearchConfig::default()).expect("solution");
         assert_eq!(ops.len(), 7);
@@ -240,9 +238,9 @@ mod tests {
 
     #[test]
     fn forward_exec_matches_fin() {
-        let fin = example_fin();
+        let fin = fin();
         let rules = test_rules();
-        let init = example_init();
+        let init = init();
         let ops = solve_bfs(&init, &fin, &rules, &SearchConfig::default()).unwrap();
         assert!(verify_forward(&fin, &ops, 7));
     }

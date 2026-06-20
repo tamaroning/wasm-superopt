@@ -1,6 +1,7 @@
 //! Loop/jump-free WebAssembly basic blocks → backward goal search + e-graph rules.
 
 mod canon;
+mod example;
 mod forward;
 mod goal;
 mod heuristic;

@@ -151,32 +151,24 @@ pub fn forward_goal(init: &MachineState, ops: &[SemOp]) -> Result<MachineState, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::goal::example_init;
+    use crate::example::{fin, init, segment};
     use crate::search::verify_forward;
-    use crate::semantics::SemOp;
 
     #[test]
-    fn example_fin_from_forward_exec() {
-        let init = example_init();
-        let ops = [
-            SemOp::LocalGet(0),
-            SemOp::I32Const(1),
-            SemOp::I32Add,
-            SemOp::LocalTee(0),
-            SemOp::I32Const(2),
-            SemOp::I32Mul,
-            SemOp::LocalGet(0),
-        ];
-        let fin = forward_goal(&init, &ops).expect("forward");
-        assert!(fin.validate_bounds());
+    fn running_example_forward_exec() {
+        let init = init();
+        let fin = fin();
+        let ops = segment().ops.clone();
+        let got = forward_goal(&init, &ops).expect("forward");
+        assert!(got.validate_bounds());
         assert!(verify_forward(&fin, &ops, 42));
     }
 
     #[test]
-    fn function_entry_matches_example_init() {
+    fn function_entry_matches_running_example_init() {
         let entry = SymMachine::function_entry(1, 1);
         let init = entry.to_init_state();
-        let expected = example_init();
+        let expected = crate::example::init();
         assert_eq!(init.stack, expected.stack);
         assert_eq!(init.locals, expected.locals);
     }

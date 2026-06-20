@@ -10,6 +10,7 @@ use crate::sema::{
     exec_instrs_z3, format_al_pretty, format_rule_binop_pretty, format_rule_local_pretty,
     rule_instrs_for,
 };
+use std::fmt;
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{Config, Context, Sort};
 
@@ -56,6 +57,22 @@ impl SemOp {
             self,
             SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_)
         )
+    }
+}
+
+impl fmt::Display for SemOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SemOp::I32Const(n) => write!(f, "i32.const {n}"),
+            SemOp::I32Add => write!(f, "i32.add"),
+            SemOp::I32Mul => write!(f, "i32.mul"),
+            SemOp::I32DivU => write!(f, "i32.div_u"),
+            SemOp::I32DivS => write!(f, "i32.div_s"),
+            SemOp::I32Shl => write!(f, "i32.shl"),
+            SemOp::LocalGet(x) => write!(f, "local.get {x}"),
+            SemOp::LocalSet(x) => write!(f, "local.set {x}"),
+            SemOp::LocalTee(x) => write!(f, "local.tee {x}"),
+        }
     }
 }
 

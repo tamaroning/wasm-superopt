@@ -99,7 +99,7 @@ fn inst_kind_to_sem(kind: InstKind) -> SemOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::goal::{example_fin, example_init};
+    use crate::example::{fin, init};
     use crate::synthesis::{
         load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
     };
@@ -115,20 +115,18 @@ mod tests {
     #[test]
     fn memo_convergence_mul_vs_shl() {
         let mut canon = canonizer();
-        let fin = example_fin();
-        let mut g = fin.clone();
-        // peel top get_0
-        let peels = applicable_peels(&g, &mut canon);
-        let (_, g1) = peels
-            .iter()
-            .find(|(a, _)| matches!(a, PeelAction::Forward(SemOp::LocalGet(0))))
-            .expect("get peel");
-        g = g1.clone();
+        // Use (L+1)*2 so mul/shl equivalences both appear in the e-graph.
+        let top = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
+        let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
+        let mut locals = std::collections::BTreeMap::new();
+        locals.insert(0, crate::goal::LocalReq::Need(l_plus_1));
+        let g = crate::goal::MachineState {
+            stack: vec![top],
+            locals,
+        };
         let key1 = canon.normal_goal(&g);
-        // peel mul path
-        let mut g_mul = g.clone();
-        let top = g_mul.stack.pop().expect("top");
-        let decomps = canon.binop_decompositions(&top);
+        let top_expr = g.stack.last().expect("top");
+        let decomps = canon.binop_decompositions(top_expr);
         assert!(decomps.iter().any(|(k, _, _)| *k == InstKind::I32Mul));
         let (_, e1, e2) = decomps
             .iter()
@@ -141,11 +139,10 @@ mod tests {
         after_mul.stack.push(parse_value_expr("2"));
         after_mul.stack.pop();
         let key_mul = canon.normal_goal(&after_mul);
-        // peel shl path
         let (_, e1s, e2s) = decomps
             .iter()
             .find(|(k, _, _)| *k == InstKind::I32Shl)
-            .unwrap();
+            .expect("shl decomposition");
         let mut after_shl = g.clone();
         after_shl.stack.pop();
         after_shl.stack.push(e1s.clone());
@@ -161,17 +158,18 @@ mod tests {
     #[test]
     fn peel_sequence_reaches_init() {
         let mut canon = canonizer();
-        let init = example_init();
-        let mut g = example_fin();
+        let init = init();
+        let mut g = fin();
         let manual: Vec<SemOp> = vec![
-            SemOp::LocalGet(0),
-            SemOp::I32Mul,
-            SemOp::I32Const(2),
             SemOp::LocalTee(0),
-            SemOp::I32Add,
+            SemOp::I32Shl,
             SemOp::I32Const(1),
             SemOp::LocalGet(0),
+            SemOp::I32Shl,
+            SemOp::I32Const(3),
+            SemOp::LocalGet(0),
         ];
+        let forward: Vec<SemOp> = manual.iter().rev().cloned().collect();
         for op in manual {
             let peels = applicable_peels(&g, &mut canon);
             let next = peels
@@ -179,9 +177,11 @@ mod tests {
                 .find(|(a, _)| match (&a, &op) {
                     (PeelAction::Forward(SemOp::I32Const(a)), SemOp::I32Const(b)) => a == b,
                     (PeelAction::Forward(SemOp::LocalGet(a)), SemOp::LocalGet(b)) => a == b,
+                    (PeelAction::Forward(SemOp::LocalSet(a)), SemOp::LocalSet(b)) => a == b,
                     (PeelAction::Forward(SemOp::LocalTee(a)), SemOp::LocalTee(b)) => a == b,
                     (PeelAction::Forward(SemOp::I32Mul), SemOp::I32Mul) => true,
                     (PeelAction::Forward(SemOp::I32Add), SemOp::I32Add) => true,
+                    (PeelAction::Forward(SemOp::I32Shl), SemOp::I32Shl) => true,
                     _ => false,
                 })
                 .map(|(_, n)| n)
@@ -189,5 +189,6 @@ mod tests {
             g = next;
         }
         assert!(g.is_grounded(&init, &mut canon));
+        assert!(crate::search::verify_forward(&fin(), &forward, 42));
     }
 }

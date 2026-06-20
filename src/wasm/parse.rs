@@ -14,8 +14,18 @@ pub struct WasmModuleInfo {
 }
 
 pub fn parse_wasm_file(path: &Path) -> Result<WasmModuleInfo, String> {
-    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let bytes = read_wasm_bytes(path)?;
     parse_wasm_bytes(&bytes)
+}
+
+fn read_wasm_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let ext = path.extension().and_then(|e| e.to_str());
+    if ext == Some("wat") {
+        let text = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        wat::parse_str(&text).map_err(|e| format!("parse wat {}: {e}", path.display()))
+    } else {
+        fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))
+    }
 }
 
 pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
