@@ -16,8 +16,8 @@ pub struct NormalizedGoal {
     pub locals: Vec<(u32, CanonId)>,
 }
 
-const SAT_ITER_LIMIT: usize = 20;
-const SAT_NODE_LIMIT: usize = 10_000;
+const EQSAT_ITER_LIMIT: usize = 20;
+const EQSAT_NODE_LIMIT: usize = 10_000;
 
 pub struct Canonizer {
     rules: Vec<Rewrite<ValueLang, ()>>,
@@ -36,8 +36,8 @@ impl Canonizer {
             class_to_id: HashMap::new(),
             next_id: 0,
             runner: Runner::default()
-                .with_iter_limit(SAT_ITER_LIMIT)
-                .with_node_limit(SAT_NODE_LIMIT),
+                .with_iter_limit(EQSAT_ITER_LIMIT)
+                .with_node_limit(EQSAT_NODE_LIMIT),
         }
     }
 
@@ -99,8 +99,8 @@ impl Canonizer {
 
     pub fn saturate(&self, expr: &ValueExpr) -> Runner<ValueLang, ()> {
         Runner::default()
-            .with_iter_limit(SAT_ITER_LIMIT)
-            .with_node_limit(SAT_NODE_LIMIT)
+            .with_iter_limit(EQSAT_ITER_LIMIT)
+            .with_node_limit(EQSAT_NODE_LIMIT)
             .with_expr(expr)
             .run(&self.rules)
     }
@@ -145,8 +145,8 @@ impl Canonizer {
         let egraph = std::mem::take(&mut self.runner.egraph);
         let roots = self.runner.roots.clone();
         self.runner = Runner::default()
-            .with_iter_limit(SAT_ITER_LIMIT)
-            .with_node_limit(SAT_NODE_LIMIT)
+            .with_iter_limit(EQSAT_ITER_LIMIT)
+            .with_node_limit(EQSAT_NODE_LIMIT)
             .with_egraph(egraph)
             .run(&self.rules);
         self.runner.roots = roots;
