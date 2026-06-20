@@ -310,7 +310,7 @@ mod tests {
         for input in synthesis_inputs() {
             let asts: Vec<ValueAst> = enumerate_value_asts(4, input.len())
                 .into_iter()
-                .filter(|ast| ast.uses_each_symbol_once(input.len()))
+                .filter(|ast| ast.uses_all_symbols(input.len()))
                 .collect();
             total_pairs += count_candidate_pairs(input.len(), &asts);
         }
