@@ -1,5 +1,6 @@
-//! SpecTec AL definitions transcribed from [`spectec/binop.al`](../../spectec/binop.al)
-//! and [`spectec/local.al`](../../spectec/local.al).
+//! SpecTec AL definitions transcribed from [`spectec/binop.al`](../../spectec/binop.al),
+//! [`spectec/local.al`](../../spectec/local.al), and [`spectec/wasm-2.0.al`](../../spectec/wasm-2.0.al)
+//! (relop / testop / unop sections).
 //!
 //! Types and `$fn` bodies from those files live here. Step templates use
 //! [`Expr`](super::ast::Expr) for primitive `binop` (`+`, `-`, `*`, …).
@@ -159,9 +160,71 @@ pub mod types {
                 | BinOpKind::Sub
                 | BinOpKind::Mul
                 | BinOpKind::Shl
-                | BinOpKind::And
+                |                 BinOpKind::And
                 | BinOpKind::Or => Bool::from_bool(ctx, false),
             }
+        }
+    }
+
+    /// Relational operator case for signed lt/gt/le/ge (`LT`, `GT`, …).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum RelOpCase {
+        Lt,
+        Gt,
+        Le,
+        Ge,
+    }
+
+    /// Wasm `relop` variant from instruction syntax (e.g. `LT S`, `EQ`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum WasmRelOp {
+        Eq,
+        Ne,
+        Lt(Sign),
+        Gt(Sign),
+        Le(Sign),
+        Ge(Sign),
+        Flt,
+        Fgt,
+        Fle,
+        Fge,
+    }
+
+    /// Wasm `testop` variant (`EQZ`, …).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum WasmTestOp {
+        Eqz,
+    }
+
+    /// Unary operator case for `EXTEND M`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum UnOpCase {
+        Extend,
+    }
+
+    /// Wasm `unop` variant from instruction syntax (e.g. `CLZ`, `ABS`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum WasmUnOp {
+        Clz,
+        Ctz,
+        Popcnt,
+        Extend,
+        Abs,
+        Neg,
+        Sqrt,
+        Ceil,
+        Floor,
+        Trunc,
+        Nearest,
+    }
+
+    impl WasmUnOp {
+        /// Whether `$unop_` may return ε (via float builtins / `$list_`).
+        pub const fn is_partial(self) -> bool {
+            matches!(
+                self,
+                WasmUnOp::Sqrt | WasmUnOp::Trunc | WasmUnOp::Nearest
+            )
         }
     }
 }
@@ -198,6 +261,35 @@ const BINOP_PARAMS: &[Param] = &[
     mp("binop_", ParamType::BinOp),
     mp("iN_1", ParamType::Nat),
     mp("iN_2", ParamType::Nat),
+];
+const RELOP_PARAMS: &[Param] = &[
+    mp("numtype", ParamType::NumType),
+    mp("relop_", ParamType::RelOp),
+    mp("iN_1", ParamType::Nat),
+    mp("iN_2", ParamType::Nat),
+];
+const TESTOP_PARAMS: &[Param] = &[
+    mp("numtype", ParamType::NumType),
+    mp("testop_", ParamType::TestOp),
+    mp("iN", ParamType::Nat),
+];
+const UNOP_PARAMS: &[Param] = &[
+    mp("numtype", ParamType::NumType),
+    mp("unop_", ParamType::UnOp),
+    mp("iN", ParamType::Nat),
+];
+const BOOL_PARAMS: &[Param] = &[mp("b", ParamType::Any)];
+const IEQZ_PARAMS: &[Param] = &[mp("N", ParamType::Nat), mp("i_1", ParamType::Nat)];
+const IEQ_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("i_1", ParamType::Nat),
+    mp("i_2", ParamType::Nat),
+];
+const IORDERED_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("sx", ParamType::Sign),
+    mp("i_1", ParamType::Nat),
+    mp("i_2", ParamType::Nat),
 ];
 const LOCAL_PARAMS: &[Param] = &[
     mp("s", ParamType::Any),
@@ -274,8 +366,47 @@ fn le(a: Expr, b: Expr) -> Pred {
     Pred::Le(a, b)
 }
 
+fn ge(a: Expr, b: Expr) -> Pred {
+    Pred::Ge(a, b)
+}
+
 fn and(a: Pred, b: Pred) -> Pred {
     Pred::And(Box::new(a), Box::new(b))
+}
+
+fn cmp_eq(a: Expr, b: Expr) -> Expr {
+    Expr::Eq(Box::new(a), Box::new(b))
+}
+
+fn cmp_ne(a: Expr, b: Expr) -> Expr {
+    Expr::Ne(Box::new(a), Box::new(b))
+}
+
+fn cmp_lt(a: Expr, b: Expr) -> Expr {
+    Expr::LtCmp(Box::new(a), Box::new(b))
+}
+
+fn cmp_le(a: Expr, b: Expr) -> Expr {
+    Expr::LeCmp(Box::new(a), Box::new(b))
+}
+
+fn cmp_gt(a: Expr, b: Expr) -> Expr {
+    Expr::GtCmp(Box::new(a), Box::new(b))
+}
+
+fn cmp_ge(a: Expr, b: Expr) -> Expr {
+    Expr::GeCmp(Box::new(a), Box::new(b))
+}
+
+fn bool_of(cmp: Expr) -> Expr {
+    call("bool", vec![Arg::ExpA(Box::new(cmp))])
+}
+
+fn push_i32_const(name: &'static str) -> Instr {
+    Instr::PushI(Expr::Call(
+        "const",
+        vec![Arg::NumType(NumType::I32), Arg::Var(name)],
+    ))
 }
 
 fn wrap_mod(nat_expr: Expr, modulus: Expr) -> Expr {
@@ -356,6 +487,77 @@ pub fn step_pure_binop_template(nt: NumType, binop: WasmBinOp) -> Vec<Instr> {
                 Instr::PushI(Expr::Call("const", vec![Arg::NumType(nt), Arg::Var("c")])),
             ],
         },
+    ]
+}
+
+// =============================================================================
+// Step_pure/unop, Step_pure/testop, Step_pure/relop  (wasm-2.0.al L257–293)
+// =============================================================================
+
+pub fn step_pure_unop_template(nt: NumType, unop: WasmUnOp) -> Vec<Instr> {
+    let unop_call = Expr::Call(
+        "unop_",
+        vec![
+            Arg::NumType(nt),
+            Arg::UnOp(unop),
+            Arg::Var("c_1"),
+        ],
+    );
+    vec![
+        Instr::AssertI(InstrCond::Expr(Expr::TopValue(nt))),
+        Instr::PopI(PopTarget::NumConst("c_1")),
+        Instr::IfI {
+            cond: InstrCond::Expr(Expr::OptionalLen(Box::new(unop_call.clone()))),
+            then_steps: vec![Instr::TrapI],
+            else_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::Var("c"),
+                    expr: Expr::Choose(Box::new(unop_call)),
+                },
+                Instr::PushI(Expr::Call("const", vec![Arg::NumType(nt), Arg::Var("c")])),
+            ],
+        },
+    ]
+}
+
+pub fn step_pure_testop_template(nt: NumType, testop: WasmTestOp) -> Vec<Instr> {
+    vec![
+        Instr::AssertI(InstrCond::Expr(Expr::TopValue(nt))),
+        Instr::PopI(PopTarget::NumConst("c_1")),
+        Instr::LetI {
+            lhs: LetLhs::Var("c"),
+            expr: Expr::Call(
+                "testop_",
+                vec![
+                    Arg::NumType(nt),
+                    Arg::TestOp(testop),
+                    Arg::Var("c_1"),
+                ],
+            ),
+        },
+        push_i32_const("c"),
+    ]
+}
+
+pub fn step_pure_relop_template(nt: NumType, relop: WasmRelOp) -> Vec<Instr> {
+    vec![
+        Instr::AssertI(InstrCond::Expr(Expr::TopValue(nt))),
+        Instr::PopI(PopTarget::NumConst("c_2")),
+        Instr::AssertI(InstrCond::Expr(Expr::TopValue(nt))),
+        Instr::PopI(PopTarget::NumConst("c_1")),
+        Instr::LetI {
+            lhs: LetLhs::Var("c"),
+            expr: Expr::Call(
+                "relop_",
+                vec![
+                    Arg::NumType(nt),
+                    Arg::RelOp(relop),
+                    Arg::Var("c_1"),
+                    Arg::Var("c_2"),
+                ],
+            ),
+        },
+        push_i32_const("c"),
     ]
 }
 
@@ -565,6 +767,26 @@ pub fn list_def() -> FuncA {
                 Instr::ReturnI(Expr::SingletonList(Box::new(p("w")))),
             ],
         }],
+    }
+}
+
+// =============================================================================
+// bool b  (wasm-2.0.al L1356–1362)
+// =============================================================================
+
+pub fn bool_def() -> FuncA {
+    FuncA {
+        id: "bool",
+        params: BOOL_PARAMS,
+        body: vec![
+            Instr::IfI {
+                cond: InstrCond::Pred(eq(p("b"), Expr::BoolLit(false))),
+                then_steps: vec![Instr::ReturnI(nat(0))],
+                else_steps: vec![],
+            },
+            Instr::AssertI(InstrCond::Pred(eq(p("b"), Expr::BoolLit(true)))),
+            Instr::ReturnI(nat(1)),
+        ],
     }
 }
 
@@ -833,6 +1055,453 @@ pub fn binop_def() -> FuncA {
     }
 }
 
+// =============================================================================
+// ieqz_, ieq_, ine_, ilt_, igt_, ile_, ige_  (wasm-2.0.al L1551–1597)
+// =============================================================================
+
+pub fn ieqz_def() -> FuncA {
+    FuncA {
+        id: "ieqz_",
+        params: IEQZ_PARAMS,
+        body: vec![Instr::ReturnI(bool_of(cmp_eq(p("i_1"), nat(0))))],
+    }
+}
+
+pub fn ieq_def() -> FuncA {
+    FuncA {
+        id: "ieq_",
+        params: IEQ_PARAMS,
+        body: vec![Instr::ReturnI(bool_of(cmp_eq(p("i_1"), p("i_2"))))],
+    }
+}
+
+pub fn ine_def() -> FuncA {
+    FuncA {
+        id: "ine_",
+        params: IEQ_PARAMS,
+        body: vec![Instr::ReturnI(bool_of(cmp_ne(p("i_1"), p("i_2"))))],
+    }
+}
+
+fn signed_i(n: Expr, i: Expr) -> Expr {
+    call(
+        "signed_",
+        vec![Arg::ExpA(Box::new(n)), Arg::ExpA(Box::new(i))],
+    )
+}
+
+pub fn ilt_def() -> FuncA {
+    FuncA {
+        id: "ilt_",
+        params: IORDERED_PARAMS,
+        body: vec![
+            Instr::IfI {
+                cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
+                then_steps: vec![Instr::ReturnI(bool_of(cmp_lt(p("i_1"), p("i_2"))))],
+                else_steps: vec![],
+            },
+            Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
+            Instr::ReturnI(bool_of(cmp_lt(
+                int_coerce(signed_i(p("N"), p("i_1"))),
+                int_coerce(signed_i(p("N"), p("i_2"))),
+            ))),
+        ],
+    }
+}
+
+pub fn igt_def() -> FuncA {
+    FuncA {
+        id: "igt_",
+        params: IORDERED_PARAMS,
+        body: vec![
+            Instr::IfI {
+                cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
+                then_steps: vec![Instr::ReturnI(bool_of(cmp_gt(p("i_1"), p("i_2"))))],
+                else_steps: vec![],
+            },
+            Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
+            Instr::ReturnI(bool_of(cmp_gt(
+                int_coerce(signed_i(p("N"), p("i_1"))),
+                int_coerce(signed_i(p("N"), p("i_2"))),
+            ))),
+        ],
+    }
+}
+
+pub fn ile_def() -> FuncA {
+    FuncA {
+        id: "ile_",
+        params: IORDERED_PARAMS,
+        body: vec![
+            Instr::IfI {
+                cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
+                then_steps: vec![Instr::ReturnI(bool_of(cmp_le(p("i_1"), p("i_2"))))],
+                else_steps: vec![],
+            },
+            Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
+            Instr::ReturnI(bool_of(cmp_le(
+                int_coerce(signed_i(p("N"), p("i_1"))),
+                int_coerce(signed_i(p("N"), p("i_2"))),
+            ))),
+        ],
+    }
+}
+
+pub fn ige_def() -> FuncA {
+    FuncA {
+        id: "ige_",
+        params: IORDERED_PARAMS,
+        body: vec![
+            Instr::IfI {
+                cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
+                then_steps: vec![Instr::ReturnI(bool_of(cmp_ge(p("i_1"), p("i_2"))))],
+                else_steps: vec![],
+            },
+            Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
+            Instr::ReturnI(bool_of(cmp_ge(
+                int_coerce(signed_i(p("N"), p("i_1"))),
+                int_coerce(signed_i(p("N"), p("i_2"))),
+            ))),
+        ],
+    }
+}
+
+// =============================================================================
+// testop_ numtype testop_ iN  (wasm-2.0.al L1555–1557)
+// =============================================================================
+
+pub fn testop_def() -> FuncA {
+    FuncA {
+        id: "testop_",
+        params: TESTOP_PARAMS,
+        body: vec![
+            Instr::AssertI(InstrCond::Pred(Pred::TypeIsInn(p("numtype")))),
+            Instr::AssertI(InstrCond::Pred(Pred::TestOpEq(
+                p("testop_"),
+                WasmTestOp::Eqz,
+            ))),
+            Instr::ReturnI(call(
+                "ieqz_",
+                vec![
+                    Arg::ExpA(Box::new(call(
+                        "sizenn",
+                        vec![Arg::ExpA(Box::new(p("numtype")))],
+                    ))),
+                    Arg::ExpA(Box::new(p("iN"))),
+                ],
+            )),
+        ],
+    }
+}
+
+// =============================================================================
+// relop_ numtype relop_ iN_1 iN_2  (wasm-2.0.al L1599–1642)
+// =============================================================================
+
+fn relop_inn_branch(sizenn_nt: Expr, i_1: Expr, i_2: Expr) -> Vec<Instr> {
+    let ieq_call = |i_1: Expr, i_2: Expr| {
+        call(
+            "ieq_",
+            vec![
+                Arg::ExpA(Box::new(sizenn_nt.clone())),
+                Arg::ExpA(Box::new(i_1)),
+                Arg::ExpA(Box::new(i_2)),
+            ],
+        )
+    };
+    let ordered_call = |name: &'static str, sx: Expr, i_1: Expr, i_2: Expr| {
+        call(
+            name,
+            vec![
+                Arg::ExpA(Box::new(sizenn_nt.clone())),
+                Arg::ExpA(Box::new(sx)),
+                Arg::ExpA(Box::new(i_1)),
+                Arg::ExpA(Box::new(i_2)),
+            ],
+        )
+    };
+    vec![
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Eq)),
+            then_steps: vec![Instr::ReturnI(ieq_call(i_1.clone(), i_2.clone()))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Ne)),
+            then_steps: vec![Instr::ReturnI(call(
+                "ine_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(i_1.clone())),
+                    Arg::ExpA(Box::new(i_2.clone())),
+                ],
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpCaseIs(p("relop_"), RelOpCase::Lt)),
+            then_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::RelOpCase(RelOpCase::Lt, "sx"),
+                    expr: p("relop_"),
+                },
+                Instr::ReturnI(ordered_call("ilt_", p("sx"), i_1.clone(), i_2.clone())),
+            ],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpCaseIs(p("relop_"), RelOpCase::Gt)),
+            then_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::RelOpCase(RelOpCase::Gt, "sx"),
+                    expr: p("relop_"),
+                },
+                Instr::ReturnI(ordered_call("igt_", p("sx"), i_1.clone(), i_2.clone())),
+            ],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpCaseIs(p("relop_"), RelOpCase::Le)),
+            then_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::RelOpCase(RelOpCase::Le, "sx"),
+                    expr: p("relop_"),
+                },
+                Instr::ReturnI(ordered_call("ile_", p("sx"), i_1.clone(), i_2.clone())),
+            ],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpCaseIs(p("relop_"), RelOpCase::Ge)),
+            then_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::RelOpCase(RelOpCase::Ge, "sx"),
+                    expr: p("relop_"),
+                },
+                Instr::ReturnI(ordered_call("ige_", p("sx"), i_1, i_2)),
+            ],
+            else_steps: vec![],
+        },
+    ]
+}
+
+pub fn relop_def() -> FuncA {
+    let sizenn_nt = call("sizenn", vec![Arg::ExpA(Box::new(p("numtype")))]);
+    let i_1 = p("iN_1");
+    let i_2 = p("iN_2");
+    let fnn_branch = vec![
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Eq)),
+            then_steps: vec![Instr::ReturnI(call(
+                "feq_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(i_1.clone())),
+                    Arg::ExpA(Box::new(i_2.clone())),
+                ],
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Ne)),
+            then_steps: vec![Instr::ReturnI(call(
+                "fne_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(i_1.clone())),
+                    Arg::ExpA(Box::new(i_2.clone())),
+                ],
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Flt)),
+            then_steps: vec![Instr::ReturnI(call(
+                "flt_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(i_1.clone())),
+                    Arg::ExpA(Box::new(i_2.clone())),
+                ],
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Fgt)),
+            then_steps: vec![Instr::ReturnI(call(
+                "fgt_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(i_1.clone())),
+                    Arg::ExpA(Box::new(i_2.clone())),
+                ],
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Fle)),
+            then_steps: vec![Instr::ReturnI(call(
+                "fle_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(i_1.clone())),
+                    Arg::ExpA(Box::new(i_2.clone())),
+                ],
+            ))],
+            else_steps: vec![],
+        },
+        Instr::AssertI(InstrCond::Pred(Pred::RelOpEq(p("relop_"), WasmRelOp::Fge))),
+        Instr::ReturnI(call(
+            "fge_",
+            vec![
+                Arg::ExpA(Box::new(sizenn_nt.clone())),
+                Arg::ExpA(Box::new(i_1.clone())),
+                Arg::ExpA(Box::new(i_2.clone())),
+            ],
+        )),
+    ];
+    FuncA {
+        id: "relop_",
+        params: RELOP_PARAMS,
+        body: {
+            let mut body = vec![Instr::IfI {
+                cond: InstrCond::Pred(Pred::TypeIsInn(p("numtype"))),
+                then_steps: relop_inn_branch(sizenn_nt.clone(), i_1.clone(), i_2.clone()),
+                else_steps: vec![],
+            }];
+            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype")))));
+            body.extend(fnn_branch);
+            body
+        },
+    }
+}
+
+// =============================================================================
+// unop_ numtype unop_ iN  (wasm-2.0.al L1402–1439)
+// =============================================================================
+
+pub fn unop_def() -> FuncA {
+    let sizenn_nt = call("sizenn", vec![Arg::ExpA(Box::new(p("numtype")))]);
+    let inn_branch = vec![
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Clz)),
+            then_steps: vec![Instr::ReturnI(Expr::SingletonList(Box::new(call(
+                "iclz_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(p("iN"))),
+                ],
+            ))))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Ctz)),
+            then_steps: vec![Instr::ReturnI(Expr::SingletonList(Box::new(call(
+                "ictz_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(p("iN"))),
+                ],
+            ))))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Popcnt)),
+            then_steps: vec![Instr::ReturnI(Expr::SingletonList(Box::new(call(
+                "ipopcnt_",
+                vec![
+                    Arg::ExpA(Box::new(sizenn_nt.clone())),
+                    Arg::ExpA(Box::new(p("iN"))),
+                ],
+            ))))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpCaseIs(p("unop_"), UnOpCase::Extend)),
+            then_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::UnOpCase(UnOpCase::Extend, "M"),
+                    expr: p("unop_"),
+                },
+                Instr::ReturnI(Expr::SingletonList(Box::new(call(
+                    "extend__",
+                    vec![
+                        Arg::ExpA(Box::new(p("M"))),
+                        Arg::ExpA(Box::new(sizenn_nt.clone())),
+                        Arg::ExpA(Box::new(Expr::SignLit(Sign::S))),
+                        Arg::ExpA(Box::new(call(
+                            "wrap__",
+                            vec![
+                                Arg::ExpA(Box::new(sizenn_nt.clone())),
+                                Arg::ExpA(Box::new(p("M"))),
+                                Arg::ExpA(Box::new(p("iN"))),
+                            ],
+                        ))),
+                    ],
+                )))),
+            ],
+            else_steps: vec![],
+        },
+    ];
+    let fnn_return = |name: &'static str| {
+        Instr::ReturnI(call(
+            name,
+            vec![
+                Arg::ExpA(Box::new(sizenn_nt.clone())),
+                Arg::ExpA(Box::new(p("iN"))),
+            ],
+        ))
+    };
+    let fnn_branch = vec![
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Abs)),
+            then_steps: vec![fnn_return("fabs_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Neg)),
+            then_steps: vec![fnn_return("fneg_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Sqrt)),
+            then_steps: vec![fnn_return("fsqrt_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Ceil)),
+            then_steps: vec![fnn_return("fceil_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Floor)),
+            then_steps: vec![fnn_return("ffloor_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Trunc)),
+            then_steps: vec![fnn_return("ftrunc_")],
+            else_steps: vec![],
+        },
+        Instr::AssertI(InstrCond::Pred(Pred::UnOpEq(p("unop_"), WasmUnOp::Nearest))),
+        fnn_return("fnearest_"),
+    ];
+    FuncA {
+        id: "unop_",
+        params: UNOP_PARAMS,
+        body: {
+            let mut body = vec![Instr::IfI {
+                cond: InstrCond::Pred(Pred::TypeIsInn(p("numtype"))),
+                then_steps: inn_branch,
+                else_steps: vec![],
+            }];
+            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype")))));
+            body.extend(fnn_branch);
+            body
+        },
+    }
+}
+
 /// Look up a SpecTec `$fn` definition by name.
 pub fn lookup_func(name: &str) -> Option<FuncA> {
     Some(match name {
@@ -841,6 +1510,17 @@ pub fn lookup_func(name: &str) -> Option<FuncA> {
         "signed_" => signed_def(),
         "inv_signed_" => inv_signed_def(),
         "list_" => list_def(),
+        "bool" => bool_def(),
+        "ieqz_" => ieqz_def(),
+        "ieq_" => ieq_def(),
+        "ine_" => ine_def(),
+        "ilt_" => ilt_def(),
+        "igt_" => igt_def(),
+        "ile_" => ile_def(),
+        "ige_" => ige_def(),
+        "testop_" => testop_def(),
+        "relop_" => relop_def(),
+        "unop_" => unop_def(),
         "idiv_" => idiv_def(),
         "irem_" => irem_def(),
         "binop_" => binop_def(),
@@ -886,5 +1566,36 @@ mod tests {
     #[test]
     fn binop_i32_add_is_total() {
         assert!(!WasmBinOp::Add.is_partial());
+    }
+
+    #[test]
+    fn bool_def_returns_i32() {
+        let def = bool_def();
+        assert_eq!(def.id, "bool");
+        assert_eq!(def.params, BOOL_PARAMS);
+    }
+
+    #[test]
+    fn relop_def_has_inn_and_fnn_paths() {
+        let def = relop_def();
+        assert_eq!(def.id, "relop_");
+        assert_eq!(def.params, RELOP_PARAMS);
+        assert!(def.body.len() >= 2);
+    }
+
+    #[test]
+    fn unop_def_has_inn_and_fnn_paths() {
+        let def = unop_def();
+        assert_eq!(def.id, "unop_");
+        assert_eq!(def.params, UNOP_PARAMS);
+        assert!(def.body.len() >= 2);
+    }
+
+    #[test]
+    fn lookup_includes_relop_helpers() {
+        assert!(lookup_func("ieq_").is_some());
+        assert!(lookup_func("relop_").is_some());
+        assert!(lookup_func("testop_").is_some());
+        assert!(lookup_func("unop_").is_some());
     }
 }

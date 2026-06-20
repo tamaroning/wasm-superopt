@@ -2,11 +2,11 @@
 
 use super::canon::{Canonizer, NormalizedGoal};
 use super::heuristic::h_goal;
-use super::inverse::{PeelAction, applicable_peels};
+use super::inverse::{PeelAction, SearchState, applicable_peels};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::sym::{LocalReq, SymState};
-use crate::wasm::SegmentBounds;
+use crate::wasm::{ops_respect_dependencies, storage_ops_preserved, SegmentBounds, StraightSegment};
 use egg::Rewrite;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
@@ -43,7 +43,7 @@ impl SearchDeadline {
 }
 
 /// SuperStack: `10 * (1 + #storage_ops)`; arithmetic-only segments use the base 10s.
-pub fn segment_timeout_secs(segment: &crate::wasm::StraightSegment, direct_timeout: bool) -> u64 {
+pub fn segment_timeout_secs(segment: &StraightSegment, direct_timeout: bool) -> u64 {
     if direct_timeout {
         return DIRECT_TIMEOUT_SECS;
     }
@@ -92,6 +92,20 @@ pub fn is_grounded(
     true
 }
 
+pub fn is_solution(
+    state: &SearchState,
+    init: &SymState,
+    bounds: &SegmentBounds,
+    canon: &mut Canonizer,
+) -> bool {
+    is_grounded(&state.goal, init, bounds, canon) && state.is_complete()
+}
+
+pub fn validate_solution_ops(ops: &[SemOp], segment: &StraightSegment) -> bool {
+    storage_ops_preserved(&segment.ops, ops)
+        && ops_respect_dependencies(ops, &segment.dependencies)
+}
+
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
     pub max_depth: usize,
@@ -112,7 +126,7 @@ impl Default for SearchConfig {
 }
 
 impl SearchConfig {
-    pub fn for_segment(&self, segment: &crate::wasm::StraightSegment) -> Self {
+    pub fn for_segment(&self, segment: &StraightSegment) -> Self {
         Self {
             max_depth: self.max_depth,
             timeout_secs: Some(segment_timeout_secs(segment, self.direct_timeout)),
@@ -127,58 +141,88 @@ fn reverse_ops(path: &[SemOp]) -> Vec<SemOp> {
     out
 }
 
-/// Memo key `⌈G⌉` (idea.md §8). Returns `true` if already expanded at ≤ `cost`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct MemoKey {
+    goal: NormalizedGoal,
+    remaining_storage: Vec<u32>,
+    used_opaque: Vec<u32>,
+}
+
+fn memo_key(state: &SearchState, canon: &mut Canonizer) -> MemoKey {
+    MemoKey {
+        goal: canon.normalize_state(&state.goal),
+        remaining_storage: state.remaining_storage.iter().copied().collect(),
+        used_opaque: state.used_opaque.iter().copied().collect(),
+    }
+}
+
 fn memo_seen(
-    memo: &HashMap<NormalizedGoal, usize>,
-    g: &SymState,
+    memo: &HashMap<MemoKey, usize>,
+    state: &SearchState,
     cost: usize,
     canon: &mut Canonizer,
 ) -> bool {
-    let key = canon.normalize_state(g);
+    let key = memo_key(state, canon);
     memo.get(&key).is_some_and(|&best| best <= cost)
 }
 
 fn memo_record(
-    memo: &mut HashMap<NormalizedGoal, usize>,
-    g: &SymState,
+    memo: &mut HashMap<MemoKey, usize>,
+    state: &SearchState,
     cost: usize,
     canon: &mut Canonizer,
 ) {
-    let key = canon.normalize_state(g);
+    let key = memo_key(state, canon);
     memo.insert(key, cost);
 }
 
+fn accept_solution(
+    path: &[SemOp],
+    segment: &StraightSegment,
+    _init: &SymState,
+    _bounds: &SegmentBounds,
+    _canon: &mut Canonizer,
+) -> Option<Vec<SemOp>> {
+    let ops = reverse_ops(path);
+    if !validate_solution_ops(&ops, segment) {
+        return None;
+    }
+    Some(ops)
+}
+
 pub fn solve_bfs(
-    init: &SymState,
-    fin: &SymState,
-    bounds: &SegmentBounds,
+    segment: &StraightSegment,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> SearchResult {
+    let init = &segment.init;
+    let bounds = &segment.bounds;
     let deadline = cfg.timeout_secs.map(SearchDeadline::new);
     let mut timed_out = false;
     let mut canon = Canonizer::new(rules.to_vec());
     let mut memo = HashMap::new();
     let mut queue = VecDeque::new();
-    queue.push_back((fin.clone(), Vec::new(), 0usize));
+    queue.push_back((SearchState::initial(segment, &segment.fin), Vec::new(), 0usize));
     let mut best = None;
-    while let Some((g, path, depth)) = queue.pop_front() {
+    while let Some((state, path, depth)) = queue.pop_front() {
         if deadline.as_ref().is_some_and(|d| d.expired()) {
             timed_out = true;
             break;
         }
-        if memo_seen(&memo, &g, depth, &mut canon) {
+        if memo_seen(&memo, &state, depth, &mut canon) {
             continue;
         }
-        if is_grounded(&g, init, bounds, &mut canon) {
-            best = Some(reverse_ops(&path));
-            break;
+        if is_solution(&state, init, bounds, &mut canon) {
+            if let Some(ops) = accept_solution(&path, segment, init, bounds, &mut canon) {
+                best = Some(ops);
+                break;
+            }
         }
-        memo_record(&mut memo, &g, depth, &mut canon);
+        memo_record(&mut memo, &state, depth, &mut canon);
         if depth >= cfg.max_depth {
             continue;
         }
-        for (PeelAction::Forward(op), next) in applicable_peels(&g, bounds, &mut canon) {
+        for (PeelAction::Forward(op), next) in applicable_peels(&state, segment, bounds, &mut canon) {
             let mut next_path = path.clone();
             next_path.push(op);
             queue.push_back((next, next_path, depth + 1));
@@ -191,42 +235,45 @@ pub fn solve_bfs(
 }
 
 pub fn solve_greedy_inv(
-    init: &SymState,
-    fin: &SymState,
-    bounds: &SegmentBounds,
+    segment: &StraightSegment,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> SearchResult {
+    let init = &segment.init;
+    let bounds = &segment.bounds;
     let deadline = cfg.timeout_secs.map(SearchDeadline::new);
     let mut timed_out = false;
     let mut canon = Canonizer::new(rules.to_vec());
-    let mut g = fin.clone();
+    let mut state = SearchState::initial(segment, &segment.fin);
     let mut path = Vec::new();
     for _ in 0..cfg.max_depth {
         if deadline.as_ref().is_some_and(|d| d.expired()) {
             timed_out = true;
             break;
         }
-        if is_grounded(&g, init, bounds, &mut canon) {
-            return SearchResult {
-                ops: Some(reverse_ops(&path)),
-                timed_out,
-            };
+        if is_solution(&state, init, bounds, &mut canon) {
+            if let Some(ops) = accept_solution(&path, segment, init, bounds, &mut canon) {
+                return SearchResult {
+                    ops: Some(ops),
+                    timed_out,
+                };
+            }
+            break;
         }
-        let peels = applicable_peels(&g, bounds, &mut canon);
+        let peels = applicable_peels(&state, segment, bounds, &mut canon);
         let Some(best) = peels
             .into_iter()
-            .min_by_key(|(_, next)| h_goal(next, init, bounds, &mut canon))
+            .min_by_key(|(_, next)| h_goal(&next.goal, init, bounds, &mut canon))
         else {
             break;
         };
         let (PeelAction::Forward(op), next) = best;
         path.push(op);
-        g = next;
+        state = next;
     }
     SearchResult {
-        ops: if is_grounded(&g, init, bounds, &mut canon) {
-            Some(reverse_ops(&path))
+        ops: if is_solution(&state, init, bounds, &mut canon) {
+            accept_solution(&path, segment, init, bounds, &mut canon)
         } else {
             None
         },
@@ -238,7 +285,7 @@ pub fn solve_greedy_inv(
 struct AstarNode {
     f: usize,
     g: usize,
-    goal: SymState,
+    state: SearchState,
     path: Vec<SemOp>,
 }
 
@@ -255,31 +302,32 @@ impl PartialOrd for AstarNode {
 }
 
 pub fn solve_astar(
-    init: &SymState,
-    fin: &SymState,
-    bounds: &SegmentBounds,
+    segment: &StraightSegment,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> SearchResult {
+    let init = &segment.init;
+    let bounds = &segment.bounds;
     let deadline = cfg.timeout_secs.map(SearchDeadline::new);
     let mut timed_out = false;
     let mut canon = Canonizer::new(rules.to_vec());
-    let greedy = solve_greedy_inv(init, fin, bounds, rules, cfg);
+    let greedy = solve_greedy_inv(segment, rules, cfg);
     timed_out |= greedy.timed_out;
-    let mut best_path = greedy.ops;
+    let mut best_path = greedy.ops.clone();
     let mut best = best_path.as_ref().map(|p| p.len()).unwrap_or(cfg.max_depth);
 
     let mut memo = HashMap::new();
     let mut heap = BinaryHeap::new();
-    let h0 = h_goal(fin, init, bounds, &mut canon);
+    let initial = SearchState::initial(segment, &segment.fin);
+    let h0 = h_goal(&initial.goal, init, bounds, &mut canon);
     heap.push(AstarNode {
         f: h0,
         g: 0,
-        goal: fin.clone(),
+        state: initial,
         path: vec![],
     });
 
-    while let Some(AstarNode { f, g, goal, path }) = heap.pop() {
+    while let Some(AstarNode { f, g, state, path }) = heap.pop() {
         if deadline.as_ref().is_some_and(|d| d.expired()) {
             timed_out = true;
             break;
@@ -287,23 +335,25 @@ pub fn solve_astar(
         if f >= best {
             continue;
         }
-        if memo_seen(&memo, &goal, g, &mut canon) {
+        if memo_seen(&memo, &state, g, &mut canon) {
             continue;
         }
-        if is_grounded(&goal, init, bounds, &mut canon) {
-            if g <= best {
-                best = g;
-                best_path = Some(reverse_ops(&path));
+        if is_solution(&state, init, bounds, &mut canon) {
+            if let Some(ops) = accept_solution(&path, segment, init, bounds, &mut canon) {
+                if g <= best {
+                    best = g;
+                    best_path = Some(ops);
+                }
             }
             continue;
         }
-        memo_record(&mut memo, &goal, g, &mut canon);
+        memo_record(&mut memo, &state, g, &mut canon);
         if g >= cfg.max_depth.min(best) {
             continue;
         }
-        for (PeelAction::Forward(op), next) in applicable_peels(&goal, bounds, &mut canon) {
+        for (PeelAction::Forward(op), next) in applicable_peels(&state, segment, bounds, &mut canon) {
             let ng = g + 1;
-            let nh = h_goal(&next, init, bounds, &mut canon);
+            let nh = h_goal(&next.goal, init, bounds, &mut canon);
             let nf = ng + nh;
             if nf <= best {
                 let mut npath = path.clone();
@@ -311,7 +361,7 @@ pub fn solve_astar(
                 heap.push(AstarNode {
                     f: nf,
                     g: ng,
-                    goal: next,
+                    state: next,
                     path: npath,
                 });
             }
@@ -338,24 +388,33 @@ mod tests {
     use crate::synthesis::{
         TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
+    use crate::sym::SymMachine;
+    use crate::wasm::SegmentBounds;
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
         synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10))
     }
 
-    use crate::wasm::SegmentBounds;
-
-    fn example_bounds() -> SegmentBounds {
-        SegmentBounds::new(1, 4)
+    fn example_segment() -> StraightSegment {
+        let init = init();
+        let fin = fin();
+        StraightSegment {
+            func_index: 0,
+            segment_index: 0,
+            ops: vec![],
+            init: init.clone(),
+            fin: fin.clone(),
+            bounds: SegmentBounds::new(1, 4),
+            opaque_meta: vec![],
+            dependencies: vec![],
+        }
     }
 
     #[test]
     fn solve_example_bfs() {
-        let init = init();
-        let fin = fin();
+        let segment = example_segment();
         let rules = test_rules();
-        let bounds = example_bounds();
-        let ops = solve_bfs(&init, &fin, &bounds, &rules, &SearchConfig::default())
+        let ops = solve_bfs(&segment, &rules, &SearchConfig::default())
             .ops
             .expect("solution");
         assert!(!ops.is_empty(), "ops: {}", format_ops(&ops));
@@ -364,15 +423,10 @@ mod tests {
 
     #[test]
     fn optimized_example_preserves_fin_state() {
-        use crate::optimize::fixtures::{fin, init};
-        use crate::optimize::search::{SearchConfig, format_ops, is_grounded, solve_astar};
-        use crate::sym::SymMachine;
-
-        let init = init();
-        let fin = fin();
+        let segment = example_segment();
         let rules = test_rules();
-        let bounds = example_bounds();
-        let ops = solve_astar(&init, &fin, &bounds, &rules, &SearchConfig::default())
+        let bounds = segment.bounds;
+        let ops = solve_astar(&segment, &rules, &SearchConfig::default())
             .ops
             .expect("solution");
         assert_eq!(ops.len(), 7, "ops: {}", format_ops(&ops));
@@ -384,7 +438,7 @@ mod tests {
         }
         let got = m.to_fin_state();
         let mut canon = crate::optimize::canon::Canonizer::new(rules);
-        assert!(is_grounded(&got, &fin, &bounds, &mut canon));
+        assert!(is_grounded(&got, &segment.fin, &bounds, &mut canon));
     }
 
     #[test]
@@ -431,11 +485,9 @@ mod tests {
 
     #[test]
     fn solve_example_astar() {
-        let init = init();
-        let fin = fin();
+        let segment = example_segment();
         let rules = test_rules();
-        let bounds = example_bounds();
-        let ops = solve_astar(&init, &fin, &bounds, &rules, &SearchConfig::default())
+        let ops = solve_astar(&segment, &rules, &SearchConfig::default())
             .ops
             .expect("solution");
         assert!(!ops.is_empty());

@@ -2,13 +2,15 @@
 
 use crate::semantics::SemOp;
 use crate::sym::{ForwardError, SymMachine, SymState};
+use crate::wasm::deps::compute_dependencies;
+use crate::wasm::segment::OpaqueMeta;
 use crate::wasm::{SegmentBounds, StraightSegment};
-use crate::wasm::stack_analysis::{operator_stack_effect, stack_bounds_ops, stack_bounds_operators};
+use crate::wasm::stack_analysis::{stack_bounds_ops, stack_bounds_operators};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
-use wasmparser::{FuncType, Operator, Parser, Payload, ValType};
+use wasmparser::{FuncType, Operator, Parser, Payload, TypeRef, ValType};
 
 #[derive(Clone, Debug)]
 pub struct WasmModuleInfo {
@@ -31,12 +33,43 @@ fn read_wasm_bytes(path: &Path) -> Result<Vec<u8>, String> {
     }
 }
 
+fn i32_param_count(ft: &FuncType) -> Result<u8, String> {
+    let n = ft
+        .params()
+        .iter()
+        .filter(|&&t| t == ValType::I32)
+        .count();
+    if n != ft.params().len() {
+        return Err(format!(
+            "only i32 params supported in calls, got {:?}",
+            ft.params()
+        ));
+    }
+    Ok(n as u8)
+}
+
+fn i32_result_count(ft: &FuncType) -> Result<u8, String> {
+    let n = ft
+        .results()
+        .iter()
+        .filter(|&&t| t == ValType::I32)
+        .count();
+    if n != ft.results().len() {
+        return Err(format!(
+            "only i32 results supported in calls, got {:?}",
+            ft.results()
+        ));
+    }
+    Ok(n as u8)
+}
+
 pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
     let mut types: Vec<FuncType> = Vec::new();
-    let mut function_type_indices: Vec<u32> = Vec::new();
+    let mut module_func_types: Vec<FuncType> = Vec::new();
+    let mut import_func_count = 0usize;
     let mut segments = Vec::new();
     let mut warnings = Vec::new();
-    let mut func_index = 0u32;
+    let mut code_func_index = 0u32;
 
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|e| format!("wasm parse error: {e}"))?;
@@ -49,32 +82,54 @@ pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
                     }
                 }
             }
+            Payload::ImportSection(reader) => {
+                for group in reader {
+                    let group = group.map_err(|e| format!("import section: {e}"))?;
+                    for import in group {
+                        let (_offset, import) =
+                            import.map_err(|e| format!("import entry: {e}"))?;
+                        if let TypeRef::Func(type_idx) = import.ty {
+                            let ft = types
+                                .get(type_idx as usize)
+                                .ok_or_else(|| format!("missing import type {type_idx}"))?
+                                .clone();
+                            module_func_types.push(ft);
+                            import_func_count += 1;
+                        }
+                    }
+                }
+            }
             Payload::FunctionSection(reader) => {
-                function_type_indices = reader
+                let function_type_indices: Vec<u32> = reader
                     .into_iter()
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| format!("function section: {e}"))?;
+                for type_idx in function_type_indices {
+                    let ft = types
+                        .get(type_idx as usize)
+                        .ok_or_else(|| format!("missing func type {type_idx}"))?
+                        .clone();
+                    module_func_types.push(ft);
+                }
             }
             Payload::CodeSectionEntry(body) => {
-                let type_idx = function_type_indices
-                    .get(func_index as usize)
-                    .copied()
-                    .ok_or_else(|| format!("missing type for func {func_index}"))?;
-                let func_type = types
-                    .get(type_idx as usize)
-                    .ok_or_else(|| format!("missing type {type_idx}"))?;
+                let module_func_index = import_func_count + code_func_index as usize;
+                let func_type = module_func_types
+                    .get(module_func_index)
+                    .ok_or_else(|| format!("missing type for module func {module_func_index}"))?;
                 let num_params = func_type.params().len() as u32;
                 let declared = count_declared_locals(&body)?;
                 let total_locals = num_params + declared;
                 extract_from_body(
-                    func_index,
+                    code_func_index,
                     num_params,
                     total_locals,
+                    &module_func_types,
                     &body,
                     &mut segments,
                     &mut warnings,
                 )?;
-                func_index += 1;
+                code_func_index += 1;
             }
             _ => {}
         }
@@ -163,6 +218,7 @@ fn extract_from_body(
     func_index: u32,
     num_params: u32,
     total_locals: u32,
+    module_func_types: &[FuncType],
     body: &wasmparser::FunctionBody<'_>,
     out: &mut Vec<StraightSegment>,
     warnings: &mut Vec<String>,
@@ -189,6 +245,7 @@ fn extract_from_body(
             num_params,
             total_locals,
             bounds_template,
+            module_func_types,
             &optimizable,
             &mut segment_index,
             out,
@@ -199,11 +256,25 @@ fn extract_from_body(
     Ok(())
 }
 
+struct OpClassCtx<'a> {
+    module_func_types: &'a [FuncType],
+    next_access_id: u32,
+}
+
+impl<'a> OpClassCtx<'a> {
+    fn fresh_id(&mut self) -> u32 {
+        let id = self.next_access_id;
+        self.next_access_id += 1;
+        id
+    }
+}
+
 fn extract_from_ops(
     func_index: u32,
     num_params: u32,
     total_locals: u32,
     bounds_template: SegmentBounds,
+    module_func_types: &[FuncType],
     ops: &[Operator<'_>],
     segment_index: &mut usize,
     out: &mut Vec<StraightSegment>,
@@ -215,17 +286,26 @@ fn extract_from_ops(
     machine.begin_segment();
 
     let mut collected: Vec<SemOp> = Vec::new();
+    let mut opaque_meta: Vec<OpaqueMeta> = Vec::new();
     let mut segment_init: SymState = machine.to_init_state();
     let mut collecting = true;
+    let mut ctx = OpClassCtx {
+        module_func_types,
+        next_access_id: 0,
+    };
 
     for op in ops {
-        match classify_operator(op) {
+        match classify_operator(op, &mut ctx) {
             OpClass::Supported(sem) => {
                 if !collecting {
                     continue;
                 }
-                match machine.exec(&sem) {
-                    Ok(()) => collected.push(sem),
+                match machine.exec_with_meta(&sem) {
+                    Ok(Some(meta)) => {
+                        opaque_meta.push(meta);
+                        collected.push(sem);
+                    }
+                    Ok(None) => collected.push(sem),
                     Err(e) => {
                         let msg = format!(
                             "func {func_index} segment {segment_index} forward exec {sem:?}: {e:?}"
@@ -236,6 +316,7 @@ fn extract_from_ops(
                             func_index,
                             segment_index,
                             &mut collected,
+                            &mut opaque_meta,
                             &segment_init,
                             &machine,
                             bounds,
@@ -255,39 +336,23 @@ fn extract_from_ops(
                         func_index,
                         segment_index,
                         &mut collected,
+                        &mut opaque_meta,
                         &segment_init,
                         &mut machine,
                         bounds,
                         out,
-                        warnings,
                         num_params,
                         total_locals,
                     );
                     collecting = false;
                 }
             }
-            OpClass::Boundary { pop, push } => {
-                flush_segment(
-                    func_index,
-                    segment_index,
-                    &mut collected,
-                    &segment_init,
-                    &machine,
-                    bounds,
-                    out,
-                );
-                if let Err(e) = machine.apply_boundary_stack(pop, push) {
-                    warn_exec(func_index, *segment_index, "boundary", e, warnings);
-                }
-                machine.begin_segment();
-                segment_init = machine.to_init_state();
-                collecting = true;
-            }
             OpClass::Unsupported => {
                 flush_segment(
                     func_index,
                     segment_index,
                     &mut collected,
+                    &mut opaque_meta,
                     &segment_init,
                     &machine,
                     bounds,
@@ -303,6 +368,7 @@ fn extract_from_ops(
             func_index,
             segment_index,
             &mut collected,
+            &mut opaque_meta,
             &segment_init,
             &machine,
             bounds,
@@ -327,11 +393,11 @@ fn flush_and_stop(
     func_index: u32,
     segment_index: &mut usize,
     ops: &mut Vec<SemOp>,
+    opaque_meta: &mut Vec<OpaqueMeta>,
     init: &SymState,
     machine: &mut SymMachine,
     bounds: SegmentBounds,
     out: &mut Vec<StraightSegment>,
-    _warnings: &mut Vec<String>,
     num_params: u32,
     total_locals: u32,
 ) {
@@ -339,6 +405,7 @@ fn flush_and_stop(
         func_index,
         segment_index,
         ops,
+        opaque_meta,
         init,
         machine,
         bounds,
@@ -352,12 +419,14 @@ fn flush_segment(
     func_index: u32,
     segment_index: &mut usize,
     ops: &mut Vec<SemOp>,
+    opaque_meta: &mut Vec<OpaqueMeta>,
     init: &SymState,
     machine: &SymMachine,
     mut bounds: SegmentBounds,
     out: &mut Vec<StraightSegment>,
 ) {
     if ops.is_empty() {
+        opaque_meta.clear();
         return;
     }
     let (_, max_stack) = stack_bounds_ops(ops);
@@ -365,8 +434,10 @@ fn flush_segment(
     let fin = machine.to_fin_state();
     if !init.validate_bounds(&bounds) || !fin.validate_bounds(&bounds) {
         ops.clear();
+        opaque_meta.clear();
         return;
     }
+    let dependencies = compute_dependencies(ops, opaque_meta);
     out.push(StraightSegment {
         func_index,
         segment_index: *segment_index,
@@ -374,23 +445,29 @@ fn flush_segment(
         init: init.clone(),
         fin,
         bounds,
+        opaque_meta: opaque_meta.clone(),
+        dependencies,
     });
     *segment_index += 1;
     ops.clear();
+    opaque_meta.clear();
 }
 
 enum OpClass {
     Supported(SemOp),
     PopStack,
-    Boundary { pop: usize, push: usize },
     Unsupported,
 }
 
-fn classify_operator(op: &Operator<'_>) -> OpClass {
-    if is_boundary(op) {
-        let (pop, push) = boundary_stack_effect(op);
-        return OpClass::Boundary { pop, push };
-    }
+fn load_sem(id: u32, mem: u32, offset: u32) -> SemOp {
+    SemOp::I32Load { id, mem, offset }
+}
+
+fn store_sem(id: u32, mem: u32, offset: u32) -> SemOp {
+    SemOp::I32Store { id, mem, offset }
+}
+
+fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
     match op {
         Operator::I32Const { value } => OpClass::Supported(SemOp::I32Const(*value)),
         Operator::I32Add => OpClass::Supported(SemOp::I32Add),
@@ -404,10 +481,63 @@ fn classify_operator(op: &Operator<'_>) -> OpClass {
         Operator::I32LtS => OpClass::Supported(SemOp::I32LtS),
         Operator::I32LeS => OpClass::Supported(SemOp::I32LeS),
         Operator::I32GtS => OpClass::Supported(SemOp::I32GtS),
+        Operator::I32Eqz => OpClass::Supported(SemOp::I32Eqz),
+        Operator::I32Clz => OpClass::Supported(SemOp::I32Clz),
+        Operator::I32Ctz => OpClass::Supported(SemOp::I32Ctz),
+        Operator::I32Popcnt => OpClass::Supported(SemOp::I32Popcnt),
         Operator::LocalGet { local_index } => OpClass::Supported(SemOp::LocalGet(*local_index)),
         Operator::LocalSet { local_index } => OpClass::Supported(SemOp::LocalSet(*local_index)),
         Operator::LocalTee { local_index } => OpClass::Supported(SemOp::LocalTee(*local_index)),
         Operator::Drop => OpClass::PopStack,
+        Operator::I32Load { memarg, .. }
+        | Operator::I32Load8S { memarg, .. }
+        | Operator::I32Load8U { memarg, .. }
+        | Operator::I32Load16S { memarg, .. }
+        | Operator::I32Load16U { memarg, .. } => {
+            let id = ctx.fresh_id();
+            OpClass::Supported(load_sem(id, memarg.memory, memarg.offset as u32))
+        }
+        Operator::I32Store { memarg, .. }
+        | Operator::I32Store8 { memarg, .. }
+        | Operator::I32Store16 { memarg, .. } => {
+            let id = ctx.fresh_id();
+            OpClass::Supported(store_sem(id, memarg.memory, memarg.offset as u32))
+        }
+        Operator::GlobalGet { global_index } => {
+            let id = ctx.fresh_id();
+            OpClass::Supported(SemOp::GlobalGet {
+                id,
+                global_index: *global_index,
+            })
+        }
+        Operator::GlobalSet { global_index } => {
+            let id = ctx.fresh_id();
+            OpClass::Supported(SemOp::GlobalSet {
+                id,
+                global_index: *global_index,
+            })
+        }
+        Operator::Call { function_index } => {
+            let id = ctx.fresh_id();
+            let ft = match ctx.module_func_types.get(*function_index as usize) {
+                Some(ft) => ft,
+                None => return OpClass::Unsupported,
+            };
+            let pops = match i32_param_count(ft) {
+                Ok(n) => n,
+                Err(_) => return OpClass::Unsupported,
+            };
+            let pushes = match i32_result_count(ft) {
+                Ok(n) => n,
+                Err(_) => return OpClass::Unsupported,
+            };
+            OpClass::Supported(SemOp::Call {
+                id,
+                func_index: *function_index,
+                pops,
+                pushes,
+            })
+        }
         Operator::Nop | Operator::Block { .. } | Operator::Else | Operator::End => {
             OpClass::Unsupported
         }
@@ -418,31 +548,10 @@ fn classify_operator(op: &Operator<'_>) -> OpClass {
         | Operator::Return
         | Operator::If { .. }
         | Operator::Unreachable
-        | Operator::Select => OpClass::Unsupported,
+        | Operator::Select
+        | Operator::CallIndirect { .. } => OpClass::Unsupported,
         _ => OpClass::Unsupported,
     }
-}
-
-fn is_boundary(op: &Operator<'_>) -> bool {
-    matches!(
-        op,
-        Operator::I32Load { .. }
-            | Operator::I32Load8S { .. }
-            | Operator::I32Load8U { .. }
-            | Operator::I32Load16S { .. }
-            | Operator::I32Load16U { .. }
-            | Operator::I32Store { .. }
-            | Operator::I32Store8 { .. }
-            | Operator::I32Store16 { .. }
-            | Operator::GlobalGet { .. }
-            | Operator::GlobalSet { .. }
-            | Operator::Call { .. }
-            | Operator::CallIndirect { .. }
-    )
-}
-
-fn boundary_stack_effect(op: &Operator<'_>) -> (usize, usize) {
-    operator_stack_effect(op).unwrap_or((0, 0))
 }
 
 #[cfg(test)]
@@ -521,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_splits_segment() {
+    fn load_store_stays_in_one_segment() {
         let wasm = wat_to_wasm(
             r#"(module
                 (memory 1)
@@ -538,9 +647,9 @@ mod tests {
             )"#,
         );
         let info = parse_wasm_bytes(&wasm).expect("parse");
-        assert_eq!(info.segments.len(), 2);
-        assert_eq!(info.segments[0].ops.len(), 4);
-        assert_eq!(info.segments[1].ops.len(), 3);
+        assert_eq!(info.segments.len(), 1, "expected single segment");
+        assert_eq!(info.segments[0].ops.len(), 8);
+        assert!(info.segments[0].has_opaque());
     }
 
     #[test]
@@ -548,6 +657,32 @@ mod tests {
         let bytes = include_bytes!("../../examples/addition_chains_initial.wasm");
         let info = parse_wasm_bytes(bytes).expect("addition_chains must parse");
         assert!(!info.segments.is_empty(), "expected at least one segment");
+    }
+
+    #[test]
+    fn addition_chains_segment_count_drops_after_opaque_merge() {
+        let bytes = include_bytes!("../../examples/addition_chains_initial.wasm");
+        let info = parse_wasm_bytes(bytes).expect("addition_chains must parse");
+        assert!(
+            info.segments.len() < 327,
+            "Phase 1 split on every boundary produced 327; got {}",
+            info.segments.len()
+        );
+        assert!(
+            info.segments.len() <= 200,
+            "expected merged opaque segments, got {}",
+            info.segments.len()
+        );
+        let mixed = info.segments.iter().any(|s| {
+            let has_load = s.ops.iter().any(|op| matches!(op, SemOp::I32Load { .. }));
+            let has_store = s.ops.iter().any(|op| matches!(op, SemOp::I32Store { .. }));
+            let has_arith = s
+                .ops
+                .iter()
+                .any(|op| matches!(op, SemOp::I32Add | SemOp::I32Mul | SemOp::I32Sub));
+            has_load && has_store && has_arith
+        });
+        assert!(mixed, "expected at least one load+store+arith segment");
     }
 
     #[test]

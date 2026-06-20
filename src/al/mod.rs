@@ -12,12 +12,18 @@ mod specs;
 mod symbolic;
 mod util;
 
-pub use ast::format_rule_binop_pretty;
+pub use ast::{
+    format_rule_binop_pretty, format_rule_relop_pretty, format_rule_testop_pretty,
+    format_rule_unop_pretty,
+};
 pub use defs::format_rule_local_pretty;
-pub use defs::{NumType, Sign, WasmBinOp};
+pub use defs::{
+    NumType, Sign, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp,
+};
 pub use derive::{
     derive_inst_spec, derive_rule_binop_spec, derive_rule_local_get_spec,
-    derive_rule_local_set_spec, derive_rule_local_tee_spec,
+    derive_rule_local_set_spec, derive_rule_local_tee_spec, derive_rule_relop_spec,
+    derive_rule_testop_spec, derive_rule_unop_spec,
 };
 pub use ir::format_al_pretty;
 pub use policy::STRAIGHT_LINE_EMBED;

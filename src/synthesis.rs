@@ -42,7 +42,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 7;
+const RULES_CACHE_FORMAT_VERSION: u32 = 8;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
@@ -286,6 +286,23 @@ mod tests {
     }
 
     #[test]
+    fn ast_pattern_for_unary_ops() {
+        let eqz = ValueAst::Eqz(Box::new(ValueAst::Symbol(0)));
+        assert_eq!(eqz.to_pattern(), "(i32.eqz ?a)");
+        let clz = ValueAst::Clz(Box::new(ValueAst::Symbol(0)));
+        assert_eq!(clz.to_pattern(), "(i32.clz ?a)");
+    }
+
+    #[test]
+    fn ast_pattern_for_relop() {
+        let eq = ValueAst::Eq(
+            Box::new(ValueAst::Symbol(0)),
+            Box::new(ValueAst::Symbol(1)),
+        );
+        assert_eq!(eq.to_pattern(), "(i32.eq ?a ?b)");
+    }
+
+    #[test]
     fn directed_ast_pair_skips_larger_rhs() {
         let short = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
         let long = ValueAst::Add(Box::new(ValueAst::Const(1)), Box::new(short.clone()));
@@ -304,8 +321,8 @@ mod tests {
             total_pairs += count_candidate_pairs(input.len(), &asts);
         }
         assert!(
-            total_pairs < 100_000,
-            "expected pruned pair count under 100k, got {total_pairs}"
+            total_pairs < 2_000_000,
+            "expected pruned pair count under 2M, got {total_pairs}"
         );
     }
 }

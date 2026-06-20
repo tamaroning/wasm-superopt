@@ -4,32 +4,57 @@ use super::canon::Canonizer;
 use crate::lang::ValueLang;
 use crate::semantics::{InstKind, SemOp};
 use crate::sym::{LocalReq, SymState, subtree_expr};
-use crate::wasm::SegmentBounds;
+use crate::value::parse_value_expr;
+use crate::wasm::{SegmentBounds, StraightSegment};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PeelAction {
     Forward(SemOp),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SearchState {
+    pub goal: SymState,
+    pub remaining_storage: BTreeSet<u32>,
+    pub used_opaque: BTreeSet<u32>,
+}
+
+impl SearchState {
+    pub fn initial(segment: &StraightSegment, fin: &SymState) -> Self {
+        Self {
+            goal: fin.clone(),
+            remaining_storage: segment.storage_ids().collect(),
+            used_opaque: BTreeSet::new(),
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.remaining_storage.is_empty()
+    }
+}
+
 pub fn applicable_peels(
-    g: &SymState,
+    state: &SearchState,
+    segment: &StraightSegment,
     bounds: &SegmentBounds,
     canon: &mut Canonizer,
-) -> Vec<(PeelAction, SymState)> {
-    if !g.validate_bounds(bounds) {
+) -> Vec<(PeelAction, SearchState)> {
+    if !state.goal.validate_bounds(bounds) {
         return vec![];
     }
     let mut out = Vec::new();
+    let g = &state.goal;
 
     for (&slot, req) in &g.locals {
         if slot > bounds.max_local {
             continue;
         }
         if let LocalReq::Need(v) = req {
-            let mut next = g.clone();
-            next.locals.insert(slot, LocalReq::DontCare);
-            next.stack.push(v.clone());
-            if next.stack.len() <= bounds.max_stack {
+            let mut next = state.clone();
+            next.goal.locals.insert(slot, LocalReq::DontCare);
+            next.goal.stack.push(v.clone());
+            if next.goal.stack.len() <= bounds.max_stack {
                 out.push((PeelAction::Forward(SemOp::LocalSet(slot)), next));
             }
         }
@@ -42,8 +67,8 @@ pub fn applicable_peels(
             }
             if let LocalReq::Need(v) = req {
                 if canon.values_equivalent(top, v) {
-                    let mut next = g.clone();
-                    next.locals.insert(slot, LocalReq::DontCare);
+                    let mut next = state.clone();
+                    next.goal.locals.insert(slot, LocalReq::DontCare);
                     out.push((PeelAction::Forward(SemOp::LocalTee(slot)), next));
                 }
             }
@@ -52,28 +77,28 @@ pub fn applicable_peels(
 
     if let Some(top) = g.top().cloned() {
         if let ValueLang::I32Const(c) = &top[top.root()] {
-            let mut next = g.clone();
-            next.stack.pop();
+            let mut next = state.clone();
+            next.goal.stack.pop();
             out.push((PeelAction::Forward(SemOp::I32Const(*c)), next));
         }
 
         for (kind, e1, e2) in canon.binop_decompositions(&top) {
             let sem = inst_kind_to_sem(kind);
-            let mut next = g.clone();
-            next.stack.pop();
-            next.stack.push(e1);
-            next.stack.push(e2);
-            if next.stack.len() <= bounds.max_stack {
+            let mut next = state.clone();
+            next.goal.stack.pop();
+            next.goal.stack.push(e1);
+            next.goal.stack.push(e2);
+            if next.goal.stack.len() <= bounds.max_stack {
                 out.push((PeelAction::Forward(sem), next));
             }
         }
 
         if let Some((sem, a, b)) = structural_binop_peel(&top) {
-            let mut next = g.clone();
-            next.stack.pop();
-            next.stack.push(a);
-            next.stack.push(b);
-            if next.stack.len() <= bounds.max_stack {
+            let mut next = state.clone();
+            next.goal.stack.pop();
+            next.goal.stack.push(a);
+            next.goal.stack.push(b);
+            if next.goal.stack.len() <= bounds.max_stack {
                 out.push((PeelAction::Forward(sem), next));
             }
         }
@@ -81,12 +106,12 @@ pub fn applicable_peels(
         if !g.stack.is_empty() {
             let v = top;
             for slot in 0..=bounds.max_local {
-                let mut next = g.clone();
-                next.stack.pop();
-                match next.locals.get(&slot) {
+                let mut next = state.clone();
+                next.goal.stack.pop();
+                match next.goal.locals.get(&slot) {
                     Some(LocalReq::Need(existing)) if canon.values_equivalent(existing, &v) => {}
                     Some(LocalReq::DontCare) | None => {
-                        next.locals.insert(slot, LocalReq::Need(v.clone()));
+                        next.goal.locals.insert(slot, LocalReq::Need(v.clone()));
                     }
                     Some(LocalReq::Need(_)) => continue,
                 }
@@ -95,7 +120,108 @@ pub fn applicable_peels(
         }
     }
 
+    for meta in &segment.opaque_meta {
+        if state.used_opaque.contains(&meta.id) {
+            continue;
+        }
+        let Some(op) = find_op_by_id(segment, meta.id) else {
+            continue;
+        };
+
+        if meta.storage {
+            if !state.remaining_storage.contains(&meta.id) {
+                continue;
+            }
+            if can_peel_storage(state, meta, canon) {
+                if let Some(next) = peel_storage_op(state, op, meta) {
+                    if next.goal.validate_bounds(bounds) {
+                        out.push((PeelAction::Forward(op.clone()), next));
+                    }
+                }
+            }
+        } else if can_peel_result_op(state, meta, canon) {
+            if let Some(next) = peel_result_op(state, op, meta) {
+                if next.goal.validate_bounds(bounds) {
+                    out.push((PeelAction::Forward(op.clone()), next));
+                }
+            }
+        }
+    }
+
     out
+}
+
+fn find_op_by_id(segment: &StraightSegment, id: u32) -> Option<&SemOp> {
+    segment.ops.iter().find(|op| op.opaque_id() == Some(id))
+}
+
+fn symbol_at_stack(g: &SymState, idx_from_top: usize, sym: &str, canon: &mut Canonizer) -> bool {
+    let expr = parse_value_expr(sym);
+    let Some(idx) = g.stack.len().checked_sub(1 + idx_from_top) else {
+        return false;
+    };
+    g.stack
+        .get(idx)
+        .is_some_and(|e| canon.values_equivalent(e, &expr))
+}
+
+fn can_peel_result_op(state: &SearchState, meta: &crate::wasm::OpaqueMeta, canon: &mut Canonizer) -> bool {
+    if meta.result_symbols.is_empty() {
+        return false;
+    }
+    for (i, sym) in meta.result_symbols.iter().enumerate().rev() {
+        if !symbol_at_stack(&state.goal, i, sym, canon) {
+            return false;
+        }
+    }
+    true
+}
+
+fn can_peel_storage(state: &SearchState, meta: &crate::wasm::OpaqueMeta, canon: &mut Canonizer) -> bool {
+    if meta.result_symbols.is_empty() {
+        return true;
+    }
+    can_peel_result_op(state, meta, canon)
+}
+
+fn peel_result_op(
+    state: &SearchState,
+    _op: &SemOp,
+    meta: &crate::wasm::OpaqueMeta,
+) -> Option<SearchState> {
+    let mut next = state.clone();
+    for _ in 0..meta.result_symbols.len() {
+        next.goal.stack.pop()?;
+    }
+    push_inputs(&mut next.goal, meta)?;
+    next.used_opaque.insert(meta.id);
+    Some(next)
+}
+
+fn peel_storage_op(
+    state: &SearchState,
+    op: &SemOp,
+    meta: &crate::wasm::OpaqueMeta,
+) -> Option<SearchState> {
+    let mut next = state.clone();
+    if !meta.result_symbols.is_empty() {
+        for _ in 0..meta.result_symbols.len() {
+            next.goal.stack.pop()?;
+        }
+    }
+    push_inputs(&mut next.goal, meta)?;
+    next.used_opaque.insert(meta.id);
+    next.remaining_storage.remove(&meta.id);
+    let _ = op;
+    Some(next)
+}
+
+fn push_inputs(g: &mut SymState, meta: &crate::wasm::OpaqueMeta) -> Option<()> {
+    // Forward opaque ops pop inputs top-first; backward pushes bottom-first.
+    for sym in meta.input_symbols.iter().rev() {
+        g.stack.push(parse_value_expr(sym));
+    }
+    Some(())
 }
 
 fn structural_binop_peel(top: &crate::sym::ValueExpr) -> Option<(SemOp, crate::sym::ValueExpr, crate::sym::ValueExpr)> {
@@ -150,6 +276,33 @@ fn inst_kind_to_sem(kind: InstKind) -> SemOp {
         InstKind::I32GtS => SemOp::I32GtS,
         other => panic!("not a peelable binop: {other:?}"),
     }
+}
+
+/// Backward-compatible peel API for arithmetic-only segments/tests.
+pub fn applicable_peels_arithmetic_only(
+    g: &SymState,
+    bounds: &SegmentBounds,
+    canon: &mut Canonizer,
+) -> Vec<(PeelAction, SymState)> {
+    let state = SearchState {
+        goal: g.clone(),
+        remaining_storage: BTreeSet::new(),
+        used_opaque: BTreeSet::new(),
+    };
+    let empty = StraightSegment {
+        func_index: 0,
+        segment_index: 0,
+        ops: vec![],
+        init: g.clone(),
+        fin: g.clone(),
+        bounds: *bounds,
+        opaque_meta: vec![],
+        dependencies: vec![],
+    };
+    applicable_peels(&state, &empty, bounds, canon)
+        .into_iter()
+        .map(|(a, s)| (a, s.goal))
+        .collect()
 }
 
 #[cfg(test)]
@@ -225,7 +378,7 @@ mod tests {
             SemOp::LocalGet(0),
         ];
         for op in manual {
-            let peels = applicable_peels(&g, &bounds, &mut canon);
+            let peels = applicable_peels_arithmetic_only(&g, &bounds, &mut canon);
             let next = peels
                 .into_iter()
                 .find(|(a, _)| match (&a, &op) {

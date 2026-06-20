@@ -120,6 +120,12 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
             let db = residual_depth(&subtree_expr(expr, *b), avail, canon);
             1 + da.max(db)
         }
+        ValueLang::I32Eqz([a])
+        | ValueLang::I32Clz([a])
+        | ValueLang::I32Ctz([a])
+        | ValueLang::I32Popcnt([a]) => {
+            1 + residual_depth(&subtree_expr(expr, *a), avail, canon)
+        }
     }
 }
 

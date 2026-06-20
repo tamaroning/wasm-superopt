@@ -137,3 +137,36 @@ pub fn derive_rule_local_tee_spec(slot: u32) -> InstSpec {
         can_trap: false,
     }
 }
+
+/// Static `InstSpec` for `Step_pure/relop` — pop two `nt`, push one `i32`.
+pub fn derive_rule_relop_spec(kind: InstKind) -> InstSpec {
+    assert!(kind.is_i32_relop(), "derive_rule_relop_spec: {kind:?}");
+    InstSpec {
+        kind,
+        pops: POPS_2,
+        pushes: PUSHES_1,
+        can_trap: false,
+    }
+}
+
+/// Static `InstSpec` for `Step_pure/testop` — pop one `nt`, push one `i32`.
+pub fn derive_rule_testop_spec(kind: InstKind) -> InstSpec {
+    assert!(kind.is_i32_testop(), "derive_rule_testop_spec: {kind:?}");
+    InstSpec {
+        kind,
+        pops: POPS_1,
+        pushes: PUSHES_1,
+        can_trap: false,
+    }
+}
+
+/// Static `InstSpec` for `Step_pure/unop` — pop one `nt`, push one `nt`.
+pub fn derive_rule_unop_spec(kind: InstKind) -> InstSpec {
+    assert!(kind.is_i32_unop(), "derive_rule_unop_spec: {kind:?}");
+    InstSpec {
+        kind,
+        pops: POPS_1,
+        pushes: PUSHES_1,
+        can_trap: kind.may_trap_as_unop(),
+    }
+}

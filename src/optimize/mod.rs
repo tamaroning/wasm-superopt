@@ -68,11 +68,10 @@ pub fn optimize_segment(
             timeout_secs,
         };
     }
-    let bounds = &segment.bounds;
     let result = match solver {
-        SolverKind::Bfs => solve_bfs(&segment.init, &segment.fin, bounds, rules, &segment_cfg),
-        SolverKind::Greedy => solve_greedy_inv(&segment.init, &segment.fin, bounds, rules, &segment_cfg),
-        SolverKind::Astar => solve_astar(&segment.init, &segment.fin, bounds, rules, &segment_cfg),
+        SolverKind::Bfs => solve_bfs(segment, rules, &segment_cfg),
+        SolverKind::Greedy => solve_greedy_inv(segment, rules, &segment_cfg),
+        SolverKind::Astar => solve_astar(segment, rules, &segment_cfg),
     };
     SegmentOptResult {
         segment: segment.clone(),
@@ -192,9 +191,12 @@ pub fn summarize(results: &[SegmentOptResult]) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::optimize::search::{validate_solution_ops, SearchConfig};
+    use crate::semantics::SemOp;
     use crate::synthesis::{
         TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
+    use crate::wasm::ops_respect_dependencies;
     use crate::wasm::parse_wasm_bytes;
 
     fn rules() -> Vec<Rewrite<ValueLang, ()>> {
@@ -306,5 +308,53 @@ mod tests {
             segment_timeout_secs(&info.segments[0], false),
             DEFAULT_TIMEOUT_BASE_SECS
         );
+    }
+
+    #[test]
+    fn storage_ops_preserved_in_optimized_segment() {
+        let wasm = wat::parse_str(
+            r#"(module
+                (memory 1)
+                (func (param i32)
+                  local.get 0
+                  i32.const 1
+                  i32.add
+                  i32.const 0
+                  i32.store
+                )
+            )"#,
+        )
+        .unwrap();
+        let info = parse_wasm_bytes(&wasm).unwrap();
+        assert_eq!(info.segments.len(), 1);
+        let segment = &info.segments[0];
+        assert!(segment.ops.iter().any(|op| op.is_storage_boundary()));
+        let result = optimize_segment(segment, &rules(), &SearchConfig::default(), SolverKind::Astar);
+        let opt = result.optimized.as_ref().expect("expected optimized ops");
+        assert!(
+            crate::wasm::storage_ops_preserved(&segment.ops, opt),
+            "optimized: {}",
+            format_ops(opt)
+        );
+        assert!(validate_solution_ops(opt, segment));
+    }
+
+    #[test]
+    fn dependency_order_respected_in_solution() {
+        let load = SemOp::I32Load {
+            id: 0,
+            mem: 0,
+            offset: 0,
+        };
+        let store = SemOp::I32Store {
+            id: 1,
+            mem: 0,
+            offset: 0,
+        };
+        let deps = vec![(0, 1)];
+        let good = vec![load.clone(), SemOp::I32Add, store.clone()];
+        let bad = vec![store.clone(), SemOp::I32Add, load.clone()];
+        assert!(ops_respect_dependencies(&good, &deps));
+        assert!(!ops_respect_dependencies(&bad, &deps));
     }
 }

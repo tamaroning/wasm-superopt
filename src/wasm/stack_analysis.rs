@@ -57,9 +57,16 @@ pub fn semop_stack_effect(op: &SemOp) -> (usize, usize) {
         | SemOp::I32LtS
         | SemOp::I32LeS
         | SemOp::I32GtS => (2, 1),
+        SemOp::I32Eqz => (1, 1),
+        SemOp::I32Clz | SemOp::I32Ctz | SemOp::I32Popcnt => (1, 1),
         SemOp::LocalGet(_) => (0, 1),
         SemOp::LocalSet(_) => (1, 0),
         SemOp::LocalTee(_) => (1, 1),
+        SemOp::I32Load { .. } => (1, 1),
+        SemOp::I32Store { .. } => (2, 0),
+        SemOp::Call { pops, pushes, .. } => (*pops as usize, *pushes as usize),
+        SemOp::GlobalGet { .. } => (0, 1),
+        SemOp::GlobalSet { .. } => (1, 0),
     }
 }
 
@@ -79,6 +86,10 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         | Operator::I32GtS
         | Operator::I32GeS
         | Operator::I32GeU => (2, 1),
+        Operator::I32Eqz
+        | Operator::I32Clz
+        | Operator::I32Ctz
+        | Operator::I32Popcnt => (1, 1),
         Operator::LocalGet { .. } => (0, 1),
         Operator::LocalSet { .. } => (1, 0),
         Operator::LocalTee { .. } => (1, 1),

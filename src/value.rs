@@ -17,6 +17,15 @@ pub enum ValueAst {
     DivU(Box<ValueAst>, Box<ValueAst>),
     DivS(Box<ValueAst>, Box<ValueAst>),
     Shl(Box<ValueAst>, Box<ValueAst>),
+    Eq(Box<ValueAst>, Box<ValueAst>),
+    Ne(Box<ValueAst>, Box<ValueAst>),
+    LtS(Box<ValueAst>, Box<ValueAst>),
+    LeS(Box<ValueAst>, Box<ValueAst>),
+    GtS(Box<ValueAst>, Box<ValueAst>),
+    Eqz(Box<ValueAst>),
+    Clz(Box<ValueAst>),
+    Ctz(Box<ValueAst>),
+    Popcnt(Box<ValueAst>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,11 +35,41 @@ enum ValueBinOp {
     DivU,
     DivS,
     Shl,
+    Eq,
+    Ne,
+    LtS,
+    LeS,
+    GtS,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ValueUnOp {
+    Eqz,
+    Clz,
+    Ctz,
+    Popcnt,
 }
 
 impl ValueBinOp {
-    fn all() -> [Self; 5] {
-        [Self::Add, Self::Mul, Self::DivU, Self::DivS, Self::Shl]
+    fn all() -> [Self; 10] {
+        [
+            Self::Add,
+            Self::Mul,
+            Self::DivU,
+            Self::DivS,
+            Self::Shl,
+            Self::Eq,
+            Self::Ne,
+            Self::LtS,
+            Self::LeS,
+            Self::GtS,
+        ]
+    }
+}
+
+impl ValueUnOp {
+    fn all() -> [Self; 4] {
+        [Self::Eqz, Self::Clz, Self::Ctz, Self::Popcnt]
     }
 }
 
@@ -42,7 +81,13 @@ impl ValueAst {
             | Self::Mul(l, r)
             | Self::DivU(l, r)
             | Self::DivS(l, r)
-            | Self::Shl(l, r) => 1 + l.size() + r.size(),
+            | Self::Shl(l, r)
+            | Self::Eq(l, r)
+            | Self::Ne(l, r)
+            | Self::LtS(l, r)
+            | Self::LeS(l, r)
+            | Self::GtS(l, r) => 1 + l.size() + r.size(),
+            Self::Eqz(c) | Self::Clz(c) | Self::Ctz(c) | Self::Popcnt(c) => 1 + c.size(),
         }
     }
 
@@ -60,9 +105,17 @@ impl ValueAst {
             | Self::Mul(l, r)
             | Self::DivU(l, r)
             | Self::DivS(l, r)
-            | Self::Shl(l, r) => {
+            | Self::Shl(l, r)
+            | Self::Eq(l, r)
+            | Self::Ne(l, r)
+            | Self::LtS(l, r)
+            | Self::LeS(l, r)
+            | Self::GtS(l, r) => {
                 l.collect_symbol_counts(counts);
                 r.collect_symbol_counts(counts);
+            }
+            Self::Eqz(c) | Self::Clz(c) | Self::Ctz(c) | Self::Popcnt(c) => {
+                c.collect_symbol_counts(counts);
             }
         }
     }
@@ -76,6 +129,15 @@ impl ValueAst {
             Self::DivU(l, r) => format!("(i32.div_u {} {})", l.to_pattern(), r.to_pattern()),
             Self::DivS(l, r) => format!("(i32.div_s {} {})", l.to_pattern(), r.to_pattern()),
             Self::Shl(l, r) => format!("(i32.shl {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Eq(l, r) => format!("(i32.eq {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Ne(l, r) => format!("(i32.ne {} {})", l.to_pattern(), r.to_pattern()),
+            Self::LtS(l, r) => format!("(i32.lt_s {} {})", l.to_pattern(), r.to_pattern()),
+            Self::LeS(l, r) => format!("(i32.le_s {} {})", l.to_pattern(), r.to_pattern()),
+            Self::GtS(l, r) => format!("(i32.gt_s {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Eqz(c) => format!("(i32.eqz {})", c.to_pattern()),
+            Self::Clz(c) => format!("(i32.clz {})", c.to_pattern()),
+            Self::Ctz(c) => format!("(i32.ctz {})", c.to_pattern()),
+            Self::Popcnt(c) => format!("(i32.popcnt {})", c.to_pattern()),
         }
     }
 
@@ -88,6 +150,21 @@ impl ValueAst {
             ValueBinOp::DivU => Self::DivU(l, r),
             ValueBinOp::DivS => Self::DivS(l, r),
             ValueBinOp::Shl => Self::Shl(l, r),
+            ValueBinOp::Eq => Self::Eq(l, r),
+            ValueBinOp::Ne => Self::Ne(l, r),
+            ValueBinOp::LtS => Self::LtS(l, r),
+            ValueBinOp::LeS => Self::LeS(l, r),
+            ValueBinOp::GtS => Self::GtS(l, r),
+        }
+    }
+
+    fn unop(op: ValueUnOp, child: ValueAst) -> Self {
+        let c = Box::new(child);
+        match op {
+            ValueUnOp::Eqz => Self::Eqz(c),
+            ValueUnOp::Clz => Self::Clz(c),
+            ValueUnOp::Ctz => Self::Ctz(c),
+            ValueUnOp::Popcnt => Self::Popcnt(c),
         }
     }
 }
@@ -110,6 +187,13 @@ pub fn enumerate_value_asts(max_size: usize, num_inputs: usize) -> Vec<ValueAst>
     for total in 2..=max_size {
         let idx = total - 1;
         let mut new_asts = Vec::new();
+        for child_sz in 1..total {
+            for child in &by_size[child_sz - 1] {
+                for op in ValueUnOp::all() {
+                    new_asts.push(ValueAst::unop(op, child.clone()));
+                }
+            }
+        }
         for left_sz in 1..total {
             let right_sz = total - 1 - left_sz;
             if right_sz == 0 {
@@ -133,6 +217,45 @@ pub fn enumerate_value_asts(max_size: usize, num_inputs: usize) -> Vec<ValueAst>
 struct AstEvalResult {
     value: i32,
     trap: bool,
+}
+
+fn i32_bool(b: bool) -> i32 {
+    i32::from(b)
+}
+
+fn eval_children(
+    l: &ValueAst,
+    r: &ValueAst,
+    inputs: &[i32],
+    f: fn(i32, i32) -> i32,
+) -> AstEvalResult {
+    let l = eval_ast_concrete(l, inputs);
+    if l.trap {
+        return l;
+    }
+    let r = eval_ast_concrete(r, inputs);
+    if r.trap {
+        return r;
+    }
+    AstEvalResult {
+        value: f(l.value, r.value),
+        trap: false,
+    }
+}
+
+fn eval_unary_child(
+    c: &ValueAst,
+    inputs: &[i32],
+    f: fn(i32) -> i32,
+) -> AstEvalResult {
+    let c = eval_ast_concrete(c, inputs);
+    if c.trap {
+        return c;
+    }
+    AstEvalResult {
+        value: f(c.value),
+        trap: false,
+    }
 }
 
 fn eval_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> AstEvalResult {
@@ -227,6 +350,15 @@ fn eval_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> AstEvalResult {
                 trap: false,
             }
         }
+        ValueAst::Eq(l, r) => eval_children(l, r, inputs, |a, b| i32_bool(a == b)),
+        ValueAst::Ne(l, r) => eval_children(l, r, inputs, |a, b| i32_bool(a != b)),
+        ValueAst::LtS(l, r) => eval_children(l, r, inputs, |a, b| i32_bool(a < b)),
+        ValueAst::LeS(l, r) => eval_children(l, r, inputs, |a, b| i32_bool(a <= b)),
+        ValueAst::GtS(l, r) => eval_children(l, r, inputs, |a, b| i32_bool(a > b)),
+        ValueAst::Eqz(c) => eval_unary_child(c, inputs, |a| i32_bool(a == 0)),
+        ValueAst::Clz(c) => eval_unary_child(c, inputs, |a| (a as u32).leading_zeros() as i32),
+        ValueAst::Ctz(c) => eval_unary_child(c, inputs, |a| (a as u32).trailing_zeros() as i32),
+        ValueAst::Popcnt(c) => eval_unary_child(c, inputs, |a| (a as u32).count_ones() as i32),
     }
 }
 
@@ -294,6 +426,46 @@ fn ast_concrete_input(rng: &mut AstLcg, case: usize, slot: usize) -> i32 {
     }
 }
 
+fn bool32<'ctx>(ctx: &'ctx Context, b: &Bool<'ctx>) -> BV<'ctx> {
+    b.ite(
+        &BV::from_i64(ctx, 1, I32_BITS),
+        &BV::from_i64(ctx, 0, I32_BITS),
+    )
+}
+
+fn bv_bit_is_set<'ctx>(ctx: &'ctx Context, v: &BV<'ctx>, i: u32) -> Bool<'ctx> {
+    v.extract(i, i)._eq(&BV::from_u64(ctx, 1, 1))
+}
+
+fn i32_clz_z3<'ctx>(ctx: &'ctx Context, v: &BV<'ctx>) -> BV<'ctx> {
+    let mut out = BV::from_i64(ctx, 32, I32_BITS);
+    for i in (0..32).rev() {
+        let bit = bv_bit_is_set(ctx, v, i);
+        let val = BV::from_i64(ctx, (31 - i) as i64, I32_BITS);
+        out = bit.ite(&val, &out);
+    }
+    out
+}
+
+fn i32_ctz_z3<'ctx>(ctx: &'ctx Context, v: &BV<'ctx>) -> BV<'ctx> {
+    let mut out = BV::from_i64(ctx, 32, I32_BITS);
+    for i in 0..32 {
+        let bit = bv_bit_is_set(ctx, v, i);
+        let val = BV::from_i64(ctx, i as i64, I32_BITS);
+        out = bit.ite(&val, &out);
+    }
+    out
+}
+
+fn i32_popcnt_z3<'ctx>(ctx: &'ctx Context, v: &BV<'ctx>) -> BV<'ctx> {
+    let mut sum = BV::from_i64(ctx, 0, I32_BITS);
+    for i in 0..32 {
+        let bit = bool32(ctx, &bv_bit_is_set(ctx, v, i));
+        sum = sum.bvadd(&bit);
+    }
+    sum
+}
+
 fn eval_ast_z3<'ctx>(
     ctx: &'ctx Context,
     ast: &ValueAst,
@@ -339,6 +511,48 @@ fn eval_ast_z3<'ctx>(
             let mask = BV::from_u64(ctx, 31, I32_BITS);
             let shift = rv.bvand(&mask);
             (lv.bvshl(&shift), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Eq(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (bool32(ctx, &lv._eq(&rv)), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Ne(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (bool32(ctx, &lv._eq(&rv).not()), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::LtS(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (bool32(ctx, &lv.bvslt(&rv)), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::LeS(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (bool32(ctx, &lv.bvsle(&rv)), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::GtS(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (bool32(ctx, &lv.bvsgt(&rv)), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Eqz(c) => {
+            let (cv, ct) = eval_ast_z3(ctx, c, vars);
+            let zero = BV::from_i64(ctx, 0, I32_BITS);
+            (bool32(ctx, &cv._eq(&zero)), ct)
+        }
+        ValueAst::Clz(c) => {
+            let (cv, ct) = eval_ast_z3(ctx, c, vars);
+            (i32_clz_z3(ctx, &cv), ct)
+        }
+        ValueAst::Ctz(c) => {
+            let (cv, ct) = eval_ast_z3(ctx, c, vars);
+            (i32_ctz_z3(ctx, &cv), ct)
+        }
+        ValueAst::Popcnt(c) => {
+            let (cv, ct) = eval_ast_z3(ctx, c, vars);
+            (i32_popcnt_z3(ctx, &cv), ct)
         }
     }
 }
@@ -390,6 +604,8 @@ fn is_commutative_swap(lhs: &ValueAst, rhs: &ValueAst) -> bool {
     match (lhs, rhs) {
         (ValueAst::Add(l1, r1), ValueAst::Add(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         (ValueAst::Mul(l1, r1), ValueAst::Mul(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
+        (ValueAst::Eq(l1, r1), ValueAst::Eq(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
+        (ValueAst::Ne(l1, r1), ValueAst::Ne(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         _ => false,
     }
 }

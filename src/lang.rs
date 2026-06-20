@@ -16,6 +16,10 @@ define_language! {
         "i32.lt_s"  = I32LtS([Id; 2]),
         "i32.le_s"  = I32LeS([Id; 2]),
         "i32.gt_s"  = I32GtS([Id; 2]),
+        "i32.eqz"   = I32Eqz([Id; 1]),
+        "i32.clz"   = I32Clz([Id; 1]),
+        "i32.ctz"   = I32Ctz([Id; 1]),
+        "i32.popcnt" = I32Popcnt([Id; 1]),
         Symbol(Symbol),
     }
 }

@@ -3,11 +3,15 @@
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::value::parse_value_expr;
-use crate::wasm::SegmentBounds;
+use crate::wasm::{OpaqueMeta, SegmentBounds};
 use egg::{Id, RecExpr};
 use std::collections::{BTreeMap, HashMap};
 
 pub type ValueExpr = RecExpr<ValueLang>;
+
+pub fn expr_name(expr: &ValueExpr) -> String {
+    expr.to_string()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LocalReq {
@@ -113,6 +117,22 @@ fn go_subtree(
             let b = go_subtree(src, *b, dst, memo);
             dst.add(ValueLang::I32GtS([a, b]))
         }
+        ValueLang::I32Eqz([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I32Eqz([a]))
+        }
+        ValueLang::I32Clz([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I32Clz([a]))
+        }
+        ValueLang::I32Ctz([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I32Ctz([a]))
+        }
+        ValueLang::I32Popcnt([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I32Popcnt([a]))
+        }
     };
     memo.insert(id, mapped);
     mapped
@@ -207,9 +227,14 @@ impl SymMachine {
     }
 
     pub fn exec(&mut self, op: &SemOp) -> Result<(), ForwardError> {
+        self.exec_with_meta(op).map(|_| ())
+    }
+
+    pub fn exec_with_meta(&mut self, op: &SemOp) -> Result<Option<OpaqueMeta>, ForwardError> {
         match op {
             SemOp::I32Const(n) => {
                 self.push_expr(parse_value_expr(&n.to_string()))?;
+                Ok(None)
             }
             SemOp::I32Add
             | SemOp::I32Sub
@@ -239,6 +264,19 @@ impl SymMachine {
                     _ => unreachable!(),
                 };
                 self.push_expr(expr)?;
+                Ok(None)
+            }
+            SemOp::I32Eqz | SemOp::I32Clz | SemOp::I32Ctz | SemOp::I32Popcnt => {
+                let a = self.pop()?;
+                let expr = match op {
+                    SemOp::I32Eqz => parse_value_expr(&format!("(i32.eqz {a})")),
+                    SemOp::I32Clz => parse_value_expr(&format!("(i32.clz {a})")),
+                    SemOp::I32Ctz => parse_value_expr(&format!("(i32.ctz {a})")),
+                    SemOp::I32Popcnt => parse_value_expr(&format!("(i32.popcnt {a})")),
+                    _ => unreachable!(),
+                };
+                self.push_expr(expr)?;
+                Ok(None)
             }
             SemOp::LocalGet(slot) => {
                 if *slot >= self.total_locals {
@@ -250,6 +288,7 @@ impl SymMachine {
                     .cloned()
                     .ok_or(ForwardError::UnknownLocal(*slot))?;
                 self.push_expr(v)?;
+                Ok(None)
             }
             SemOp::LocalSet(slot) => {
                 if *slot >= self.total_locals {
@@ -257,6 +296,7 @@ impl SymMachine {
                 }
                 let v = self.pop()?;
                 self.locals.insert(*slot, v);
+                Ok(None)
             }
             SemOp::LocalTee(slot) => {
                 if *slot >= self.total_locals {
@@ -268,9 +308,75 @@ impl SymMachine {
                     .cloned()
                     .ok_or(ForwardError::StackUnderflow)?;
                 self.locals.insert(*slot, v);
+                Ok(None)
+            }
+            SemOp::I32Load { id, .. } => {
+                let addr = self.pop()?;
+                let sym = format!("?load_{id}");
+                let results = vec![sym.clone()];
+                self.push_expr(parse_value_expr(&sym))?;
+                Ok(Some(OpaqueMeta::from_exec(
+                    *id,
+                    false,
+                    vec![expr_name(&addr)],
+                    results,
+                )))
+            }
+            SemOp::I32Store { id, .. } => {
+                let value = self.pop()?;
+                let addr = self.pop()?;
+                Ok(Some(OpaqueMeta::from_exec(
+                    *id,
+                    true,
+                    vec![expr_name(&value), expr_name(&addr)],
+                    vec![],
+                )))
+            }
+            SemOp::Call {
+                id,
+                pops,
+                pushes,
+                ..
+            } => {
+                let mut inputs = Vec::with_capacity(*pops as usize);
+                for _ in 0..*pops {
+                    inputs.push(expr_name(&self.pop()?));
+                }
+                inputs.reverse();
+                let mut results = Vec::with_capacity(*pushes as usize);
+                for i in 0..*pushes {
+                    let sym = format!("?call_{id}_{i}");
+                    results.push(sym.clone());
+                    self.push_expr(parse_value_expr(&sym))?;
+                }
+                Ok(Some(OpaqueMeta::from_exec(
+                    *id,
+                    true,
+                    inputs,
+                    results,
+                )))
+            }
+            SemOp::GlobalGet { id, .. } => {
+                let sym = format!("?global_get_{id}");
+                let results = vec![sym.clone()];
+                self.push_expr(parse_value_expr(&sym))?;
+                Ok(Some(OpaqueMeta::from_exec(
+                    *id,
+                    false,
+                    vec![],
+                    results,
+                )))
+            }
+            SemOp::GlobalSet { id, .. } => {
+                let value = self.pop()?;
+                Ok(Some(OpaqueMeta::from_exec(
+                    *id,
+                    true,
+                    vec![expr_name(&value)],
+                    vec![],
+                )))
             }
         }
-        Ok(())
     }
 
     pub fn pop(&mut self) -> Result<ValueExpr, ForwardError> {

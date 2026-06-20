@@ -4,7 +4,10 @@
 
 #![allow(dead_code)] // mirrors spectec/*.al; not every node is wired to the live pipeline yet
 
-pub use super::defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp};
+pub use super::defs::{
+    BinOpCase, NumType, RelOpCase, Sign, UnOpCase, ValType, WasmBinOp, WasmRelOp, WasmTestOp,
+    WasmUnOp,
+};
 
 /// Formal parameter of a [`FuncA`] (`arg list` in OCaml; name + type for transcribed defs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +33,12 @@ pub enum ParamType {
     Sign,
     /// Wasm binary operator case (`ADD`, `DIV S`, …).
     BinOp,
+    /// Wasm relational operator case (`EQ`, `LT S`, …).
+    RelOp,
+    /// Wasm test operator case (`EQZ`, …).
+    TestOp,
+    /// Wasm unary operator case (`CLZ`, `ABS`, …).
+    UnOp,
     /// Polymorphic / pass-through (e.g. `X`, `X_opt` in `$list_`).
     Any,
 }
@@ -45,6 +54,12 @@ pub enum Arg {
     ValType(ValType),
     /// `ExpA` — binop case literal.
     BinOp(WasmBinOp),
+    /// `ExpA` — relop case literal.
+    RelOp(WasmRelOp),
+    /// `ExpA` — testop case literal.
+    TestOp(WasmTestOp),
+    /// `ExpA` — unop case literal.
+    UnOp(WasmUnOp),
     /// `ExpA` — `VarE` reference.
     Var(&'static str),
     /// `ExpA` — `NumE` (nat).
@@ -82,6 +97,26 @@ pub enum Expr {
     SignLit(Sign),
     /// Binop case literal (`ADD`, `DIV S`, …).
     BinOpLit(WasmBinOp),
+    /// Relop case literal (`EQ`, `LT S`, …).
+    RelOpLit(WasmRelOp),
+    /// Testop case literal (`EQZ`, …).
+    TestOpLit(WasmTestOp),
+    /// Unop case literal (`CLZ`, `ABS`, …).
+    UnOpLit(WasmUnOp),
+    /// Boolean literal (`true` / `false` in `$bool`).
+    BoolLit(bool),
+    /// Boolean equality (`a = b` inside `$bool(…)`).
+    Eq(Box<Expr>, Box<Expr>),
+    /// Boolean inequality (`a =/= b` inside `$bool(…)`).
+    Ne(Box<Expr>, Box<Expr>),
+    /// Boolean less-than (`a < b` inside `$bool(…)`).
+    LtCmp(Box<Expr>, Box<Expr>),
+    /// Boolean less-or-equal (`a <= b` inside `$bool(…)`).
+    LeCmp(Box<Expr>, Box<Expr>),
+    /// Boolean greater-than (`a > b` inside `$bool(…)`).
+    GtCmp(Box<Expr>, Box<Expr>),
+    /// Boolean greater-or-equal (`a >= b` inside `$bool(…)`).
+    GeCmp(Box<Expr>, Box<Expr>),
     /// Empty optional `ε` (`?()`).
     EmptyOpt,
     /// Singleton optional (`?(value)`).
@@ -149,6 +184,12 @@ pub enum Pred {
     Lt(Expr, Expr),
     /// `expr <= expr`.
     Le(Expr, Expr),
+    /// `expr > expr`.
+    Gt(Expr, Expr),
+    /// `expr >= expr`.
+    Ge(Expr, Expr),
+    /// `expr =/= expr`.
+    Ne(Expr, Expr),
     /// Conjunction of two predicates.
     And(Box<Pred>, Box<Pred>),
     /// Optional/list is empty (`|expr| <= 0` / `~(expr != None)`).
@@ -161,6 +202,16 @@ pub enum Pred {
     BinOpEq(Expr, WasmBinOp),
     /// Binop parameter is a signed div/rem/shr case.
     BinOpCaseIs(Expr, BinOpCase),
+    /// Relop parameter equals a case (`param = EQ`).
+    RelOpEq(Expr, WasmRelOp),
+    /// Relop parameter is a signed lt/gt/le/ge case.
+    RelOpCaseIs(Expr, RelOpCase),
+    /// Testop parameter equals a case (`param = EQZ`).
+    TestOpEq(Expr, WasmTestOp),
+    /// Unop parameter equals a case (`param = CLZ`).
+    UnOpEq(Expr, WasmUnOp),
+    /// Unop parameter is an extend case.
+    UnOpCaseIs(Expr, UnOpCase),
 }
 
 /// Condition operand for [`Instr::IfI`] and [`Instr::AssertI`].
@@ -179,6 +230,10 @@ pub enum LetLhs {
     Var(&'static str),
     /// Destructure sign from a case binop (`let (DIV sx) = binop_`).
     BinOpCase(BinOpCase, &'static str),
+    /// Destructure sign from a case relop (`let (LT sx) = relop_`).
+    RelOpCase(RelOpCase, &'static str),
+    /// Destructure width from a case unop (`let (EXTEND M) = unop_`).
+    UnOpCase(UnOpCase, &'static str),
 }
 
 /// Operand of [`Instr::PopI`] (`PopI of expr` in OCaml).
@@ -259,5 +314,45 @@ pub fn format_rule_binop_pretty(nt: NumType, binop: WasmBinOp) -> String {
              let c = choose($binop_({nt:?}, {binop:?}, c_1, c_2))\n\
              push const({nt:?}, c)\n\
          (partial via $binop_: {partial})"
+    )
+}
+
+/// Pretty-print `Step_pure/relop` with `$relop_` call visible.
+pub fn format_rule_relop_pretty(nt: NumType, relop: WasmRelOp) -> String {
+    format!(
+        "Step_pure/relop {nt:?} {relop:?}\n\
+           assert top_value({nt:?})\n\
+           pop c_2\n\
+           assert top_value({nt:?})\n\
+           pop c_1\n\
+           let c = $relop_({nt:?}, {relop:?}, c_1, c_2)\n\
+           push I32.CONST c"
+    )
+}
+
+/// Pretty-print `Step_pure/testop` with `$testop_` call visible.
+pub fn format_rule_testop_pretty(nt: NumType, testop: WasmTestOp) -> String {
+    format!(
+        "Step_pure/testop {nt:?} {testop:?}\n\
+           assert top_value({nt:?})\n\
+           pop c_1\n\
+           let c = $testop_({nt:?}, {testop:?}, c_1)\n\
+           push I32.CONST c"
+    )
+}
+
+/// Pretty-print `Step_pure/unop` with `$unop_` call visible.
+pub fn format_rule_unop_pretty(nt: NumType, unop: WasmUnOp) -> String {
+    let partial = if unop.is_partial() { "yes" } else { "no" };
+    format!(
+        "Step_pure/unop {nt:?} {unop:?}\n\
+           assert top_value({nt:?})\n\
+           pop c_1\n\
+           if |$unop_({nt:?}, {unop:?}, c_1)| <= 0 then\n\
+             trap\n\
+           else\n\
+             let c = choose($unop_({nt:?}, {unop:?}, c_1))\n\
+             push const({nt:?}, c)\n\
+         (partial via $unop_: {partial})"
     )
 }
