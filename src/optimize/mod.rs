@@ -1,12 +1,21 @@
-//! Optimize extracted straight-line Wasm segments via backward goal search.
+//! Phase 2: backward shortest-path search over straight-line Wasm segments (idea.md §2–§8).
+
+mod canon;
+mod forward;
+mod goal;
+mod heuristic;
+mod inverse;
+mod search;
+
+pub use forward::SymMachine;
+pub use goal::MachineState;
+pub use search::{DEFAULT_MAX_DEPTH, SearchConfig, format_ops, verify_forward};
 
 use crate::lang::ValueLang;
-use crate::search::{
-    format_ops, solve_astar, solve_bfs, solve_greedy_inv, verify_forward, SearchConfig,
-};
 use crate::semantics::SemOp;
 use crate::wasm::StraightSegment;
 use egg::Rewrite;
+use search::{solve_astar, solve_bfs, solve_greedy_inv};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub enum SolverKind {
@@ -112,11 +121,55 @@ pub fn summarize(results: &[SegmentOptResult]) -> (usize, usize, usize) {
     (total_orig, total_opt, improved)
 }
 
+/// Parsed `examples/example.wat` / `example-opt.wat` for unit tests (idea.md §12).
+#[cfg(test)]
+pub(crate) mod fixtures {
+    use super::MachineState;
+    use crate::semantics::SemOp;
+    use crate::wasm::{StraightSegment, parse_wasm_bytes};
+    use std::sync::OnceLock;
+
+    const BLOATED_WAT: &str = include_str!("../../examples/example.wat");
+    const OPT_WAT: &str = include_str!("../../examples/example-opt.wat");
+
+    fn bloated_segment() -> &'static StraightSegment {
+        static SEG: OnceLock<StraightSegment> = OnceLock::new();
+        SEG.get_or_init(|| {
+            let wasm = wat::parse_str(BLOATED_WAT).expect("examples/example.wat must parse");
+            let info = parse_wasm_bytes(&wasm).expect("examples/example.wat must yield wasm");
+            assert_eq!(info.segments.len(), 1);
+            info.segments.into_iter().next().unwrap()
+        })
+    }
+
+    fn canonical_fin() -> &'static MachineState {
+        static FIN: OnceLock<MachineState> = OnceLock::new();
+        FIN.get_or_init(|| {
+            let wasm = wat::parse_str(OPT_WAT).expect("examples/example-opt.wat must parse");
+            let info = parse_wasm_bytes(&wasm).expect("examples/example-opt.wat must yield wasm");
+            assert_eq!(info.segments.len(), 1);
+            info.segments[0].fin.clone()
+        })
+    }
+
+    pub fn init() -> MachineState {
+        bloated_segment().init.clone()
+    }
+
+    pub fn fin() -> MachineState {
+        canonical_fin().clone()
+    }
+
+    pub fn bloated_ops() -> Vec<SemOp> {
+        bloated_segment().ops.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::synthesis::{
-        load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
+        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
     use crate::wasm::parse_wasm_bytes;
 

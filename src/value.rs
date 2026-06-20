@@ -2,7 +2,7 @@
 
 use crate::lang::ValueLang;
 use crate::semantics::{
-    DagStackStep, I32_BITS, SemOp, StackTy, dag_stack_step, spec_for, simulate_stack_effect,
+    DagStackStep, I32_BITS, SemOp, StackTy, dag_stack_step, simulate_stack_effect, spec_for,
     synthesis_constants, value_lang_from_kind, z3_context,
 };
 use crate::stack::WasmOp;
@@ -34,13 +34,7 @@ enum ValueBinOp {
 
 impl ValueBinOp {
     fn all() -> [Self; 5] {
-        [
-            Self::Add,
-            Self::Mul,
-            Self::DivU,
-            Self::DivS,
-            Self::Shl,
-        ]
+        [Self::Add, Self::Mul, Self::DivU, Self::DivS, Self::Shl]
     }
 }
 
@@ -376,7 +370,12 @@ fn eval_ast_z3<'ctx>(
 }
 
 /// Z3 proof only (call after `asts_valid_rewrite_random` passes).
-pub fn asts_valid_rewrite_z3(ctx: &Context, num_inputs: usize, lhs: &ValueAst, rhs: &ValueAst) -> bool {
+pub fn asts_valid_rewrite_z3(
+    ctx: &Context,
+    num_inputs: usize,
+    lhs: &ValueAst,
+    rhs: &ValueAst,
+) -> bool {
     let vars: Vec<BV<'_>> = (0..num_inputs)
         .map(|i| BV::new_const(ctx, format!("in_{i}"), I32_BITS))
         .collect();
@@ -549,11 +548,7 @@ mod tests {
 
     #[test]
     fn ops_to_value_expr_builds_single_root() {
-        let ops = [
-            WasmOp::I32Const(42),
-            WasmOp::I32Const(0),
-            WasmOp::I32Add,
-        ];
+        let ops = [WasmOp::I32Const(42), WasmOp::I32Const(0), WasmOp::I32Add];
         let expr = ops_to_value_expr(&ops);
         assert_eq!(expr.to_string(), "(i32.add 42 0)");
         assert!(!expr.to_string().contains("stack.slot"));
@@ -586,10 +581,7 @@ mod tests {
     #[test]
     fn enumerate_value_asts_includes_mul_const2() {
         let asts = enumerate_value_asts(3, 1);
-        let mul = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
-        );
+        let mul = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
         assert!(asts.contains(&mul));
         assert_eq!(mul.to_pattern(), "(i32.mul ?a 2)");
         assert_eq!(mul.size(), 3);
@@ -597,56 +589,32 @@ mod tests {
 
     #[test]
     fn ast_mul_const2_equiv_add_self() {
-        let lhs = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
-        );
-        let rhs = ValueAst::Add(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Symbol(0)),
-        );
+        let lhs = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
+        let rhs = ValueAst::Add(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Symbol(0)));
         assert!(asts_valid_rewrite_random(1, &lhs, &rhs, 100));
         assert!(asts_valid_rewrite_z3_default(1, &lhs, &rhs));
     }
 
     #[test]
     fn uses_each_symbol_once_rejects_duplicated_input() {
-        let dup = ValueAst::Add(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Symbol(0)),
-        );
+        let dup = ValueAst::Add(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Symbol(0)));
         assert!(!dup.uses_each_symbol_once(1));
-        let mul = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
-        );
+        let mul = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
         assert!(mul.uses_each_symbol_once(1));
     }
 
     #[test]
     fn directed_ast_pair_prefers_mul_as_lhs_for_shl_equiv() {
-        let mul = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
-        );
-        let shl = ValueAst::Shl(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(1)),
-        );
+        let mul = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
+        let shl = ValueAst::Shl(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(1)));
         assert!(is_directed_ast_pair(&mul, &shl));
         assert!(!is_directed_ast_pair(&shl, &mul));
     }
 
     #[test]
     fn directed_ast_pair_prefers_larger_lhs() {
-        let small = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
-        );
-        let large = ValueAst::Add(
-            Box::new(small.clone()),
-            Box::new(ValueAst::Const(1)),
-        );
+        let small = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
+        let large = ValueAst::Add(Box::new(small.clone()), Box::new(ValueAst::Const(1)));
         assert!(!is_directed_ast_pair(&small, &large));
         assert!(is_directed_ast_pair(&large, &small));
     }

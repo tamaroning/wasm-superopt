@@ -1,10 +1,10 @@
 //! Z3 symbolic interpreter for flat [`AlSpec`](super::ir::AlSpec) step lists.
 
-use crate::semantics::{I32_BITS, StateTouches, Z3State};
 use super::super::env::AlEnv;
 use super::super::ir::{AlCond, AlExpr, AlSpec, AlStep, BinOpKind};
 use super::super::policy::EmbeddingPolicy;
 use super::super::util::{else_push_expr, is_trap_else_push};
+use crate::semantics::{I32_BITS, StateTouches, Z3State};
 use z3::Context;
 use z3::ast::{BV, Bool};
 
@@ -167,4 +167,3 @@ pub fn exec_al_z3<'ctx>(
     );
     trap
 }
-

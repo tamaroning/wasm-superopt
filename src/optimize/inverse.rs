@@ -1,7 +1,7 @@
 //! Inverse peel rules (backward search steps).
 
-use crate::canon::Canonizer;
-use crate::goal::{LocalReq, MachineState, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT};
+use super::canon::Canonizer;
+use super::goal::{LocalReq, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT, MachineState};
 use crate::lang::ValueLang;
 use crate::semantics::{InstKind, SemOp};
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,9 +99,9 @@ fn inst_kind_to_sem(kind: InstKind) -> SemOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::example::{fin, init};
+    use crate::optimize::fixtures::{fin, init};
     use crate::synthesis::{
-        load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
+        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
     use crate::value::parse_value_expr;
 
@@ -119,8 +119,8 @@ mod tests {
         let top = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
         let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
         let mut locals = std::collections::BTreeMap::new();
-        locals.insert(0, crate::goal::LocalReq::Need(l_plus_1));
-        let g = crate::goal::MachineState {
+        locals.insert(0, crate::optimize::goal::LocalReq::Need(l_plus_1));
+        let g = crate::optimize::goal::MachineState {
             stack: vec![top],
             locals,
         };
@@ -189,6 +189,10 @@ mod tests {
             g = next;
         }
         assert!(g.is_grounded(&init, &mut canon));
-        assert!(crate::search::verify_forward(&fin(), &forward, 42));
+        assert!(crate::optimize::search::verify_forward(
+            &fin(),
+            &forward,
+            42
+        ));
     }
 }

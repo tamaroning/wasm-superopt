@@ -2,12 +2,12 @@
 
 use std::ops::{Add, Mul, Sub};
 
+use super::super::ast::{
+    Arg, BinOpCase, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred, ValType,
+};
 use super::super::defs::lookup_func;
 use super::super::defs::{NumType, Sign, WasmBinOp};
 use crate::semantics::I32_BITS;
-use super::super::ast::{
-    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred, BinOpCase, ValType,
-};
 use z3::Context;
 use z3::ast::{Ast, BV, Bool, Int};
 
@@ -70,7 +70,8 @@ pub fn encode_call<'ctx>(
         return Ok(SymValue::Nat(as_nat_bv(ctx, bound[1].clone())?));
     }
 
-    let def = lookup_func(name).unwrap_or_else(|| panic!("unsupported AL call in sym encode: {name}"));
+    let def =
+        lookup_func(name).unwrap_or_else(|| panic!("unsupported AL call in sym encode: {name}"));
     let fn_args = bind_sym_fn_args(&def, bound)?;
     encode_fn(ctx, &def, &fn_args)
 }
@@ -109,16 +110,13 @@ pub fn encode_expr<'ctx>(
         Expr::SignLit(sx) => Ok(SymValue::Sign(*sx)),
         Expr::BinOpLit(op) => Ok(SymValue::BinOp(*op)),
         Expr::EmptyOpt => Ok(SymValue::Opt(None)),
-        Expr::SomeOpt(inner) => Ok(SymValue::Opt(Some(Box::new(encode_expr(
-            ctx, inner, env,
-        )?)))),
+        Expr::SomeOpt(inner) => Ok(SymValue::Opt(Some(Box::new(encode_expr(ctx, inner, env)?)))),
         Expr::EmptyList => Ok(SymValue::List(vec![])),
-        Expr::SingletonList(inner) => {
-            Ok(SymValue::List(vec![encode_expr(ctx, inner, env)?]))
-        }
-        Expr::IntCoerce(inner) => {
-            Ok(SymValue::Int(int_coerce(ctx, encode_expr(ctx, inner, env)?)?))
-        }
+        Expr::SingletonList(inner) => Ok(SymValue::List(vec![encode_expr(ctx, inner, env)?])),
+        Expr::IntCoerce(inner) => Ok(SymValue::Int(int_coerce(
+            ctx,
+            encode_expr(ctx, inner, env)?,
+        )?)),
         Expr::NatCoerce(inner) => nat_coerce(ctx, encode_expr(ctx, inner, env)?),
         Expr::RatCoerce(inner) => as_rat(ctx, encode_expr(ctx, inner, env)?),
         Expr::TruncZ(inner) => {
@@ -132,27 +130,19 @@ pub fn encode_expr<'ctx>(
         Expr::Mod(a, b) => sym_mod(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
         Expr::Rem(a, b) => sym_rem(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
         Expr::Shl(a, b) => sym_shl(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
-        Expr::BitAnd(a, b) => {
-            sym_bitand(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?)
-        }
-        Expr::BitOr(a, b) => {
-            sym_bitor(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?)
-        }
-        Expr::BitXor(a, b) => {
-            sym_bitxor(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?)
-        }
+        Expr::BitAnd(a, b) => sym_bitand(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::BitOr(a, b) => sym_bitor(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
+        Expr::BitXor(a, b) => sym_bitxor(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
         Expr::Pow(a, b) => sym_pow(ctx, encode_expr(ctx, a, env)?, encode_expr(ctx, b, env)?),
         Expr::Neg(inner) => Ok(SymValue::Int(
             int_coerce(ctx, encode_expr(ctx, inner, env)?)?.bvneg(),
         )),
         Expr::Choose(inner) => encode_choose(ctx, inner, env),
-        Expr::BinOpSignOf(inner) => Ok(SymValue::Sign(binop_sign_value(as_binop(
-            encode_expr(ctx, inner, env)?,
-        )?))),
+        Expr::BinOpSignOf(inner) => Ok(SymValue::Sign(binop_sign_value(as_binop(encode_expr(
+            ctx, inner, env,
+        )?)?))),
         Expr::Call(name, args) => encode_call(ctx, name, args, env),
-        Expr::OptionalLen(inner) => {
-            Ok(sym_optional_len(ctx, encode_expr(ctx, inner, env)?))
-        }
+        Expr::OptionalLen(inner) => Ok(sym_optional_len(ctx, encode_expr(ctx, inner, env)?)),
         Expr::TopValue(nt) => Ok(SymValue::NumType(*nt)),
         Expr::TopValueAny => Ok(SymValue::Nat(BV::from_u64(ctx, 0, I32_BITS))),
         Expr::CaseE(..) => panic!("CaseE in sym encode"),
@@ -325,9 +315,14 @@ fn encode_fn_step<'ctx>(
             }
         }
         Instr::IfI {
-            cond: InstrCond::Expr(_), ..
+            cond: InstrCond::Expr(_),
+            ..
         } => panic!("expr if in func body"),
-        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI | Instr::ExecuteI(_) | Instr::PerformI(_, _)
+        Instr::PopI(_)
+        | Instr::PushI(_)
+        | Instr::TrapI
+        | Instr::ExecuteI(_)
+        | Instr::PerformI(_, _)
         | Instr::ReplaceI { .. } => {
             panic!("rule instr in func body")
         }
@@ -365,17 +360,13 @@ fn encode_pred_concrete<'ctx>(
             (Some(x), Some(y)) => Ok(Some(x && y)),
             _ => Ok(None),
         },
-        Pred::OptIsNone(expr) => Ok(sym_opt_is_none_concrete(
-            &encode_expr(ctx, expr, env)?,
-        )),
+        Pred::OptIsNone(expr) => Ok(sym_opt_is_none_concrete(&encode_expr(ctx, expr, env)?)),
         Pred::TypeIsInn(expr) => Ok(Some(matches!(
             encode_expr(ctx, expr, env)?,
             SymValue::NumType(_)
         ))),
         Pred::TypeIsFnn(_) => Ok(Some(false)),
-        Pred::BinOpEq(expr, op) => Ok(Some(
-            as_binop(encode_expr(ctx, expr, env)?)? == *op,
-        )),
+        Pred::BinOpEq(expr, op) => Ok(Some(as_binop(encode_expr(ctx, expr, env)?)? == *op)),
         Pred::BinOpCaseIs(expr, case) => Ok(Some(binop_case(
             as_binop(encode_expr(ctx, expr, env)?)?,
             *case,
@@ -385,12 +376,10 @@ fn encode_pred_concrete<'ctx>(
 
 fn sym_eq_concrete<'ctx>(a: SymValue<'ctx>, b: SymValue<'ctx>) -> Option<bool> {
     match (a, b) {
-        (SymValue::Nat(x), SymValue::Nat(y)) => {
-            match (bv_const_u64(&x), bv_const_u64(&y)) {
-                (Some(xu), Some(yu)) => Some(xu == yu),
-                _ => None,
-            }
-        }
+        (SymValue::Nat(x), SymValue::Nat(y)) => match (bv_const_u64(&x), bv_const_u64(&y)) {
+            (Some(xu), Some(yu)) => Some(xu == yu),
+            _ => None,
+        },
         (SymValue::Int(x), SymValue::Int(y)) => match (x.as_i64(), y.as_i64()) {
             (Some(xi), Some(yi)) => Some(xi == yi),
             _ => None,
@@ -458,15 +447,15 @@ fn encode_pred_z3<'ctx>(
             let bv = encode_expr(ctx, b, env)?;
             Ok(Bool::or(
                 ctx,
-                &[&sym_lt_z3(ctx, av.clone(), bv.clone())?, &sym_eq_z3(ctx, av, bv)?],
+                &[
+                    &sym_lt_z3(ctx, av.clone(), bv.clone())?,
+                    &sym_eq_z3(ctx, av, bv)?,
+                ],
             ))
         }
         Pred::And(a, b) => Ok(Bool::and(
             ctx,
-            &[
-                &encode_pred_z3(ctx, a, env)?,
-                &encode_pred_z3(ctx, b, env)?,
-            ],
+            &[&encode_pred_z3(ctx, a, env)?, &encode_pred_z3(ctx, b, env)?],
         )),
         Pred::OptIsNone(expr) => Ok(sym_is_empty(ctx, &encode_expr(ctx, expr, env)?)),
         Pred::TypeIsInn(expr) => Ok(Bool::from_bool(
@@ -527,9 +516,7 @@ fn sym_lt_z3<'ctx>(
         (SymValue::Nat(x), SymValue::Nat(y)) => x.bvult(y),
         (SymValue::Int(x), SymValue::Int(y)) => x.bvslt(y),
         (SymValue::Rat(xn, xd), SymValue::Rat(yn, yd)) => xn.mul(yd).lt(&yn.mul(xd)),
-        (a, b) if sym_is_numeric(a) && sym_is_numeric(b) => {
-            sym_as_z3_int(a).lt(&sym_as_z3_int(b))
-        }
+        (a, b) if sym_is_numeric(a) && sym_is_numeric(b) => sym_as_z3_int(a).lt(&sym_as_z3_int(b)),
         (a, b) => panic!("sym_lt_z3 on incompatible {a:?} {b:?}"),
     })
 }
@@ -584,10 +571,7 @@ fn merge_cond_values<'ctx>(
     match (then_v, else_v) {
         (SymValue::Nat(t), SymValue::Nat(e)) => SymValue::Nat(cond.ite(&t, &e)),
         (SymValue::Int(t), SymValue::Int(e)) => SymValue::Int(cond.ite(&t, &e)),
-        (t, e) => SymValue::Nat(cond.ite(
-            &as_nat_bv_direct(ctx, t),
-            &as_nat_bv_direct(ctx, e),
-        )),
+        (t, e) => SymValue::Nat(cond.ite(&as_nat_bv_direct(ctx, t), &as_nat_bv_direct(ctx, e))),
     }
 }
 
@@ -606,7 +590,9 @@ fn sym_as_partial<'ctx>(
             Bool::from_bool(ctx, true),
             Box::new(SymValue::Nat(BV::from_u64(ctx, 0, I32_BITS))),
         ),
-        SymValue::List(items) if items.len() == 1 => (Bool::from_bool(ctx, false), Box::new(items[0].clone())),
+        SymValue::List(items) if items.len() == 1 => {
+            (Bool::from_bool(ctx, false), Box::new(items[0].clone()))
+        }
         other => (Bool::from_bool(ctx, false), Box::new(other)),
     }
 }
@@ -619,10 +605,7 @@ fn as_nat_bv_direct<'ctx>(_ctx: &'ctx Context, v: SymValue<'ctx>) -> BV<'ctx> {
     }
 }
 
-fn encode_choose_value<'ctx>(
-    ctx: &'ctx Context,
-    v: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn encode_choose_value<'ctx>(ctx: &'ctx Context, v: SymValue<'ctx>) -> EncodeResult<'ctx> {
     // Empty opt/list are unreachable in concrete eval (guarded by |expr| > 0), but
     // trap_dummy_push still encodes the else-branch; return a dummy nat like sym_choose_nat.
     match v {
@@ -664,7 +647,12 @@ fn truncz_rat<'ctx>(_ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'
 }
 
 /// `\ 2^N` for Inn types: modulus `0` is the `2^32` sentinel (identity on u32 bits).
-fn sym_mod_inn<'ctx>(ctx: &'ctx Context, x: BV<'ctx>, modulus: &BV<'ctx>, signed: bool) -> BV<'ctx> {
+fn sym_mod_inn<'ctx>(
+    ctx: &'ctx Context,
+    x: BV<'ctx>,
+    modulus: &BV<'ctx>,
+    signed: bool,
+) -> BV<'ctx> {
     let zero = BV::from_u64(ctx, 0, I32_BITS);
     let one = BV::from_u64(ctx, 1, I32_BITS);
     let is_mod_2p32 = modulus._eq(&zero);
@@ -754,18 +742,13 @@ fn trunc_rat<'ctx>(ctx: &'ctx Context, (n, d): (Int<'ctx>, Int<'ctx>)) -> BV<'ct
     truncz_rat(ctx, (n, d))
 }
 
-fn sym_add<'ctx>(
-    ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_add<'ctx>(ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     Ok(match (a, b) {
         (SymValue::Nat(x), SymValue::Nat(y)) => SymValue::Nat(x.bvadd(&y)),
         (SymValue::Int(x), SymValue::Int(y)) => SymValue::Int(x.bvadd(&y)),
-        (SymValue::Rat(x, xd), SymValue::Rat(y, yd)) => SymValue::Rat(
-            x.mul(&yd).add(&y.mul(&xd)),
-            xd.mul(&yd),
-        ),
+        (SymValue::Rat(x, xd), SymValue::Rat(y, yd)) => {
+            SymValue::Rat(x.mul(&yd).add(&y.mul(&xd)), xd.mul(&yd))
+        }
         (SymValue::Int(x), SymValue::Nat(y)) => {
             let ybv = int_coerce(ctx, SymValue::Nat(y))?;
             SymValue::Nat(int_coerce(ctx, SymValue::Int(x))?.bvadd(&ybv))
@@ -774,19 +757,16 @@ fn sym_add<'ctx>(
     })
 }
 
-fn sym_sub<'ctx>(
-    ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_sub<'ctx>(ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     Ok(match (a, b) {
         (SymValue::Nat(x), SymValue::Nat(y)) => SymValue::Nat(x.bvsub(&y)),
         (SymValue::Int(x), SymValue::Int(y)) => SymValue::Int(x.bvsub(&y)),
-        (SymValue::Rat(x, xd), SymValue::Rat(y, yd)) => SymValue::Rat(
-            x.mul(&yd).sub(&y.mul(&xd)),
-            xd.mul(&yd),
-        ),
-        (SymValue::Int(x), SymValue::Nat(y)) => SymValue::Int(x.bvsub(&int_coerce(ctx, SymValue::Nat(y))?)),
+        (SymValue::Rat(x, xd), SymValue::Rat(y, yd)) => {
+            SymValue::Rat(x.mul(&yd).sub(&y.mul(&xd)), xd.mul(&yd))
+        }
+        (SymValue::Int(x), SymValue::Nat(y)) => {
+            SymValue::Int(x.bvsub(&int_coerce(ctx, SymValue::Nat(y))?))
+        }
         (SymValue::Nat(x), SymValue::Int(y)) => {
             SymValue::Int(int_coerce(ctx, SymValue::Nat(x))?.bvsub(&y))
         }
@@ -794,37 +774,23 @@ fn sym_sub<'ctx>(
     })
 }
 
-fn sym_mul<'ctx>(
-    _ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_mul<'ctx>(_ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     Ok(match (a, b) {
         (SymValue::Nat(x), SymValue::Nat(y)) => SymValue::Nat(x.bvmul(&y)),
         (SymValue::Int(x), SymValue::Int(y)) => SymValue::Int(x.bvmul(&y)),
-        (SymValue::Rat(x, xd), SymValue::Rat(y, yd)) => {
-            SymValue::Rat(x.mul(&y), xd.mul(&yd))
-        }
+        (SymValue::Rat(x, xd), SymValue::Rat(y, yd)) => SymValue::Rat(x.mul(&y), xd.mul(&yd)),
         _ => panic!("mul on incompatible values"),
     })
 }
 
-fn sym_div<'ctx>(
-    _ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_div<'ctx>(_ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     match (a, b) {
         (SymValue::Rat(x, xd), SymValue::Rat(y, yd)) => Ok(SymValue::Rat(x.mul(&yd), xd.mul(&y))),
         _ => panic!("div on incompatible values"),
     }
 }
 
-fn sym_mod<'ctx>(
-    ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_mod<'ctx>(ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     Ok(match (a, b) {
         (SymValue::Nat(x), SymValue::Nat(y)) => {
             if let (Some(xu), Some(yu)) = (bv_const_u64(&x), bv_const_u64(&y)) {
@@ -842,22 +808,14 @@ fn sym_mod<'ctx>(
     })
 }
 
-fn sym_rem<'ctx>(
-    ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_rem<'ctx>(ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     let x = as_nat_bv(ctx, a)?;
     let y = as_nat_bv(ctx, b)?;
     let one = BV::from_u64(ctx, 1, I32_BITS);
     Ok(SymValue::Nat(x.bvurem(&y.bvugt(&one).ite(&y, &one))))
 }
 
-fn sym_shl<'ctx>(
-    ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_shl<'ctx>(ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     let x = as_nat_bv(ctx, a)?;
     let y = as_nat_bv(ctx, b)?;
     Ok(SymValue::Nat(sym_ishl_(ctx, I32_BITS, &x, &y)))
@@ -873,11 +831,7 @@ fn sym_bitand<'ctx>(
     Ok(SymValue::Nat(sym_iand_(ctx, I32_BITS, &x, &y)))
 }
 
-fn sym_bitor<'ctx>(
-    ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_bitor<'ctx>(ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     let x = as_nat_bv(ctx, a)?;
     let y = as_nat_bv(ctx, b)?;
     Ok(SymValue::Nat(sym_ior_(ctx, I32_BITS, &x, &y)))
@@ -893,11 +847,7 @@ fn sym_bitxor<'ctx>(
     Ok(SymValue::Nat(sym_ixor_(ctx, I32_BITS, &x, &y)))
 }
 
-fn sym_pow<'ctx>(
-    ctx: &'ctx Context,
-    a: SymValue<'ctx>,
-    b: SymValue<'ctx>,
-) -> EncodeResult<'ctx> {
+fn sym_pow<'ctx>(ctx: &'ctx Context, a: SymValue<'ctx>, b: SymValue<'ctx>) -> EncodeResult<'ctx> {
     let base = as_nat_u32_concrete(&a)?;
     let exp = as_nat_u32_concrete(&b)?;
     let result = match (base, exp) {

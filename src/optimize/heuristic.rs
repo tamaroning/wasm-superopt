@@ -1,7 +1,7 @@
 //! Admissible heuristics for backward A*.
 
-use crate::canon::{CanonId, Canonizer, ValueExpr};
-use crate::goal::{all_subtree_exprs, subtree_expr, LocalReq, MachineState, MAX_LOCAL_SLOT};
+use super::canon::{CanonId, Canonizer, ValueExpr};
+use super::goal::{LocalReq, MAX_LOCAL_SLOT, MachineState, all_subtree_exprs, subtree_expr};
 use crate::lang::ValueLang;
 use std::collections::HashSet;
 
@@ -126,9 +126,9 @@ pub fn h_goal(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::example::{fin, init};
+    use crate::optimize::fixtures::{fin, init};
     use crate::synthesis::{
-        load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
+        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
     use crate::value::parse_value_expr;
 
@@ -168,7 +168,10 @@ mod tests {
         let dep = h_dep(&g, &init, &mut canon);
         let nodes = h_node(&g, &init, &mut canon);
         assert!(dep >= 3, "nested binops depth ≥ 3, got {dep}");
-        assert!(nodes <= dep, "node count should not exceed dependency depth");
+        assert!(
+            nodes <= dep,
+            "node count should not exceed dependency depth"
+        );
     }
 
     #[test]

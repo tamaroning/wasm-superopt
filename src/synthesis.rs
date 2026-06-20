@@ -3,8 +3,8 @@
 use crate::lang::ValueLang;
 use crate::semantics::{StackTy, synthesis_inputs, z3_context};
 use crate::value::{
-    asts_valid_rewrite_random, asts_valid_rewrite_z3, enumerate_value_asts, is_ast_rewrite_pair,
-    is_directed_ast_pair, ValueAst,
+    ValueAst, asts_valid_rewrite_random, asts_valid_rewrite_z3, enumerate_value_asts,
+    is_ast_rewrite_pair, is_directed_ast_pair,
 };
 use egg::{Pattern, Rewrite};
 use serde::{Deserialize, Serialize};
@@ -58,9 +58,7 @@ pub fn load_cached_rules(max_ast_size: usize) -> Option<Vec<SynthesizedRule>> {
     let path = rules_cache_path(max_ast_size);
     let data = fs::read_to_string(&path).ok()?;
     let cached: CachedRules = serde_json::from_str(&data).ok()?;
-    if cached.format_version != RULES_CACHE_FORMAT_VERSION
-        || cached.max_ast_size != max_ast_size
-    {
+    if cached.format_version != RULES_CACHE_FORMAT_VERSION || cached.max_ast_size != max_ast_size {
         return None;
     }
     report_progress(&format!(
@@ -81,7 +79,11 @@ fn save_cached_rules(max_ast_size: usize, random_tests: usize, rules: &[Synthesi
     };
     let json = serde_json::to_string_pretty(&cached).expect("serialize rules cache");
     fs::write(&path, json).expect("write rules cache");
-    report_progress(&format!("Saved {} rules to {}", rules.len(), path.display()));
+    report_progress(&format!(
+        "Saved {} rules to {}",
+        rules.len(),
+        path.display()
+    ));
 }
 
 pub fn load_or_synthesize_rules(max_ast_size: usize, random_tests: usize) -> Vec<SynthesizedRule> {
@@ -221,20 +223,14 @@ fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
     }
 }
 
-pub fn synthesized_to_rewrites(
-    rules: &[SynthesizedRule],
-) -> Vec<Rewrite<ValueLang, ()>> {
+pub fn synthesized_to_rewrites(rules: &[SynthesizedRule]) -> Vec<Rewrite<ValueLang, ()>> {
     rules
         .iter()
         .filter_map(|r| parse_rewrite(&r.name, &r.lhs, &r.rhs).ok())
         .collect()
 }
 
-fn parse_rewrite(
-    name: &str,
-    lhs: &str,
-    rhs: &str,
-) -> Result<Rewrite<ValueLang, ()>, String> {
+fn parse_rewrite(name: &str, lhs: &str, rhs: &str) -> Result<Rewrite<ValueLang, ()>, String> {
     let lhs_pat: Pattern<ValueLang> = lhs.parse().map_err(|e| format!("lhs {lhs}: {e}"))?;
     let rhs_pat: Pattern<ValueLang> = rhs.parse().map_err(|e| format!("rhs {rhs}: {e}"))?;
     Rewrite::new(name.to_string(), lhs_pat, rhs_pat).map_err(|e| e.to_string())
@@ -271,7 +267,7 @@ pub fn print_synthesized_json(rules: &[SynthesizedRule], random_tests: usize) {
 mod tests {
     use super::*;
     use crate::semantics::synthesis_inputs;
-    use crate::value::{enumerate_value_asts, is_directed_ast_pair, ValueAst};
+    use crate::value::{ValueAst, enumerate_value_asts, is_directed_ast_pair};
 
     #[test]
     fn synthesis_inputs_excludes_empty() {
@@ -282,24 +278,15 @@ mod tests {
 
     #[test]
     fn ast_pattern_for_mul_const2() {
-        let mul = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
-        );
+        let mul = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
         assert_eq!(mul.to_pattern(), "(i32.mul ?a 2)");
         assert!(!mul.to_pattern().contains("stack"));
     }
 
     #[test]
     fn directed_ast_pair_skips_larger_rhs() {
-        let short = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
-        );
-        let long = ValueAst::Add(
-            Box::new(ValueAst::Const(1)),
-            Box::new(short.clone()),
-        );
+        let short = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
+        let long = ValueAst::Add(Box::new(ValueAst::Const(1)), Box::new(short.clone()));
         assert!(!is_directed_ast_pair(&short, &long));
         assert!(is_directed_ast_pair(&long, &short));
     }

@@ -1,9 +1,9 @@
 //! Derive static `InstSpec` from AL definitions.
 
-use crate::semantics::{InstKind, InstSpec, StackTy};
 use super::ir::{AlCond, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
+use crate::semantics::{InstKind, InstSpec, StackTy};
 
 const I32: StackTy = StackTy::I32;
 const POPS_0: &[StackTy] = &[];

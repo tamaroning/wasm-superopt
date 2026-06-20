@@ -1,18 +1,14 @@
 //! Z3 executor for [`RuleA`](super::super::ast::Algorithm::RuleA) bodies (`instr` in OCaml).
 
-use super::func::{encode_expr, SymEnv, SymValue};
 use super::super::ast::{Arg, Expr, Instr, InstrCond, LetLhs, PopTarget};
 use super::super::defs::step_local_set_template;
 use super::super::policy::EmbeddingPolicy;
+use super::func::{SymEnv, SymValue, encode_expr};
 use crate::semantics::{I32_BITS, StateTouches, Z3State};
 use z3::Context;
 use z3::ast::{Ast, BV, Bool};
 
-fn sym_if_cond<'ctx>(
-    ctx: &'ctx Context,
-    cond: &Expr,
-    env: &SymEnv<'ctx>,
-) -> Bool<'ctx> {
+fn sym_if_cond<'ctx>(ctx: &'ctx Context, cond: &Expr, env: &SymEnv<'ctx>) -> Bool<'ctx> {
     match encode_expr(ctx, cond, env).expect("if cond") {
         SymValue::Nat(bv) => bv._eq(&BV::from_u64(ctx, 0, I32_BITS)),
         other => panic!("if cond expected nat, got {other:?}"),
@@ -158,20 +154,11 @@ fn exec_instr_z3<'ctx>(
                             lhs: LetLhs::Var(name),
                             expr,
                         } => {
-                            else_env.bind(
-                                name,
-                                encode_expr(ctx, expr, &else_env).expect("else let"),
-                            );
+                            else_env
+                                .bind(name, encode_expr(ctx, expr, &else_env).expect("else let"));
                         }
                         Instr::PushI(expr) => {
-                            push_expr_z3(
-                                ctx,
-                                expr,
-                                stack,
-                                state,
-                                &else_env,
-                                Some(&is_empty),
-                            );
+                            push_expr_z3(ctx, expr, stack, state, &else_env, Some(&is_empty));
                         }
                         other => exec_instr_z3(
                             ctx,
@@ -246,7 +233,8 @@ fn exec_instr_z3<'ctx>(
             *env = env_e;
         }
         Instr::IfI {
-            cond: InstrCond::Pred(_), ..
+            cond: InstrCond::Pred(_),
+            ..
         } => panic!("pred if in rule body"),
         Instr::PushI(expr) => push_expr_z3(ctx, expr, stack, state, env, None),
         Instr::ExecuteI(expr) => {
@@ -297,9 +285,7 @@ fn exec_instrs_inner<'ctx>(
         if trap.as_bool() == Some(true) {
             return;
         }
-        exec_instr_z3(
-            ctx, step, stack, state, trap, env, touches, policy,
-        );
+        exec_instr_z3(ctx, step, stack, state, trap, env, touches, policy);
     }
 }
 
@@ -314,6 +300,8 @@ pub fn exec_instrs_z3<'ctx>(
 ) -> Bool<'ctx> {
     let mut trap = Bool::from_bool(ctx, false);
     let mut env = SymEnv::empty();
-    exec_instrs_inner(ctx, steps, stack, state, &mut trap, &mut env, touches, policy);
+    exec_instrs_inner(
+        ctx, steps, stack, state, &mut trap, &mut env, touches, policy,
+    );
     trap
 }

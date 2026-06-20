@@ -1,7 +1,6 @@
 //! Wasm binary parsing via wasmparser.
 
-use crate::forward::SymMachine;
-use crate::goal::MachineState;
+use crate::optimize::{MachineState, SymMachine};
 use crate::semantics::SemOp;
 use crate::wasm::segment::StraightSegment;
 use std::fs;
@@ -247,15 +246,9 @@ fn classify_operator(op: &Operator<'_>) -> OpClass {
         Operator::I32DivU => OpClass::Supported(SemOp::I32DivU),
         Operator::I32DivS => OpClass::Supported(SemOp::I32DivS),
         Operator::I32Shl => OpClass::Supported(SemOp::I32Shl),
-        Operator::LocalGet { local_index } => {
-            OpClass::Supported(SemOp::LocalGet(*local_index))
-        }
-        Operator::LocalSet { local_index } => {
-            OpClass::Supported(SemOp::LocalSet(*local_index))
-        }
-        Operator::LocalTee { local_index } => {
-            OpClass::Supported(SemOp::LocalTee(*local_index))
-        }
+        Operator::LocalGet { local_index } => OpClass::Supported(SemOp::LocalGet(*local_index)),
+        Operator::LocalSet { local_index } => OpClass::Supported(SemOp::LocalSet(*local_index)),
+        Operator::LocalTee { local_index } => OpClass::Supported(SemOp::LocalTee(*local_index)),
         Operator::Drop => OpClass::PopStack,
         Operator::Nop | Operator::End | Operator::Block { .. } | Operator::Else => {
             OpClass::Structural
@@ -280,7 +273,7 @@ pub fn extract_segments(info: &WasmModuleInfo) -> &[StraightSegment] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::search::format_ops;
+    use crate::optimize::format_ops;
 
     fn wat_to_wasm(wat: &str) -> Vec<u8> {
         wat::parse_str(wat).expect("wat parse")
@@ -323,7 +316,15 @@ mod tests {
             )"#,
         );
         let info = parse_wasm_bytes(&wasm).expect("parse");
-        assert_eq!(info.segments.len(), 2, "segments: {:?}", info.segments.iter().map(|s| format_ops(&s.ops)).collect::<Vec<_>>());
+        assert_eq!(
+            info.segments.len(),
+            2,
+            "segments: {:?}",
+            info.segments
+                .iter()
+                .map(|s| format_ops(&s.ops))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(info.segments[0].ops.len(), 3);
         assert_eq!(info.segments[1].ops.len(), 1);
     }

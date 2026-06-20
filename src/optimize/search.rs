@@ -1,14 +1,14 @@
 //! Backward goal search: BFS, greedy inverse, and A*.
 
-use crate::canon::Canonizer;
-use crate::goal::{concrete_local, MachineState, MAX_LOCAL_SLOT};
-use crate::heuristic::h_goal;
-use crate::inverse::{applicable_peels, PeelAction};
+use super::canon::Canonizer;
+use super::goal::{MAX_LOCAL_SLOT, MachineState, concrete_local};
+use super::heuristic::h_goal;
+use super::inverse::{PeelAction, applicable_peels};
 use crate::lang::ValueLang;
-use crate::semantics::{exec_sequence_concrete, ConcreteState, SemOp};
+use crate::semantics::{ConcreteState, SemOp, exec_sequence_concrete};
 use egg::Rewrite;
-use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 pub const DEFAULT_MAX_DEPTH: usize = 16;
 
@@ -25,11 +25,7 @@ impl Default for SearchConfig {
     }
 }
 
-pub fn verify_forward(
-    fin: &MachineState,
-    ops: &[SemOp],
-    l0: i32,
-) -> bool {
+pub fn verify_forward(fin: &MachineState, ops: &[SemOp], l0: i32) -> bool {
     let mut locals = [0i32; 8];
     locals[0] = l0;
     let state = ConcreteState::new(locals, [0; 16]);
@@ -37,7 +33,7 @@ pub fn verify_forward(
     if r.trap {
         return false;
     }
-    let expect_stack = crate::goal::concrete_stack(fin, l0);
+    let expect_stack = super::goal::concrete_stack(fin, l0);
     if r.stack != expect_stack {
         return false;
     }
@@ -101,9 +97,9 @@ pub fn solve_greedy_inv(
             return Some(reverse_ops(&path));
         }
         let peels = applicable_peels(&g, &mut canon);
-        let best = peels.into_iter().min_by_key(|(_, next)| {
-            h_goal(next, init, &mut canon)
-        })?;
+        let best = peels
+            .into_iter()
+            .min_by_key(|(_, next)| h_goal(next, init, &mut canon))?;
         let (PeelAction::Forward(op), next) = best;
         path.push(op);
         g = next;
@@ -125,10 +121,7 @@ struct AstarNode {
 
 impl Ord for AstarNode {
     fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .f
-            .cmp(&self.f)
-            .then_with(|| other.g.cmp(&self.g))
+        other.f.cmp(&self.f).then_with(|| other.g.cmp(&self.g))
     }
 }
 
@@ -206,9 +199,9 @@ pub fn format_ops(ops: &[SemOp]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::example::{fin, init};
+    use crate::optimize::fixtures::{fin, init};
     use crate::synthesis::{
-        load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
+        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {

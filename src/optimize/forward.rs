@@ -1,6 +1,6 @@
 //! Forward symbolic execution: build residual goals from instruction sequences.
 
-use crate::goal::{LocalReq, MachineState, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT};
+use super::goal::{LocalReq, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT, MachineState};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::value::parse_value_expr;
@@ -151,14 +151,14 @@ pub fn forward_goal(init: &MachineState, ops: &[SemOp]) -> Result<MachineState, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::example::{fin, init, segment};
-    use crate::search::verify_forward;
+    use crate::optimize::fixtures::{bloated_ops, fin, init};
+    use crate::optimize::search::verify_forward;
 
     #[test]
     fn running_example_forward_exec() {
         let init = init();
         let fin = fin();
-        let ops = segment().ops.clone();
+        let ops = bloated_ops();
         let got = forward_goal(&init, &ops).expect("forward");
         assert!(got.validate_bounds());
         assert!(verify_forward(&fin, &ops, 42));
@@ -168,7 +168,7 @@ mod tests {
     fn function_entry_matches_running_example_init() {
         let entry = SymMachine::function_entry(1, 1);
         let init = entry.to_init_state();
-        let expected = crate::example::init();
+        let expected = crate::optimize::fixtures::init();
         assert_eq!(init.stack, expected.stack);
         assert_eq!(init.locals, expected.locals);
     }

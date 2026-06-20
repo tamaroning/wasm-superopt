@@ -169,7 +169,7 @@ pub mod types {
 pub use types::*;
 
 use super::ast::{
-    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Path, Pred, PopTarget,
+    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Path, PopTarget, Pred,
 };
 
 const fn mp(name: &'static str, ty: ParamType) -> Param {
@@ -178,18 +178,9 @@ const fn mp(name: &'static str, ty: ParamType) -> Param {
 
 const SIZE_PARAMS: &[Param] = &[mp("valtype", ParamType::ValType)];
 const SIZENN_PARAMS: &[Param] = &[mp("nt", ParamType::NumType)];
-const SIGNED_PARAMS: &[Param] = &[
-    mp("N", ParamType::Nat),
-    mp("i", ParamType::Nat),
-];
-const INV_SIGNED_PARAMS: &[Param] = &[
-    mp("N", ParamType::Nat),
-    mp("i", ParamType::Int),
-];
-const LIST_PARAMS: &[Param] = &[
-    mp("X", ParamType::Any),
-    mp("X_opt", ParamType::Any),
-];
+const SIGNED_PARAMS: &[Param] = &[mp("N", ParamType::Nat), mp("i", ParamType::Nat)];
+const INV_SIGNED_PARAMS: &[Param] = &[mp("N", ParamType::Nat), mp("i", ParamType::Int)];
+const LIST_PARAMS: &[Param] = &[mp("X", ParamType::Any), mp("X_opt", ParamType::Any)];
 const IDIV_PARAMS: &[Param] = &[
     mp("N", ParamType::Nat),
     mp("sx", ParamType::Sign),
@@ -260,10 +251,7 @@ fn pow2(exp: Expr) -> Expr {
 }
 
 fn n_minus_1(n: Expr) -> Expr {
-    nat_coerce(Expr::Sub(
-        Box::new(int_coerce(n)),
-        Box::new(int(1)),
-    ))
+    nat_coerce(Expr::Sub(Box::new(int_coerce(n)), Box::new(int(1))))
 }
 
 fn half_modulus(n: Expr) -> Expr {
@@ -296,10 +284,7 @@ fn wrap_mod(nat_expr: Expr, modulus: Expr) -> Expr {
 
 /// `$((i_1 + i_2) \ (2 ^ N))` — spectec equation, not a separate `$fn` def.
 fn inn_iadd(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
-    wrap_mod(
-        Expr::Add(Box::new(i_1), Box::new(i_2)),
-        full_modulus(n),
-    )
+    wrap_mod(Expr::Add(Box::new(i_1), Box::new(i_2)), full_modulus(n))
 }
 
 /// `$((2^N + i_1 - i_2) \ 2^N)` — spectec equation.
@@ -319,25 +304,16 @@ fn inn_isub(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
 
 /// `$((i_1 * i_2) \ (2 ^ N))` — spectec equation.
 fn inn_imul(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
-    wrap_mod(
-        Expr::Mul(Box::new(i_1), Box::new(i_2)),
-        full_modulus(n),
-    )
+    wrap_mod(Expr::Mul(Box::new(i_1), Box::new(i_2)), full_modulus(n))
 }
 
 /// `$iand_` / `$ior_` — spectec `hint(builtin)`: `(m op n) & mask(N)`.
 fn inn_iand(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
-    wrap_mod(
-        Expr::BitAnd(Box::new(i_1), Box::new(i_2)),
-        full_modulus(n),
-    )
+    wrap_mod(Expr::BitAnd(Box::new(i_1), Box::new(i_2)), full_modulus(n))
 }
 
 fn inn_ior(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
-    wrap_mod(
-        Expr::BitOr(Box::new(i_1), Box::new(i_2)),
-        full_modulus(n),
-    )
+    wrap_mod(Expr::BitOr(Box::new(i_1), Box::new(i_2)), full_modulus(n))
 }
 
 fn inn_ishl(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
@@ -373,11 +349,11 @@ pub fn step_pure_binop_template(nt: NumType, binop: WasmBinOp) -> Vec<Instr> {
             cond: InstrCond::Expr(Expr::OptionalLen(Box::new(binop_call.clone()))),
             then_steps: vec![Instr::TrapI],
             else_steps: vec![
-                Instr::LetI { lhs: LetLhs::Var("c"), expr: Expr::Choose(Box::new(binop_call)) },
-                Instr::PushI(Expr::Call(
-                    "const",
-                    vec![Arg::NumType(nt), Arg::Var("c")],
-                )),
+                Instr::LetI {
+                    lhs: LetLhs::Var("c"),
+                    expr: Expr::Choose(Box::new(binop_call)),
+                },
+                Instr::PushI(Expr::Call("const", vec![Arg::NumType(nt), Arg::Var("c")])),
             ],
         },
     ]
@@ -392,17 +368,11 @@ fn case_e(op: &'static str, args: Vec<Expr>) -> Expr {
 }
 
 fn frame_locals(frame: &'static str) -> Expr {
-    Expr::AccE(
-        Box::new(Expr::VarE(frame)),
-        Path::Dot("LOCALS"),
-    )
+    Expr::AccE(Box::new(Expr::VarE(frame)), Path::Dot("LOCALS"))
 }
 
 fn frame_local_at(frame: &'static str, idx: Expr) -> Expr {
-    Expr::AccE(
-        Box::new(frame_locals(frame)),
-        Path::Idx(Box::new(idx)),
-    )
+    Expr::AccE(Box::new(frame_locals(frame)), Path::Idx(Box::new(idx)))
 }
 
 fn local_call_args(x: u32) -> Vec<Arg> {
@@ -415,10 +385,7 @@ fn with_local_call_args(x: u32) -> Vec<Arg> {
 
 /// `Step_read/local.get x { Push $local(z, x) }` (local.al L1–3)
 pub fn step_read_local_get_template(x: u32) -> Vec<Instr> {
-    vec![Instr::PushI(Expr::Call(
-        "local",
-        local_call_args(x),
-    ))]
+    vec![Instr::PushI(Expr::Call("local", local_call_args(x)))]
 }
 
 /// `Step_pure/local.tee x { … }` (local.al L6–12)
@@ -471,9 +438,7 @@ pub fn local_def() -> FuncA {
 pub fn format_rule_local_pretty(op: &crate::semantics::SemOp) -> String {
     use crate::semantics::SemOp;
     match op {
-        SemOp::LocalGet(x) => format!(
-            "Step_read/local.get {x}\n  push $local(z, {x})"
-        ),
+        SemOp::LocalGet(x) => format!("Step_read/local.get {x}\n  push $local(z, {x})"),
         SemOp::LocalSet(x) => format!(
             "Step/local.set {x}\n  assert top_value()\n  pop val\n  $with_local(z, {x}, val)"
         ),
@@ -539,7 +504,7 @@ pub fn signed_def() -> FuncA {
         params: &SIGNED_PARAMS,
         body: vec![
             Instr::IfI {
-            cond: InstrCond::Pred(lt(p("i"), threshold.clone())),
+                cond: InstrCond::Pred(lt(p("i"), threshold.clone())),
                 then_steps: vec![Instr::ReturnI(int_coerce(p("i")))],
                 else_steps: vec![],
             },
@@ -564,10 +529,7 @@ pub fn inv_signed_def() -> FuncA {
         params: &INV_SIGNED_PARAMS,
         body: vec![
             Instr::IfI {
-                cond: InstrCond::Pred(and(
-                    le(int(0), p("i")),
-                    lt(p("i"), threshold.clone()),
-                )),
+                cond: InstrCond::Pred(and(le(int(0), p("i")), lt(p("i"), threshold.clone()))),
                 then_steps: vec![Instr::ReturnI(nat_coerce(p("i")))],
                 else_steps: vec![],
             },
@@ -592,16 +554,17 @@ pub fn list_def() -> FuncA {
     FuncA {
         id: "list_",
         params: &LIST_PARAMS,
-        body: vec![
-            Instr::IfI {
+        body: vec![Instr::IfI {
             cond: InstrCond::Pred(Pred::OptIsNone(p("X_opt"))),
-                then_steps: vec![Instr::ReturnI(Expr::EmptyList)],
-                else_steps: vec![
-                    Instr::LetI { lhs: LetLhs::Var("w"), expr: Expr::Choose(Box::new(p("X_opt"))) },
-                    Instr::ReturnI(Expr::SingletonList(Box::new(p("w")))),
-                ],
-            },
-        ],
+            then_steps: vec![Instr::ReturnI(Expr::EmptyList)],
+            else_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::Var("w"),
+                    expr: Expr::Choose(Box::new(p("X_opt"))),
+                },
+                Instr::ReturnI(Expr::SingletonList(Box::new(p("w")))),
+            ],
+        }],
     }
 }
 
@@ -620,17 +583,11 @@ pub fn idiv_def() -> FuncA {
         Expr::Div(
             Box::new(rat_coerce(call(
                 "signed_",
-                vec![
-                    Arg::ExpA(Box::new(p("N"))),
-                    Arg::ExpA(Box::new(p("i_1"))),
-                ],
+                vec![Arg::ExpA(Box::new(p("N"))), Arg::ExpA(Box::new(p("i_1")))],
             ))),
             Box::new(rat_coerce(call(
                 "signed_",
-                vec![
-                    Arg::ExpA(Box::new(p("N"))),
-                    Arg::ExpA(Box::new(p("i_2"))),
-                ],
+                vec![Arg::ExpA(Box::new(p("N"))), Arg::ExpA(Box::new(p("i_2")))],
             ))),
         ),
         rat_coerce(half_modulus(p("N"))),
@@ -640,21 +597,19 @@ pub fn idiv_def() -> FuncA {
         params: IDIV_PARAMS,
         body: vec![
             Instr::IfI {
-            cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
-                then_steps: vec![
-                    Instr::IfI {
-            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
-                        then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
-                        else_steps: vec![Instr::ReturnI(Expr::SomeOpt(Box::new(
-                            nat_coerce(trunc_div(p("i_1"), p("i_2"))),
-                        )))],
-                    },
-                ],
+                cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
+                then_steps: vec![Instr::IfI {
+                    cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                    then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
+                    else_steps: vec![Instr::ReturnI(Expr::SomeOpt(Box::new(nat_coerce(
+                        trunc_div(p("i_1"), p("i_2")),
+                    ))))],
+                }],
                 else_steps: vec![],
             },
             Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
             Instr::IfI {
-            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
                 then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
                 else_steps: vec![],
             },
@@ -668,17 +623,11 @@ pub fn idiv_def() -> FuncA {
                         Arg::ExpA(Box::new(trunc_div(
                             call(
                                 "signed_",
-                                vec![
-                                    Arg::ExpA(Box::new(p("N"))),
-                                    Arg::ExpA(Box::new(p("i_1"))),
-                                ],
+                                vec![Arg::ExpA(Box::new(p("N"))), Arg::ExpA(Box::new(p("i_1")))],
                             ),
                             call(
                                 "signed_",
-                                vec![
-                                    Arg::ExpA(Box::new(p("N"))),
-                                    Arg::ExpA(Box::new(p("i_2"))),
-                                ],
+                                vec![Arg::ExpA(Box::new(p("N"))), Arg::ExpA(Box::new(p("i_2")))],
                             ),
                         ))),
                     ],
@@ -693,58 +642,46 @@ pub fn idiv_def() -> FuncA {
 // =============================================================================
 
 pub fn irem_def() -> FuncA {
-    let trunc_div = |a: Expr, b: Expr| {
-        truncz(Expr::Div(
-            Box::new(rat_coerce(a)),
-            Box::new(rat_coerce(b)),
-        ))
-    };
+    let trunc_div =
+        |a: Expr, b: Expr| truncz(Expr::Div(Box::new(rat_coerce(a)), Box::new(rat_coerce(b))));
     FuncA {
         id: "irem_",
         params: IREM_PARAMS,
         body: vec![
             Instr::IfI {
-            cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
-                then_steps: vec![
-                    Instr::IfI {
-            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
-                        then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
-                        else_steps: vec![Instr::ReturnI(Expr::SomeOpt(Box::new(
-                            nat_coerce(Expr::Sub(
-                                Box::new(int_coerce(p("i_1"))),
-                                Box::new(int_coerce(Expr::Mul(
-                                    Box::new(p("i_2")),
-                                    Box::new(nat_coerce(trunc_div(p("i_1"), p("i_2")))),
-                                ))),
-                            )),
-                        )))],
-                    },
-                ],
+                cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
+                then_steps: vec![Instr::IfI {
+                    cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                    then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
+                    else_steps: vec![Instr::ReturnI(Expr::SomeOpt(Box::new(nat_coerce(
+                        Expr::Sub(
+                            Box::new(int_coerce(p("i_1"))),
+                            Box::new(int_coerce(Expr::Mul(
+                                Box::new(p("i_2")),
+                                Box::new(nat_coerce(trunc_div(p("i_1"), p("i_2")))),
+                            ))),
+                        ),
+                    ))))],
+                }],
                 else_steps: vec![],
             },
             Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
             Instr::IfI {
-            cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
+                cond: InstrCond::Pred(eq(p("i_2"), nat(0))),
                 then_steps: vec![Instr::ReturnI(Expr::EmptyOpt)],
                 else_steps: vec![
                     Instr::LetI {
                         lhs: LetLhs::Var("j_1"),
                         expr: call(
                             "signed_",
-                            vec![
-                                Arg::ExpA(Box::new(p("N"))),
-                                Arg::ExpA(Box::new(p("i_1"))),
-                            ],
+                            vec![Arg::ExpA(Box::new(p("N"))), Arg::ExpA(Box::new(p("i_1")))],
                         ),
                     },
                     Instr::LetI {
                         lhs: LetLhs::Var("j_2"),
                         expr: call(
                             "signed_",
-                            vec![
-                                Arg::ExpA(Box::new(p("N"))),
-                                Arg::ExpA(Box::new(p("i_2"))),
-                            ],
+                            vec![Arg::ExpA(Box::new(p("N"))), Arg::ExpA(Box::new(p("i_2")))],
                         ),
                     },
                     Instr::ReturnI(Expr::SomeOpt(Box::new(call(
@@ -836,7 +773,10 @@ pub fn binop_def() -> FuncA {
         Instr::IfI {
             cond: InstrCond::Pred(Pred::BinOpCaseIs(p("binop_"), BinOpCase::Div)),
             then_steps: vec![
-                Instr::LetI { lhs: LetLhs::BinOpCase(BinOpCase::Div, "sx"), expr: p("binop_") },
+                Instr::LetI {
+                    lhs: LetLhs::BinOpCase(BinOpCase::Div, "sx"),
+                    expr: p("binop_"),
+                },
                 list_idiv,
             ],
             else_steps: vec![],
@@ -844,7 +784,10 @@ pub fn binop_def() -> FuncA {
         Instr::IfI {
             cond: InstrCond::Pred(Pred::BinOpCaseIs(p("binop_"), BinOpCase::Rem)),
             then_steps: vec![
-                Instr::LetI { lhs: LetLhs::BinOpCase(BinOpCase::Rem, "sx"), expr: p("binop_") },
+                Instr::LetI {
+                    lhs: LetLhs::BinOpCase(BinOpCase::Rem, "sx"),
+                    expr: p("binop_"),
+                },
                 list_irem,
             ],
             else_steps: vec![],
@@ -880,13 +823,13 @@ pub fn binop_def() -> FuncA {
     FuncA {
         id: "binop_",
         params: BINOP_PARAMS,
-        body: vec![
-            Instr::IfI {
+        body: vec![Instr::IfI {
             cond: InstrCond::Pred(Pred::TypeIsInn(p("numtype"))),
-                then_steps: inn_branch,
-                else_steps: vec![Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype"))))],
-            },
-        ],
+            then_steps: inn_branch,
+            else_steps: vec![Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p(
+                "numtype",
+            ))))],
+        }],
     }
 }
 

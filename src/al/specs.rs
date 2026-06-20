@@ -1,11 +1,11 @@
 //! Per-op AL spec definitions (non-binop flat specs; binops use meta AL).
 
+use super::ast::Instr;
 use super::defs::{
-    step_local_set_template, step_pure_binop_template, step_pure_local_tee_template,
-    step_read_local_get_template, NumType, Sign, WasmBinOp,
+    NumType, Sign, WasmBinOp, step_local_set_template, step_pure_binop_template,
+    step_pure_local_tee_template, step_read_local_get_template,
 };
 use super::ir::{AlExpr, AlSpec, AlStep};
-use super::ast::Instr;
 use crate::semantics::SemOp;
 use std::borrow::Cow;
 

@@ -1,9 +1,7 @@
 //! Concrete evaluator for [`FuncA`](super::super::ast::FuncA) bodies (OCaml `FuncA`).
 
-use super::super::defs::{lookup_func, BinOpCase, NumType, Sign, ValType, WasmBinOp};
-use super::super::ast::{
-    Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred,
-};
+use super::super::ast::{Arg, Expr, FuncA, Instr, InstrCond, LetLhs, Param, ParamType, Pred};
+use super::super::defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp, lookup_func};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AlValue {
@@ -125,9 +123,14 @@ fn eval_fn_step(step: &Instr, env: &mut AlEnv) -> Result<Option<AlValue>, EvalEr
             }
         }
         Instr::IfI {
-            cond: InstrCond::Expr(_), ..
+            cond: InstrCond::Expr(_),
+            ..
         } => panic!("expr if in func body"),
-        Instr::PopI(_) | Instr::PushI(_) | Instr::TrapI | Instr::ExecuteI(_) | Instr::PerformI(_, _)
+        Instr::PopI(_)
+        | Instr::PushI(_)
+        | Instr::TrapI
+        | Instr::ExecuteI(_)
+        | Instr::PerformI(_, _)
         | Instr::ReplaceI { .. } => {
             panic!("rule instr in func body")
         }
@@ -172,17 +175,15 @@ fn eval_expr_inner(expr: &Expr, env: &AlEnv) -> EvalResult {
         Expr::Pow(a, b) => eval_pow(eval_expr(a, env)?, eval_expr(b, env)?),
         Expr::Neg(inner) => Ok(AlValue::Int(-as_int(eval_expr(inner, env)?)?)),
         Expr::Choose(inner) => eval_choose(eval_expr(inner, env)?),
-        Expr::BinOpSignOf(inner) => {
-            Ok(AlValue::Sign(binop_sign_value(as_binop(eval_expr(inner, env)?)?)))
-        }
+        Expr::BinOpSignOf(inner) => Ok(AlValue::Sign(binop_sign_value(as_binop(eval_expr(
+            inner, env,
+        )?)?))),
         Expr::Call(name, args) => eval_call(name, args, env),
-        Expr::OptionalLen(inner) => {
-            Ok(AlValue::Nat(match eval_expr(inner, env)? {
-                AlValue::List(items) if items.is_empty() => 0,
-                AlValue::Opt(None) => 0,
-                _ => 1,
-            }))
-        }
+        Expr::OptionalLen(inner) => Ok(AlValue::Nat(match eval_expr(inner, env)? {
+            AlValue::List(items) if items.is_empty() => 0,
+            AlValue::Opt(None) => 0,
+            _ => 1,
+        })),
         Expr::TopValue(nt) => Ok(AlValue::NumType(*nt)),
         Expr::TopValueAny => Ok(AlValue::Nat(0)),
         Expr::CaseE(..) => panic!("CaseE in fn eval"),
@@ -232,9 +233,7 @@ fn eval_pred(pred: &Pred, env: &AlEnv) -> Result<bool, EvalError> {
         Pred::TypeIsInn(expr) => Ok(matches!(eval_expr(expr, env)?, AlValue::NumType(_))),
         Pred::TypeIsFnn(_) => Ok(false),
         Pred::BinOpEq(expr, op) => Ok(as_binop(eval_expr(expr, env)?)? == *op),
-        Pred::BinOpCaseIs(expr, case) => {
-            Ok(binop_case(as_binop(eval_expr(expr, env)?)?, *case))
-        }
+        Pred::BinOpCaseIs(expr, case) => Ok(binop_case(as_binop(eval_expr(expr, env)?)?, *case)),
     }
 }
 
@@ -376,7 +375,10 @@ fn to_i64(v: AlValue) -> Result<i64, EvalError> {
     })
 }
 
-fn bind_eval_fn_args(def: &FuncA, bound: Vec<AlValue>) -> Result<Vec<(&'static str, AlValue)>, EvalError> {
+fn bind_eval_fn_args(
+    def: &FuncA,
+    bound: Vec<AlValue>,
+) -> Result<Vec<(&'static str, AlValue)>, EvalError> {
     assert_eq!(
         def.params.len(),
         bound.len(),

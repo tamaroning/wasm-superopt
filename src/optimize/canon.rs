@@ -1,6 +1,6 @@
 //! Value canonicalization via equality saturation.
 
-use crate::goal::{LocalReq, MachineState};
+use super::goal::{LocalReq, MachineState};
 use crate::lang::ValueLang;
 use crate::semantics::InstKind;
 use egg::{AstSize, Extractor, Id, RecExpr, Rewrite, Runner};
@@ -94,10 +94,7 @@ impl Canonizer {
         runner.egraph.id_to_expr(id)
     }
 
-    pub fn binop_decompositions(
-        &self,
-        expr: &ValueExpr,
-    ) -> Vec<(InstKind, ValueExpr, ValueExpr)> {
+    pub fn binop_decompositions(&self, expr: &ValueExpr) -> Vec<(InstKind, ValueExpr, ValueExpr)> {
         let runner = self.saturate(expr);
         let root = runner.roots[0];
         let class_id = runner.egraph.find(root);

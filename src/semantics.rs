@@ -3,12 +3,11 @@
 //! Operand stack holds i32 values only. Locals and linear memory are implicit machine
 //! state threaded through effectful instructions (mirroring Wasm, not the egg DAG token).
 
-use crate::sema::{
+use crate::al::{
     NumType, STRAIGHT_LINE_EMBED, Sign, WasmBinOp, al_spec_for, derive_inst_spec,
     derive_rule_binop_spec, derive_rule_local_get_spec, derive_rule_local_set_spec,
-    derive_rule_local_tee_spec, exec_al_concrete, exec_al_z3, exec_instrs_concrete,
-    exec_instrs_z3, format_al_pretty, format_rule_binop_pretty, format_rule_local_pretty,
-    rule_instrs_for,
+    derive_rule_local_tee_spec, exec_al_concrete, exec_al_z3, exec_instrs_concrete, exec_instrs_z3,
+    format_al_pretty, format_rule_binop_pretty, format_rule_local_pretty, rule_instrs_for,
 };
 use std::fmt;
 use z3::ast::{Array, Ast, BV, Bool};
@@ -182,10 +181,7 @@ pub enum DagStackStep {
     /// `i32.const` — immediate carried here (pop 0).
     PushConst(i32),
     /// Any other op: popped operands in stack order (bottom-first), then one push.
-    Push {
-        kind: InstKind,
-        args: Vec<egg::Id>,
-    },
+    Push { kind: InstKind, args: Vec<egg::Id> },
 }
 
 /// Apply `InstSpec` stack effect; `I32Const` reads its immediate from `op`.
@@ -777,8 +773,8 @@ pub fn enumerate_sequences_by_output(
     let mut work = vec![(input.to_vec(), Vec::new())];
 
     while let Some((stack, seq)) = work.pop() {
-        let is_candidate = is_type_valid(input, &seq)
-            && (seq.is_empty() || uses_all_input_slots(input, &seq));
+        let is_candidate =
+            is_type_valid(input, &seq) && (seq.is_empty() || uses_all_input_slots(input, &seq));
         if is_candidate {
             by_output
                 .entry(StackSig {
@@ -838,9 +834,7 @@ pub fn print_semantics_table() {
         );
         for line in match binop_wasm(&op) {
             Some((nt, binop)) => format_rule_binop_pretty(nt, binop),
-            None if op.is_effectful() => {
-                format_rule_local_pretty(&op)
-            }
+            None if op.is_effectful() => format_rule_local_pretty(&op),
             None => format_al_pretty(&al_spec_for(&op)),
         }
         .lines()
@@ -891,7 +885,11 @@ mod tests {
         let input = vec![StackTy::I32];
         let catalog = OpCatalog::from_ops(&concrete_ops());
         let by_output = enumerate_sequences_by_output(&input, &catalog, 2);
-        assert!(by_output.values().any(|seqs| seqs.iter().any(|seq| seq.is_empty())));
+        assert!(
+            by_output
+                .values()
+                .any(|seqs| seqs.iter().any(|seq| seq.is_empty()))
+        );
     }
 
     #[test]

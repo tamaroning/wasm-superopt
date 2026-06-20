@@ -1,7 +1,9 @@
 //! Stack-to-DAG conversion driven by centralized semantics.
 
 use crate::lang::WasmLang;
-use crate::semantics::{DagStackStep, SemOp, StackTy, dag_stack_step, spec_for, wasm_lang_from_kind};
+use crate::semantics::{
+    DagStackStep, SemOp, StackTy, dag_stack_step, spec_for, wasm_lang_from_kind,
+};
 use egg::{Id, Language, RecExpr};
 use std::fmt::{self, Display};
 
@@ -80,9 +82,8 @@ impl StackToDag {
     /// Apply using semantics table for stack signature validation.
     pub fn apply_sem(&mut self, op: &SemOp) {
         let spec = spec_for(op);
-        let step = dag_stack_step(op, &spec, &mut self.stack).unwrap_or_else(|| {
-            panic!("effectful or unsupported op in DAG conversion: {op:?}")
-        });
+        let step = dag_stack_step(op, &spec, &mut self.stack)
+            .unwrap_or_else(|| panic!("effectful or unsupported op in DAG conversion: {op:?}"));
         match step {
             DagStackStep::PushConst(n) => {
                 self.stack.push(self.expr.add(WasmLang::I32Const(n)));
@@ -131,7 +132,6 @@ impl StackToDag {
     pub fn pattern_from_stack(&self) -> String {
         stack_ids_to_pattern(&self.expr, &self.stack)
     }
-
 }
 
 pub fn stack_to_dag(ops: &[WasmOp]) -> RecExpr<WasmLang> {

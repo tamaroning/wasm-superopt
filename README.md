@@ -4,7 +4,7 @@ Loop/jump-free WebAssembly basic blocks are optimized via backward residual-goal
 
 ## Architecture (two phases)
 
-**Phase 1 — arithmetic rewrite synthesis** (`synthesis.rs`, `sema/`, `value.rs`)
+**Phase 1 — arithmetic rewrite synthesis** (`synthesis.rs`, `al/`, `value.rs`)
 
 - Encode SpecTec AL semantics as Z3 constraints
 - Enumerate value-level AST pairs and verify equivalence (random tests + Z3)
@@ -63,7 +63,7 @@ cargo run --release -- examples/example.wat --segments-only
 - `src/heuristic.rs` — admissible A* heuristics (`h_stack`, `h_local`, `h_node`, `h_dep`)
 - `src/forward.rs` — forward symbolic execution
 - `src/wasm/` — Wasm parsing and segment extraction
-- `src/sema/` — SpecTec AL semantics
+- `src/al/` — SpecTec AL semantics
 - `src/example.rs` — loads `examples/example.wat` for tests and docs
 - `examples/` — running example (`example.wat`) and SMT-LIB sample (`smt-lib.md`)
 

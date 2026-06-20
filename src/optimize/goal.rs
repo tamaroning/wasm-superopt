@@ -1,6 +1,6 @@
 //! Machine goals for backward search (stack + locals).
 
-use crate::canon::Canonizer;
+use super::canon::Canonizer;
 use crate::lang::ValueLang;
 use crate::value::parse_value_expr;
 use egg::{Id, RecExpr};
@@ -29,11 +29,7 @@ pub struct MachineState {
 
 impl MachineState {
     pub fn validate_bounds(&self) -> bool {
-        self.stack.len() <= MAX_STACK_HEIGHT
-            && self
-                .locals
-                .keys()
-                .all(|&s| s <= MAX_LOCAL_SLOT)
+        self.stack.len() <= MAX_STACK_HEIGHT && self.locals.keys().all(|&s| s <= MAX_LOCAL_SLOT)
     }
 
     pub fn top(&self) -> Option<&ValueExpr> {
@@ -108,11 +104,7 @@ fn eval_id(expr: &ValueExpr, id: Id, l0: i32) -> i32 {
 }
 
 pub fn concrete_stack(state: &MachineState, l0: i32) -> Vec<i32> {
-    state
-        .stack
-        .iter()
-        .map(|e| eval_value(e, l0))
-        .collect()
+    state.stack.iter().map(|e| eval_value(e, l0)).collect()
 }
 
 pub fn concrete_local(state: &MachineState, slot: u32, l0: i32) -> Option<i32> {
@@ -177,4 +169,3 @@ pub fn all_subtree_exprs(expr: &ValueExpr) -> Vec<ValueExpr> {
         .map(|i| subtree_expr(expr, Id::from(i)))
         .collect()
 }
-

@@ -1,6 +1,6 @@
 //! Straight-line segment representation.
 
-use crate::goal::MachineState;
+use crate::optimize::MachineState;
 use crate::semantics::SemOp;
 
 #[derive(Clone, Debug)]

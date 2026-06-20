@@ -1,8 +1,8 @@
 //! Concrete executor for [`RuleA`](super::super::ast::Algorithm::RuleA) bodies (`instr` in OCaml).
 
-use super::func::{eval_expr, AlEnv, AlValue};
 use super::super::ast::{Arg, Expr, Instr, InstrCond, LetLhs, PopTarget};
 use super::super::defs::step_local_set_template;
+use super::func::{AlEnv, AlValue, eval_expr};
 use crate::semantics::ConcreteState;
 
 fn push_stack(stack: &mut Vec<i32>, val: AlValue) {
@@ -37,12 +37,7 @@ fn with_local_args(args: &[Arg]) -> (u32, &'static str) {
     }
 }
 
-fn push_expr(
-    expr: &Expr,
-    stack: &mut Vec<i32>,
-    state: &ConcreteState,
-    env: &AlEnv,
-) {
+fn push_expr(expr: &Expr, stack: &mut Vec<i32>, state: &ConcreteState, env: &AlEnv) {
     if let Expr::Call("local", args) = expr {
         let x = local_index(args);
         stack.push(state.locals[x as usize]);
@@ -51,11 +46,7 @@ fn push_expr(
     push_stack(stack, eval_expr(expr, env).expect("push expr"));
 }
 
-fn perform_with_local(
-    args: &[Arg],
-    state: &mut ConcreteState,
-    env: &AlEnv,
-) {
+fn perform_with_local(args: &[Arg], state: &mut ConcreteState, env: &AlEnv) {
     let (x, val_name) = with_local_args(args);
     state.locals[x as usize] = alval_to_i32(env.get(val_name));
 }
@@ -105,7 +96,8 @@ fn exec_instr(
             }
         }
         Instr::IfI {
-            cond: InstrCond::Pred(_), ..
+            cond: InstrCond::Pred(_),
+            ..
         } => panic!("pred if in rule body"),
         Instr::PushI(expr) => push_expr(expr, stack, state, env),
         Instr::ExecuteI(expr) => {
@@ -163,11 +155,11 @@ pub fn exec_instrs_concrete(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::ConcreteState;
-    use crate::sema::defs::{
-        step_local_set_template, step_pure_binop_template, step_pure_local_tee_template,
-        step_read_local_get_template, NumType, Sign, WasmBinOp,
+    use crate::al::defs::{
+        NumType, Sign, WasmBinOp, step_local_set_template, step_pure_binop_template,
+        step_pure_local_tee_template, step_read_local_get_template,
     };
+    use crate::semantics::ConcreteState;
 
     const LOCAL_SLOTS: usize = 8;
     const MEM_SLOTS: usize = 16;

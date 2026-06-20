@@ -1,15 +1,8 @@
 //! Loop/jump-free WebAssembly basic blocks → backward goal search + e-graph rules.
 
-mod canon;
-mod example;
-mod forward;
-mod goal;
-mod heuristic;
-mod inverse;
+mod al;
 mod lang;
 mod optimize;
-mod search;
-mod sema;
 mod semantics;
 mod stack;
 mod synthesis;
@@ -24,7 +17,10 @@ use synthesis::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "egraph", about = "Optimize loop/jump-free Wasm segments via backward goal search")]
+#[command(
+    name = "egraph",
+    about = "Optimize loop/jump-free Wasm segments via backward goal search"
+)]
 struct Cli {
     /// Wasm module to optimize.
     #[arg(value_name = "WASM", required_unless_present_any = ["synthesize_only", "print_semantics"])]
@@ -55,7 +51,7 @@ struct Cli {
     segments_only: bool,
 
     /// Maximum peel depth (instruction window) for backward search.
-    #[arg(long, default_value_t = search::DEFAULT_MAX_DEPTH)]
+    #[arg(long, default_value_t = optimize::DEFAULT_MAX_DEPTH)]
     window: usize,
 }
 
@@ -81,7 +77,7 @@ enum SolverKind {
 }
 
 fn run_wasm(cli: &Cli, path: &std::path::Path, rules: &[egg::Rewrite<ValueLang, ()>]) {
-    use search::{format_ops, SearchConfig};
+    use optimize::{SearchConfig, format_ops};
     use wasm::parse_wasm_file;
 
     let info = parse_wasm_file(path).unwrap_or_else(|e| {
