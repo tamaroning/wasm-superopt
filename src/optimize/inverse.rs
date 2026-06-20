@@ -124,7 +124,6 @@ mod tests {
             stack: vec![top],
             locals,
         };
-        let key1_stack: Vec<_> = g.stack.iter().map(|e| canon.canon(e)).collect();
         let top_expr = g.stack.last().expect("top");
         let decomps = canon.binop_decompositions(top_expr);
         assert!(decomps.iter().any(|(k, _, _)| *k == InstKind::I32Mul));
@@ -136,8 +135,7 @@ mod tests {
         after_mul.stack.pop();
         after_mul.stack.push(e1.clone());
         after_mul.stack.push(e2.clone());
-        after_mul.stack.push(parse_value_expr("2"));
-        after_mul.stack.pop();
+        after_mul.stack.pop(); // peel `i32.const 2`
         let key_mul_stack: Vec<_> = after_mul.stack.iter().map(|e| canon.canon(e)).collect();
         let (_, e1s, e2s) = decomps
             .iter()
@@ -147,11 +145,10 @@ mod tests {
         after_shl.stack.pop();
         after_shl.stack.push(e1s.clone());
         after_shl.stack.push(e2s.clone());
-        after_shl.stack.push(parse_value_expr("1"));
-        after_shl.stack.pop();
+        after_shl.stack.pop(); // peel `i32.const 1`
         let key_shl_stack: Vec<_> = after_shl.stack.iter().map(|e| canon.canon(e)).collect();
         assert_eq!(key_mul_stack, key_shl_stack);
-        assert_ne!(key1_stack.len(), key_mul_stack.len());
+        assert_eq!(key_mul_stack.len(), 1, "both paths require only L+1");
     }
 
     #[test]

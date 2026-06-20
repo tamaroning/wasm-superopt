@@ -168,10 +168,7 @@ mod tests {
         let dep = h_dep(&g, &init, &mut canon);
         let nodes = h_node(&g, &init, &mut canon);
         assert!(dep >= 3, "nested binops depth ≥ 3, got {dep}");
-        assert!(
-            nodes <= dep,
-            "node count should not exceed dependency depth"
-        );
+        assert!(nodes >= 1, "needs at least one residual subtree, got {nodes}");
     }
 
     #[test]

@@ -8,11 +8,16 @@ use std::collections::{HashMap, HashSet};
 pub type ValueExpr = RecExpr<ValueLang>;
 pub type CanonId = u32;
 
+const SAT_ITER_LIMIT: usize = 20;
+const SAT_NODE_LIMIT: usize = 10_000;
+
 pub struct Canonizer {
     rules: Vec<Rewrite<ValueLang, ()>>,
     str_cache: HashMap<String, CanonId>,
-    class_cache: HashMap<usize, CanonId>,
+    /// Maps e-class ids in the persistent e-graph to canon ids.
+    class_to_id: HashMap<usize, CanonId>,
     next_id: CanonId,
+    runner: Runner<ValueLang, ()>,
 }
 
 impl Canonizer {
@@ -20,8 +25,11 @@ impl Canonizer {
         Self {
             rules,
             str_cache: HashMap::new(),
-            class_cache: HashMap::new(),
+            class_to_id: HashMap::new(),
             next_id: 0,
+            runner: Runner::default()
+                .with_iter_limit(SAT_ITER_LIMIT)
+                .with_node_limit(SAT_NODE_LIMIT),
         }
     }
 
@@ -37,37 +45,27 @@ impl Canonizer {
             self.str_cache.insert(key, id);
             return id;
         }
-        let runner = Runner::default()
-            .with_iter_limit(20)
-            .with_node_limit(10_000)
-            .with_expr(expr)
-            .run(&self.rules);
-        let root = runner.roots[0];
-        let class_id = runner.egraph.find(root);
-        let class = usize::from(class_id);
-        if allow_class_merge(&runner, class_id) {
-            if let Some(&id) = self.class_cache.get(&class) {
-                self.str_cache.insert(key, id);
-                return id;
-            }
-        }
-        let extractor = Extractor::new(&runner.egraph, AstSize);
-        let (_, best) = extractor.find_best(root);
-        let canon_str = best.to_string();
-        if let Some(&id) = self.str_cache.get(&canon_str) {
+
+        let root = self.register_and_saturate(expr);
+        let class = usize::from(self.runner.egraph.find(root));
+        if let Some(&id) = self.class_to_id.get(&class) {
             self.str_cache.insert(key, id);
-            if allow_class_merge(&runner, class_id) {
-                self.class_cache.insert(class, id);
-            }
             return id;
         }
-        let id = self.next_id;
-        self.next_id += 1;
+
+        let extractor = Extractor::new(&self.runner.egraph, AstSize);
+        let (_, best) = extractor.find_best(root);
+        let canon_str = best.to_string();
+        let id = if let Some(&existing) = self.str_cache.get(&canon_str) {
+            existing
+        } else {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.str_cache.insert(canon_str, id);
+            id
+        };
         self.str_cache.insert(key, id);
-        self.str_cache.insert(canon_str, id);
-        if allow_class_merge(&runner, class_id) {
-            self.class_cache.insert(class, id);
-        }
+        self.class_to_id.insert(class, id);
         id
     }
 
@@ -77,8 +75,8 @@ impl Canonizer {
 
     pub fn saturate(&self, expr: &ValueExpr) -> Runner<ValueLang, ()> {
         Runner::default()
-            .with_iter_limit(20)
-            .with_node_limit(10_000)
+            .with_iter_limit(SAT_ITER_LIMIT)
+            .with_node_limit(SAT_NODE_LIMIT)
             .with_expr(expr)
             .run(&self.rules)
     }
@@ -116,16 +114,48 @@ impl Canonizer {
         }
         out
     }
+
+    fn register_and_saturate(&mut self, expr: &ValueExpr) -> Id {
+        let id = self.runner.egraph.add_expr(expr);
+        self.runner.roots.push(id);
+        let egraph = std::mem::take(&mut self.runner.egraph);
+        let roots = self.runner.roots.clone();
+        self.runner = Runner::default()
+            .with_iter_limit(SAT_ITER_LIMIT)
+            .with_node_limit(SAT_NODE_LIMIT)
+            .with_egraph(egraph)
+            .run(&self.rules);
+        self.runner.roots = roots;
+        id
+    }
 }
 
-/// Share e-class ids unless the class mixes bare symbols with bare constants.
-fn allow_class_merge(runner: &Runner<ValueLang, ()>, class_id: Id) -> bool {
-    let eclass = &runner.egraph[class_id];
-    let has_symbol = eclass
-        .iter()
-        .any(|node| matches!(node, ValueLang::Symbol(_)));
-    let has_const = eclass
-        .iter()
-        .any(|node| matches!(node, ValueLang::I32Const(_)));
-    !(has_symbol && has_const)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synthesis::{
+        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
+    };
+    use crate::value::parse_value_expr;
+
+    fn rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
+        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10))
+    }
+
+    #[test]
+    fn distinct_shifts_get_distinct_canon_ids() {
+        let mut canon = Canonizer::new(rules());
+        let a = parse_value_expr("(i32.shl ?L0 3)");
+        let b = parse_value_expr("(i32.shl ?L0 1)");
+        assert_ne!(canon.canon(&a), canon.canon(&b));
+        assert!(!canon.values_equivalent(&a, &b));
+    }
+
+    #[test]
+    fn sound_mul_shl_equivalence_shares_canon_id() {
+        let mut canon = Canonizer::new(rules());
+        let mul = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
+        let shl = parse_value_expr("(i32.shl (i32.add ?L0 1) 1)");
+        assert_eq!(canon.canon(&mul), canon.canon(&shl));
+    }
 }

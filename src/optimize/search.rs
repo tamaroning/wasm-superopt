@@ -233,6 +233,27 @@ mod tests {
     }
 
     #[test]
+    fn optimized_example_preserves_fin_state() {
+        use crate::optimize::fixtures::{fin, init};
+        use crate::optimize::search::{SearchConfig, format_ops, is_grounded, solve_astar};
+        use crate::sym::SymMachine;
+
+        let init = init();
+        let fin = fin();
+        let rules = test_rules();
+        let ops = solve_astar(&init, &fin, &rules, &SearchConfig::default()).expect("solution");
+        assert_eq!(ops.len(), 7, "ops: {}", format_ops(&ops));
+
+        let mut m = SymMachine::function_entry(1, 1);
+        for op in &ops {
+            m.exec(op).unwrap();
+        }
+        let got = m.to_fin_state();
+        let mut canon = crate::optimize::canon::Canonizer::new(rules);
+        assert!(is_grounded(&got, &fin, &mut canon));
+    }
+
+    #[test]
     fn solve_example_astar() {
         let init = init();
         let fin = fin();
