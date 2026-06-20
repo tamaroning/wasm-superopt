@@ -1,6 +1,6 @@
 //! Backward goal search: BFS, greedy inverse, and A*.
 
-use super::canon::Canonizer;
+use super::canon::{Canonizer, NormalizedGoal};
 use super::heuristic::h_goal;
 use super::inverse::{PeelAction, applicable_peels};
 use crate::lang::ValueLang;
@@ -58,13 +58,25 @@ fn reverse_ops(path: &[SemOp]) -> Vec<SemOp> {
     out
 }
 
-/// Structural memo key (exact `SymState`). Returns `true` if already expanded at ≤ `cost`.
-fn memo_seen(memo: &HashMap<SymState, usize>, g: &SymState, cost: usize) -> bool {
-    memo.get(g).is_some_and(|&best| best <= cost)
+/// Memo key `⌈G⌉` (idea.md §8). Returns `true` if already expanded at ≤ `cost`.
+fn memo_seen(
+    memo: &HashMap<NormalizedGoal, usize>,
+    g: &SymState,
+    cost: usize,
+    canon: &mut Canonizer,
+) -> bool {
+    let key = canon.normalize_state(g);
+    memo.get(&key).is_some_and(|&best| best <= cost)
 }
 
-fn memo_record(memo: &mut HashMap<SymState, usize>, g: &SymState, cost: usize) {
-    memo.insert(g.clone(), cost);
+fn memo_record(
+    memo: &mut HashMap<NormalizedGoal, usize>,
+    g: &SymState,
+    cost: usize,
+    canon: &mut Canonizer,
+) {
+    let key = canon.normalize_state(g);
+    memo.insert(key, cost);
 }
 
 pub fn solve_bfs(
@@ -78,13 +90,13 @@ pub fn solve_bfs(
     let mut queue = VecDeque::new();
     queue.push_back((fin.clone(), Vec::new(), 0usize));
     while let Some((g, path, depth)) = queue.pop_front() {
-        if memo_seen(&memo, &g, depth) {
+        if memo_seen(&memo, &g, depth, &mut canon) {
             continue;
         }
         if is_grounded(&g, init, &mut canon) {
             return Some(reverse_ops(&path));
         }
-        memo_record(&mut memo, &g, depth);
+        memo_record(&mut memo, &g, depth, &mut canon);
         if depth >= cfg.max_depth {
             continue;
         }
@@ -169,7 +181,7 @@ pub fn solve_astar(
         if f >= best {
             continue;
         }
-        if memo_seen(&memo, &goal, g) {
+        if memo_seen(&memo, &goal, g, &mut canon) {
             continue;
         }
         if is_grounded(&goal, init, &mut canon) {
@@ -179,7 +191,7 @@ pub fn solve_astar(
             }
             continue;
         }
-        memo_record(&mut memo, &goal, g);
+        memo_record(&mut memo, &goal, g, &mut canon);
         if g >= cfg.max_depth.min(best) {
             continue;
         }
@@ -251,6 +263,48 @@ mod tests {
         let got = m.to_fin_state();
         let mut canon = crate::optimize::canon::Canonizer::new(rules);
         assert!(is_grounded(&got, &fin, &mut canon));
+    }
+
+    #[test]
+    fn normalized_memo_key_merges_mul_and_shl_peel_paths() {
+        use crate::optimize::canon::Canonizer;
+        use crate::semantics::InstKind;
+        use crate::sym::LocalReq;
+        use crate::value::parse_value_expr;
+
+        let rules = test_rules();
+        let mut canon = Canonizer::new(rules);
+        let top = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
+        let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
+        let mut locals = std::collections::BTreeMap::new();
+        locals.insert(0, LocalReq::Need(l_plus_1));
+        let g = SymState {
+            stack: vec![top],
+            locals,
+        };
+        let decomps = canon.binop_decompositions(g.top().unwrap());
+        let (_, e1, e2) = decomps
+            .iter()
+            .find(|(k, _, _)| *k == InstKind::I32Mul)
+            .unwrap();
+        let mut after_mul = g.clone();
+        after_mul.stack.pop();
+        after_mul.stack.push(e1.clone());
+        after_mul.stack.push(e2.clone());
+        after_mul.stack.pop();
+        let (_, e1s, e2s) = decomps
+            .iter()
+            .find(|(k, _, _)| *k == InstKind::I32Shl)
+            .unwrap();
+        let mut after_shl = g.clone();
+        after_shl.stack.pop();
+        after_shl.stack.push(e1s.clone());
+        after_shl.stack.push(e2s.clone());
+        after_shl.stack.pop();
+        assert_eq!(
+            canon.normalize_state(&after_mul),
+            canon.normalize_state(&after_shl)
+        );
     }
 
     #[test]

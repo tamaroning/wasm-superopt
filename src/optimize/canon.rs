@@ -8,6 +8,14 @@ use std::collections::{HashMap, HashSet};
 pub type ValueExpr = RecExpr<ValueLang>;
 pub type CanonId = u32;
 
+/// Normal form ⌈G⌉ for memoization (idea.md §8).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NormalizedGoal {
+    pub stack: Vec<CanonId>,
+    /// `(slot, c(v))` for required locals; `★` slots are pruned.
+    pub locals: Vec<(u32, CanonId)>,
+}
+
 const SAT_ITER_LIMIT: usize = 20;
 const SAT_NODE_LIMIT: usize = 10_000;
 
@@ -71,6 +79,22 @@ impl Canonizer {
 
     pub fn values_equivalent(&mut self, a: &ValueExpr, b: &ValueExpr) -> bool {
         self.canon(a) == self.canon(b)
+    }
+
+    /// Residual goal key `⌈G⌉ = ⟨[c(s)], {x ↦ c(M[x]) | M[x] ≠ ★}⟩`.
+    pub fn normalize_state(&mut self, state: &crate::sym::SymState) -> NormalizedGoal {
+        use crate::sym::LocalReq;
+
+        let stack = state.stack.iter().map(|e| self.canon(e)).collect();
+        let locals = state
+            .locals
+            .iter()
+            .filter_map(|(&slot, req)| match req {
+                LocalReq::Need(v) => Some((slot, self.canon(v))),
+                LocalReq::DontCare => None,
+            })
+            .collect();
+        NormalizedGoal { stack, locals }
     }
 
     pub fn saturate(&self, expr: &ValueExpr) -> Runner<ValueLang, ()> {
