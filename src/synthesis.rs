@@ -45,6 +45,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
 const RULES_CACHE_FORMAT_VERSION: u32 = 7;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
+#[cfg(test)]
 pub const TEST_SYNTHESIS_AST_SIZE: usize = 3;
 
 #[derive(Serialize, Deserialize)]
@@ -298,7 +299,7 @@ mod tests {
         for input in synthesis_inputs() {
             let asts: Vec<ValueAst> = enumerate_value_asts(4, input.len())
                 .into_iter()
-                .filter(|ast| ast.uses_all_symbols(input.len()))
+                .filter(|ast| ast.uses_each_symbol_once(input.len()))
                 .collect();
             total_pairs += count_candidate_pairs(input.len(), &asts);
         }

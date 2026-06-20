@@ -2,6 +2,8 @@
 //!
 //! Flattened instruction specs live in [`super::ir`](super::ir) (`AlSpec` / `AlStep`).
 
+#![allow(dead_code)] // mirrors spectec/*.al; not every node is wired to the live pipeline yet
+
 pub use super::defs::{BinOpCase, NumType, Sign, ValType, WasmBinOp};
 
 /// Formal parameter of a [`FuncA`] (`arg list` in OCaml; name + type for transcribed defs).
@@ -241,27 +243,6 @@ pub struct FuncA {
     /// Function body (`instr list`).
     pub body: Vec<Instr>,
 }
-
-/// AL algorithm (`algorithm'` in OCaml).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Algorithm {
-    /// Reduction rule (`RuleA of mixop * anchor * arg list * instr list`).
-    ///
-    /// Example: `Step_pure/binop` from `binop.al`.
-    RuleA {
-        /// Rule anchor / hierarchical name (e.g. `Step_pure/binop`).
-        anchor: &'static str,
-        /// Rule parameters (instantiation arguments).
-        params: &'static [Param],
-        /// Rule body steps.
-        body: Vec<Instr>,
-    },
-    /// Helper function (`FuncA of id * arg list * instr list`).
-    FuncA(FuncA),
-}
-
-/// AL script — top-level list of algorithms (`script` in OCaml).
-pub type Script = Vec<Algorithm>;
 
 /// Pretty-print `Step_pure/binop` with `$binop_` call visible.
 pub fn format_rule_binop_pretty(nt: NumType, binop: WasmBinOp) -> String {

@@ -2,9 +2,9 @@
 
 mod al;
 mod lang;
+mod sym;
 mod optimize;
 mod semantics;
-mod stack;
 mod synthesis;
 mod value;
 mod wasm;

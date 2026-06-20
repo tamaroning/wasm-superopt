@@ -3,22 +3,6 @@
 use egg::*;
 
 define_language! {
-    pub enum WasmLang {
-        I32Const(i32),
-        "i32.add"   = I32Add([Id; 2]),
-        "i32.mul"   = I32Mul([Id; 2]),
-        "i32.div_u" = I32DivU([Id; 2]),
-        "i32.div_s" = I32DivS([Id; 2]),
-        "i32.shl"   = I32Shl([Id; 2]),
-        "stack.end"  = StackEnd,
-        "stack.slot" = StackSlot([Id; 2]),
-        Symbol(Symbol),
-    }
-}
-
-pub type EGraph = egg::EGraph<WasmLang, ()>;
-
-define_language! {
     pub enum ValueLang {
         I32Const(i32),
         "i32.add"   = I32Add([Id; 2]),
@@ -29,5 +13,3 @@ define_language! {
         Symbol(Symbol),
     }
 }
-
-pub type ValueEGraph = egg::EGraph<ValueLang, ()>;

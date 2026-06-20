@@ -1,6 +1,6 @@
 //! Straight-line segment representation.
 
-use crate::optimize::MachineState;
+use crate::sym::SymState;
 use crate::semantics::SemOp;
 
 #[derive(Clone, Debug)]
@@ -8,8 +8,8 @@ pub struct StraightSegment {
     pub func_index: u32,
     pub segment_index: usize,
     pub ops: Vec<SemOp>,
-    pub init: MachineState,
-    pub fin: MachineState,
+    pub init: SymState,
+    pub fin: SymState,
 }
 
 impl StraightSegment {

@@ -1,7 +1,7 @@
 //! Inverse peel rules (backward search steps).
 
 use super::canon::Canonizer;
-use super::goal::{LocalReq, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT, MachineState};
+use crate::sym::{LocalReq, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT, SymState};
 use crate::lang::ValueLang;
 use crate::semantics::{InstKind, SemOp};
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,9 +10,9 @@ pub enum PeelAction {
 }
 
 pub fn applicable_peels(
-    g: &MachineState,
+    g: &SymState,
     canon: &mut Canonizer,
-) -> Vec<(PeelAction, MachineState)> {
+) -> Vec<(PeelAction, SymState)> {
     if !g.validate_bounds() {
         return vec![];
     }
@@ -119,12 +119,12 @@ mod tests {
         let top = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
         let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
         let mut locals = std::collections::BTreeMap::new();
-        locals.insert(0, crate::optimize::goal::LocalReq::Need(l_plus_1));
-        let g = crate::optimize::goal::MachineState {
+        locals.insert(0, crate::sym::LocalReq::Need(l_plus_1));
+        let g = crate::sym::SymState {
             stack: vec![top],
             locals,
         };
-        let key1 = canon.normal_goal(&g);
+        let key1_stack: Vec<_> = g.stack.iter().map(|e| canon.canon(e)).collect();
         let top_expr = g.stack.last().expect("top");
         let decomps = canon.binop_decompositions(top_expr);
         assert!(decomps.iter().any(|(k, _, _)| *k == InstKind::I32Mul));
@@ -138,7 +138,7 @@ mod tests {
         after_mul.stack.push(e2.clone());
         after_mul.stack.push(parse_value_expr("2"));
         after_mul.stack.pop();
-        let key_mul = canon.normal_goal(&after_mul);
+        let key_mul_stack: Vec<_> = after_mul.stack.iter().map(|e| canon.canon(e)).collect();
         let (_, e1s, e2s) = decomps
             .iter()
             .find(|(k, _, _)| *k == InstKind::I32Shl)
@@ -149,10 +149,9 @@ mod tests {
         after_shl.stack.push(e2s.clone());
         after_shl.stack.push(parse_value_expr("1"));
         after_shl.stack.pop();
-        let key_shl = canon.normal_goal(&after_shl);
-        assert_eq!(key_mul.stack, key_shl.stack);
-        assert_eq!(key_mul.locals, key_shl.locals);
-        assert_ne!(key1.stack.len(), key_mul.stack.len());
+        let key_shl_stack: Vec<_> = after_shl.stack.iter().map(|e| canon.canon(e)).collect();
+        assert_eq!(key_mul_stack, key_shl_stack);
+        assert_ne!(key1_stack.len(), key_mul_stack.len());
     }
 
     #[test]
@@ -188,6 +187,6 @@ mod tests {
                 .expect("peel step");
             g = next;
         }
-        assert!(g.is_grounded(&init, &mut canon));
+        assert!(crate::optimize::search::is_grounded(&g, &init, &mut canon));
     }
 }

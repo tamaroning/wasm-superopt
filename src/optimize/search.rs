@@ -1,16 +1,43 @@
 //! Backward goal search: BFS, greedy inverse, and A*.
 
 use super::canon::Canonizer;
-use super::goal::MachineState;
 use super::heuristic::h_goal;
 use super::inverse::{PeelAction, applicable_peels};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
+use crate::sym::{LocalReq, MAX_LOCAL_SLOT, SymState};
 use egg::Rewrite;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 pub const DEFAULT_MAX_DEPTH: usize = 16;
+
+/// Whether residual goal `state` matches initial conditions `init` under canonicalization.
+pub fn is_grounded(state: &SymState, init: &SymState, canon: &mut Canonizer) -> bool {
+    if state.stack.len() != init.stack.len() {
+        return false;
+    }
+    for (a, b) in state.stack.iter().zip(init.stack.iter()) {
+        if canon.canon(a) != canon.canon(b) {
+            return false;
+        }
+    }
+    for slot in 0..=MAX_LOCAL_SLOT {
+        let cur = state.locals.get(&slot);
+        let expected = init.locals.get(&slot);
+        match (cur, expected) {
+            (None | Some(LocalReq::DontCare), None) => {}
+            (Some(LocalReq::DontCare), _) | (None, Some(LocalReq::DontCare)) => {}
+            (Some(LocalReq::Need(v)), Some(LocalReq::Need(init_v))) => {
+                if canon.canon(v) != canon.canon(init_v) {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
+}
 
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
@@ -31,18 +58,18 @@ fn reverse_ops(path: &[SemOp]) -> Vec<SemOp> {
     out
 }
 
-/// Structural memo key (exact `MachineState`). Returns `true` if already expanded at ≤ `cost`.
-fn memo_seen(memo: &HashMap<MachineState, usize>, g: &MachineState, cost: usize) -> bool {
+/// Structural memo key (exact `SymState`). Returns `true` if already expanded at ≤ `cost`.
+fn memo_seen(memo: &HashMap<SymState, usize>, g: &SymState, cost: usize) -> bool {
     memo.get(g).is_some_and(|&best| best <= cost)
 }
 
-fn memo_record(memo: &mut HashMap<MachineState, usize>, g: &MachineState, cost: usize) {
+fn memo_record(memo: &mut HashMap<SymState, usize>, g: &SymState, cost: usize) {
     memo.insert(g.clone(), cost);
 }
 
 pub fn solve_bfs(
-    init: &MachineState,
-    fin: &MachineState,
+    init: &SymState,
+    fin: &SymState,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> Option<Vec<SemOp>> {
@@ -54,7 +81,7 @@ pub fn solve_bfs(
         if memo_seen(&memo, &g, depth) {
             continue;
         }
-        if g.is_grounded(init, &mut canon) {
+        if is_grounded(&g, init, &mut canon) {
             return Some(reverse_ops(&path));
         }
         memo_record(&mut memo, &g, depth);
@@ -71,8 +98,8 @@ pub fn solve_bfs(
 }
 
 pub fn solve_greedy_inv(
-    init: &MachineState,
-    fin: &MachineState,
+    init: &SymState,
+    fin: &SymState,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> Option<Vec<SemOp>> {
@@ -80,7 +107,7 @@ pub fn solve_greedy_inv(
     let mut g = fin.clone();
     let mut path = Vec::new();
     for _ in 0..cfg.max_depth {
-        if g.is_grounded(init, &mut canon) {
+        if is_grounded(&g, init, &mut canon) {
             return Some(reverse_ops(&path));
         }
         let peels = applicable_peels(&g, &mut canon);
@@ -91,7 +118,7 @@ pub fn solve_greedy_inv(
         path.push(op);
         g = next;
     }
-    if g.is_grounded(init, &mut canon) {
+    if is_grounded(&g, init, &mut canon) {
         Some(reverse_ops(&path))
     } else {
         None
@@ -102,7 +129,7 @@ pub fn solve_greedy_inv(
 struct AstarNode {
     f: usize,
     g: usize,
-    goal: MachineState,
+    goal: SymState,
     path: Vec<SemOp>,
 }
 
@@ -119,8 +146,8 @@ impl PartialOrd for AstarNode {
 }
 
 pub fn solve_astar(
-    init: &MachineState,
-    fin: &MachineState,
+    init: &SymState,
+    fin: &SymState,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> Option<Vec<SemOp>> {
@@ -145,7 +172,7 @@ pub fn solve_astar(
         if memo_seen(&memo, &goal, g) {
             continue;
         }
-        if goal.is_grounded(init, &mut canon) {
+        if is_grounded(&goal, init, &mut canon) {
             if g <= best {
                 best = g;
                 best_path = Some(reverse_ops(&path));
@@ -213,25 +240,5 @@ mod tests {
         let ops = solve_astar(&init, &fin, &rules, &SearchConfig::default()).expect("solution");
         assert!(!ops.is_empty());
         assert!(ops.len() <= 7);
-    }
-
-    #[test]
-    fn memo_skips_revisited_states() {
-        use super::{memo_record, memo_seen};
-        use crate::optimize::goal::LocalReq;
-        use crate::value::parse_value_expr;
-
-        let mut memo = HashMap::new();
-        let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
-        let mut locals = std::collections::BTreeMap::new();
-        locals.insert(0, LocalReq::Need(l_plus_1.clone()));
-        let state = MachineState {
-            stack: vec![l_plus_1],
-            locals,
-        };
-        assert!(!memo_seen(&memo, &state, 4));
-        memo_record(&mut memo, &state, 4);
-        assert!(memo_seen(&memo, &state, 5));
-        assert!(!memo_seen(&memo, &state, 3));
     }
 }

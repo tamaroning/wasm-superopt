@@ -1,11 +1,11 @@
 //! Admissible heuristics for backward A*.
 
 use super::canon::{CanonId, Canonizer, ValueExpr};
-use super::goal::{LocalReq, MAX_LOCAL_SLOT, MachineState, all_subtree_exprs, subtree_expr};
+use crate::sym::{LocalReq, MAX_LOCAL_SLOT, SymState, all_subtree_exprs, subtree_expr};
 use crate::lang::ValueLang;
 use std::collections::HashSet;
 
-pub fn h_stack(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> usize {
+pub fn h_stack(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
     let mut k = 0usize;
     while k < g.stack.len().min(init.stack.len())
         && canon.canon(&g.stack[k]) == canon.canon(&init.stack[k])
@@ -15,7 +15,7 @@ pub fn h_stack(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> 
     g.stack.len().saturating_sub(k)
 }
 
-pub fn h_local(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> usize {
+pub fn h_local(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
     let mut n = 0usize;
     for slot in 0..=MAX_LOCAL_SLOT {
         let cur = g.locals.get(&slot);
@@ -34,7 +34,7 @@ pub fn h_local(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> 
     n
 }
 
-pub fn available_canon(init: &MachineState, canon: &mut Canonizer) -> HashSet<CanonId> {
+pub fn available_canon(init: &SymState, canon: &mut Canonizer) -> HashSet<CanonId> {
     let mut set = HashSet::new();
     for e in &init.stack {
         for sub in all_subtree_exprs(e) {
@@ -51,7 +51,7 @@ pub fn available_canon(init: &MachineState, canon: &mut Canonizer) -> HashSet<Ca
     set
 }
 
-pub fn h_node(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> usize {
+pub fn h_node(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
     let avail = available_canon(init, canon);
     let mut need = HashSet::new();
     for e in &g.stack {
@@ -79,7 +79,7 @@ pub fn h_node(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> u
 ///
 /// Each binop on a root-to-leaf path needs at least one inverse peel, so this never
 /// overestimates the remaining instruction count.
-pub fn h_dep(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> usize {
+pub fn h_dep(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
     let avail = available_canon(init, canon);
     let mut best = 0usize;
     for e in required_roots(g) {
@@ -88,7 +88,7 @@ pub fn h_dep(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> us
     best
 }
 
-fn required_roots(g: &MachineState) -> Vec<&ValueExpr> {
+fn required_roots(g: &SymState) -> Vec<&ValueExpr> {
     let mut roots: Vec<&ValueExpr> = g.stack.iter().collect();
     for req in g.locals.values() {
         if let LocalReq::Need(e) = req {
@@ -116,7 +116,7 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
     }
 }
 
-pub fn h_goal(g: &MachineState, init: &MachineState, canon: &mut Canonizer) -> usize {
+pub fn h_goal(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
     h_stack(g, init, canon)
         .max(h_local(g, init, canon))
         .max(h_node(g, init, canon))
@@ -161,7 +161,7 @@ mod tests {
         let init = init();
         let mut canon = canonizer();
         let deep = parse_value_expr("(i32.mul (i32.add (i32.add ?L0 1) 1) 2)");
-        let g = MachineState {
+        let g = SymState {
             stack: vec![deep],
             locals: Default::default(),
         };

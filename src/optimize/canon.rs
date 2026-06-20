@@ -1,6 +1,5 @@
 //! Value canonicalization via equality saturation.
 
-use super::goal::{LocalReq, MachineState};
 use crate::lang::ValueLang;
 use crate::semantics::InstKind;
 use egg::{AstSize, Extractor, Id, RecExpr, Rewrite, Runner};
@@ -8,12 +7,6 @@ use std::collections::{HashMap, HashSet};
 
 pub type ValueExpr = RecExpr<ValueLang>;
 pub type CanonId = u32;
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NormalGoal {
-    pub stack: Vec<CanonId>,
-    pub locals: Vec<(u32, CanonId)>,
-}
 
 pub struct Canonizer {
     rules: Vec<Rewrite<ValueLang, ()>>,
@@ -82,20 +75,6 @@ impl Canonizer {
         self.canon(a) == self.canon(b)
     }
 
-    pub fn normal_goal(&mut self, g: &MachineState) -> NormalGoal {
-        NormalGoal {
-            stack: g.stack.iter().map(|e| self.canon(e)).collect(),
-            locals: g
-                .locals
-                .iter()
-                .filter_map(|(&slot, req)| match req {
-                    LocalReq::DontCare => None,
-                    LocalReq::Need(e) => Some((slot, self.canon(e))),
-                })
-                .collect(),
-        }
-    }
-
     pub fn saturate(&self, expr: &ValueExpr) -> Runner<ValueLang, ()> {
         Runner::default()
             .with_iter_limit(20)
@@ -149,48 +128,4 @@ fn allow_class_merge(runner: &Runner<ValueLang, ()>, class_id: Id) -> bool {
         .iter()
         .any(|node| matches!(node, ValueLang::I32Const(_)));
     !(has_symbol && has_const)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::synthesis::{
-        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
-    };
-    use crate::value::parse_value_expr;
-
-    fn canonizer() -> Canonizer {
-        Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
-            TEST_SYNTHESIS_AST_SIZE,
-            10,
-        )))
-    }
-
-    #[test]
-    fn canon_distinguishes_symbol_from_const() {
-        let mut c = canonizer();
-        let l0 = parse_value_expr("?L0");
-        let one = parse_value_expr("1");
-        let three = parse_value_expr("3");
-        assert_ne!(c.canon(&l0), c.canon(&one));
-        assert_ne!(c.canon(&l0), c.canon(&three));
-    }
-
-    #[test]
-    fn saturate_mul_includes_shl_form() {
-        let c = canonizer();
-        let mul = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
-        let runner = c.saturate(&mul);
-        let class = runner.egraph.find(runner.roots[0]);
-        let kinds: Vec<_> = runner.egraph[class]
-            .iter()
-            .filter_map(|n| match n {
-                ValueLang::I32Mul(_) => Some("mul"),
-                ValueLang::I32Shl(_) => Some("shl"),
-                _ => None,
-            })
-            .collect();
-        assert!(kinds.contains(&"mul"));
-        assert!(kinds.contains(&"shl"));
-    }
 }

@@ -1,13 +1,92 @@
-//! Forward symbolic execution: build residual goals from instruction sequences.
+//! Symbolic machine state and forward execution (shared by wasm parsing and optimization).
 
-use super::goal::{LocalReq, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT, MachineState};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::value::parse_value_expr;
-use egg::RecExpr;
-use std::collections::BTreeMap;
+use egg::{Id, RecExpr};
+use std::collections::{BTreeMap, HashMap};
+
+pub const MAX_STACK_HEIGHT: usize = 4;
+pub const MAX_LOCAL_SLOT: u32 = 2;
 
 pub type ValueExpr = RecExpr<ValueLang>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LocalReq {
+    DontCare,
+    Need(ValueExpr),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SymState {
+    pub stack: Vec<ValueExpr>,
+    pub locals: BTreeMap<u32, LocalReq>,
+}
+
+impl SymState {
+    pub fn validate_bounds(&self) -> bool {
+        self.stack.len() <= MAX_STACK_HEIGHT && self.locals.keys().all(|&s| s <= MAX_LOCAL_SLOT)
+    }
+
+    pub fn top(&self) -> Option<&ValueExpr> {
+        self.stack.last()
+    }
+}
+
+pub fn subtree_expr(expr: &ValueExpr, node: Id) -> ValueExpr {
+    let mut dst = RecExpr::default();
+    let mut memo = HashMap::new();
+    go_subtree(expr, node, &mut dst, &mut memo);
+    dst
+}
+
+fn go_subtree(
+    src: &ValueExpr,
+    id: Id,
+    dst: &mut RecExpr<ValueLang>,
+    memo: &mut HashMap<Id, Id>,
+) -> Id {
+    if let Some(&mapped) = memo.get(&id) {
+        return mapped;
+    }
+    let mapped = match &src[id] {
+        ValueLang::I32Const(n) => dst.add(ValueLang::I32Const(*n)),
+        ValueLang::Symbol(s) => dst.add(ValueLang::Symbol(s.clone())),
+        ValueLang::I32Add([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Add([a, b]))
+        }
+        ValueLang::I32Mul([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Mul([a, b]))
+        }
+        ValueLang::I32Shl([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Shl([a, b]))
+        }
+        ValueLang::I32DivU([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32DivU([a, b]))
+        }
+        ValueLang::I32DivS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32DivS([a, b]))
+        }
+    };
+    memo.insert(id, mapped);
+    mapped
+}
+
+pub fn all_subtree_exprs(expr: &ValueExpr) -> Vec<ValueExpr> {
+    (0..expr.len())
+        .map(|i| subtree_expr(expr, Id::from(i)))
+        .collect()
+}
 
 #[derive(Debug, Clone)]
 pub struct SymMachine {
@@ -19,7 +98,6 @@ pub struct SymMachine {
 pub enum ForwardError {
     StackUnderflow,
     UnknownLocal(u32),
-    UnsupportedOp,
     StackTooHigh,
     LocalOutOfRange,
 }
@@ -29,7 +107,6 @@ impl SymMachine {
         parse_value_expr(&format!("?L{slot}"))
     }
 
-    /// Entry state for a function: params are symbols, other locals are zero.
     pub fn function_entry(num_params: u32, total_locals: u32) -> Self {
         let mut locals = BTreeMap::new();
         for slot in 0..total_locals.min(MAX_LOCAL_SLOT + 1) {
@@ -101,16 +178,16 @@ impl SymMachine {
         self.stack.pop().ok_or(ForwardError::StackUnderflow)
     }
 
-    pub fn to_init_state(&self) -> MachineState {
+    pub fn to_init_state(&self) -> SymState {
         self.snapshot()
     }
 
-    pub fn to_fin_state(&self) -> MachineState {
+    pub fn to_fin_state(&self) -> SymState {
         self.snapshot()
     }
 
-    fn snapshot(&self) -> MachineState {
-        MachineState {
+    fn snapshot(&self) -> SymState {
+        SymState {
             stack: self.stack.clone(),
             locals: self
                 .locals
@@ -130,43 +207,17 @@ impl SymMachine {
     }
 }
 
-pub fn forward_goal(init: &MachineState, ops: &[SemOp]) -> Result<MachineState, ForwardError> {
-    let mut machine = SymMachine {
-        stack: init.stack.clone(),
-        locals: init
-            .locals
-            .iter()
-            .filter_map(|(&slot, req)| match req {
-                LocalReq::Need(v) => Some((slot, v.clone())),
-                LocalReq::DontCare => None,
-            })
-            .collect(),
-    };
-    for op in ops {
-        machine.exec(op)?;
-    }
-    Ok(machine.to_fin_state())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimize::fixtures::{bloated_ops, init};
-
-    #[test]
-    fn running_example_forward_exec() {
-        let init = init();
-        let ops = bloated_ops();
-        let got = forward_goal(&init, &ops).expect("forward");
-        assert!(got.validate_bounds());
-    }
+    use crate::optimize::fixtures::init;
 
     #[test]
     fn function_entry_matches_running_example_init() {
         let entry = SymMachine::function_entry(1, 1);
-        let init = entry.to_init_state();
-        let expected = crate::optimize::fixtures::init();
-        assert_eq!(init.stack, expected.stack);
-        assert_eq!(init.locals, expected.locals);
+        let init_state = entry.to_init_state();
+        let expected = init();
+        assert_eq!(init_state.stack, expected.stack);
+        assert_eq!(init_state.locals, expected.locals);
     }
 }

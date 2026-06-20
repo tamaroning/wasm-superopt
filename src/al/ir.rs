@@ -1,5 +1,7 @@
 //! Flat AL IR for hand-written instruction specs (not binop meta encoding).
 
+#![allow(dead_code)] // trap/if shapes kept for derive; only const push specs are live today
+
 pub use super::defs::BinOpKind;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

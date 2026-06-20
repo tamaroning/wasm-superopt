@@ -3,5 +3,7 @@
 mod parse;
 mod segment;
 
-pub use parse::{WasmModuleInfo, parse_wasm_bytes, parse_wasm_file};
+pub use parse::parse_wasm_file;
+#[allow(unused_imports)]
+pub use parse::parse_wasm_bytes;
 pub use segment::StraightSegment;

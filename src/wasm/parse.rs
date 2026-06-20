@@ -1,6 +1,6 @@
 //! Wasm binary parsing via wasmparser.
 
-use crate::optimize::{MachineState, SymMachine};
+use crate::sym::{SymMachine, SymState};
 use crate::semantics::SemOp;
 use crate::wasm::segment::StraightSegment;
 use std::fs;
@@ -206,7 +206,7 @@ fn flush_segment(
     func_index: u32,
     segment_index: &mut usize,
     ops: &mut Vec<SemOp>,
-    init: &MachineState,
+    init: &SymState,
     machine: &SymMachine,
     out: &mut Vec<StraightSegment>,
 ) {
@@ -264,10 +264,6 @@ fn classify_operator(op: &Operator<'_>) -> OpClass {
         | Operator::Select => OpClass::Unsupported,
         _ => OpClass::Unsupported,
     }
-}
-
-pub fn extract_segments(info: &WasmModuleInfo) -> &[StraightSegment] {
-    &info.segments
 }
 
 #[cfg(test)]
