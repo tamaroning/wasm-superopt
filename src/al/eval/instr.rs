@@ -3,7 +3,7 @@
 use super::super::ast::{Arg, Expr, Instr, InstrCond, LetLhs, PopTarget};
 use super::super::defs::step_local_set_template;
 use super::func::{AlEnv, AlValue, eval_expr};
-use crate::semantics::ConcreteState;
+use crate::al::ConcreteState;
 
 fn push_stack(stack: &mut Vec<i32>, val: AlValue) {
     match val {
@@ -155,11 +155,11 @@ pub fn exec_instrs_concrete(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::al::ConcreteState;
     use crate::al::defs::{
         NumType, Sign, WasmBinOp, step_local_set_template, step_pure_binop_template,
         step_pure_local_tee_template, step_read_local_get_template,
     };
-    use crate::semantics::ConcreteState;
 
     const LOCAL_SLOTS: usize = 8;
     const MEM_SLOTS: usize = 16;

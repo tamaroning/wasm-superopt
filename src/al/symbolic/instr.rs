@@ -4,7 +4,7 @@ use super::super::ast::{Arg, Expr, Instr, InstrCond, LetLhs, PopTarget};
 use super::super::defs::step_local_set_template;
 use super::super::policy::EmbeddingPolicy;
 use super::func::{SymEnv, SymValue, encode_expr};
-use crate::semantics::{I32_BITS, StateTouches, Z3State};
+use crate::al::{I32_BITS, StateTouches, Z3State};
 use z3::Context;
 use z3::ast::{Ast, BV, Bool};
 

@@ -7,7 +7,7 @@ use super::super::ast::{
 };
 use super::super::defs::lookup_func;
 use super::super::defs::{NumType, Sign, WasmBinOp};
-use crate::semantics::I32_BITS;
+use crate::al::I32_BITS;
 use z3::Context;
 use z3::ast::{Ast, BV, Bool, Int};
 

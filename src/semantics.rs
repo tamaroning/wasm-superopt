@@ -1,4 +1,4 @@
-//! Centralized Wasm instruction semantics: stack types, Z3 encoding, trap conditions.
+//! Centralized Wasm instruction semantics: stack types, specs, and stack simulation.
 //!
 //! Operand stack holds i32 values only. Locals and linear memory are implicit machine
 //! state threaded through effectful instructions (mirroring Wasm, not the egg DAG token).
@@ -6,12 +6,10 @@
 use crate::al::{
     NumType, STRAIGHT_LINE_EMBED, Sign, WasmBinOp, al_spec_for, derive_inst_spec,
     derive_rule_binop_spec, derive_rule_local_get_spec, derive_rule_local_set_spec,
-    derive_rule_local_tee_spec, exec_al_concrete, exec_al_z3, exec_instrs_concrete, exec_instrs_z3,
-    format_al_pretty, format_rule_binop_pretty, format_rule_local_pretty, rule_instrs_for,
+    derive_rule_local_tee_spec, format_al_pretty, format_rule_binop_pretty,
+    format_rule_local_pretty,
 };
 use std::fmt;
-use z3::ast::{Array, Ast, BV, Bool};
-use z3::{Config, Context, Sort};
 
 // ---------------------------------------------------------------------------
 // Stack types (Wasm operand stack)
@@ -316,118 +314,6 @@ pub fn synthesis_arithmetic_ops() -> Vec<SemOp> {
     ops
 }
 
-// ---------------------------------------------------------------------------
-// Concrete machine (fast randomized equivalence filter)
-// ---------------------------------------------------------------------------
-
-pub(crate) const I32_BITS: u32 = 32;
-const LOCAL_SLOTS: u32 = 8;
-const MEM_SLOTS: u32 = 16;
-/// Default number of randomized concrete tests before invoking Z3.
-pub const DEFAULT_RANDOM_TESTS: usize = 100;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConcreteState {
-    pub locals: [i32; LOCAL_SLOTS as usize],
-    pub memory: [i32; MEM_SLOTS as usize],
-}
-
-impl ConcreteState {
-    pub fn new(locals: [i32; LOCAL_SLOTS as usize], memory: [i32; MEM_SLOTS as usize]) -> Self {
-        Self { locals, memory }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConcreteResult {
-    pub stack: Vec<i32>,
-    pub state: ConcreteState,
-    pub trap: bool,
-}
-
-pub fn exec_op_concrete(op: &SemOp, stack: &mut Vec<i32>, state: &mut ConcreteState) -> bool {
-    if let Some(steps) = rule_instrs_for(op) {
-        return exec_instrs_concrete(&steps, stack, state);
-    }
-    let al = al_spec_for(op);
-    exec_al_concrete(&al, stack, state, &STRAIGHT_LINE_EMBED)
-}
-
-pub fn exec_sequence_concrete(
-    ops: &[SemOp],
-    stack: Vec<i32>,
-    state: ConcreteState,
-) -> ConcreteResult {
-    let mut stack = stack;
-    let mut state = state;
-    let mut trap = false;
-    for op in ops {
-        if trap {
-            break;
-        }
-        trap = exec_op_concrete(op, &mut stack, &mut state);
-    }
-    ConcreteResult { stack, state, trap }
-}
-
-struct Lcg(u64);
-
-impl Lcg {
-    fn new(seed: u64) -> Self {
-        Self(seed)
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1);
-        self.0
-    }
-
-    fn next_i32(&mut self) -> i32 {
-        self.next_u64() as i32
-    }
-}
-
-fn concrete_inputs_for_test(
-    input: &[StackTy],
-    rng: &mut Lcg,
-    case: usize,
-) -> (Vec<i32>, ConcreteState) {
-    let stack_in = if input.is_empty() {
-        vec![]
-    } else {
-        match case % 8 {
-            0 => vec![0; input.len()],
-            1 => vec![1; input.len()],
-            2 => vec![-1; input.len()],
-            3 => (0..input.len()).map(|i| i as i32).collect(),
-            4 => vec![i32::MAX; input.len()],
-            5 => vec![i32::MIN; input.len()],
-            6 => (0..input.len())
-                .map(|i| if i % 2 == 0 { 0 } else { 1 })
-                .collect(),
-            _ => (0..input.len()).map(|_| rng.next_i32()).collect(),
-        }
-    };
-
-    let locals = std::array::from_fn(|i| match case % 6 {
-        0 => 0,
-        1 => 1,
-        2 => -1,
-        3 => i as i32,
-        4 => i32::MAX,
-        _ => rng.next_i32(),
-    });
-    let memory = std::array::from_fn(|i| match case % 5 {
-        0 => 0,
-        1 => 42,
-        2 => i as i32,
-        3 => -1,
-        _ => rng.next_i32(),
-    });
-
-    (stack_in, ConcreteState::new(locals, memory))
-}
-
 /// Both sequences must be type-valid on `input` and leave the same operand-stack shape.
 pub fn same_stack_effect(input: &[StackTy], lhs: &[SemOp], rhs: &[SemOp]) -> bool {
     match (
@@ -476,219 +362,6 @@ pub fn initial_inputs_consumed(input: &[StackTy], ops: &[SemOp]) -> Option<usize
 /// Sequence uses every symbolic input slot (no pass-through leftovers).
 pub fn uses_all_input_slots(input: &[StackTy], ops: &[SemOp]) -> bool {
     initial_inputs_consumed(input, ops) == Some(input.len())
-}
-
-/// Whether `source => target` is a sound optimization rewrite.
-///
-/// Trap is a single boolean (any Wasm trap kind is collapsed). Validity requires:
-/// - **δ_s ⇒ δ_t**: if source is defined (no trap), target must also be defined.
-/// - **Trap preservation**: if source traps, target must trap (e.g. div-by-zero on
-///   both sides); together with δ_s ⇒ δ_t this is trap equivalence.
-/// - **Defined-domain equality**: when both are defined, operand stack and machine
-///   state (locals, memory) must match.
-fn concrete_valid_rewrite(source: &ConcreteResult, target: &ConcreteResult) -> bool {
-    if source.trap != target.trap {
-        return false;
-    }
-    if source.trap {
-        return true;
-    }
-    source.stack == target.stack
-        && source.state.locals == target.state.locals
-        && source.state.memory == target.state.memory
-}
-
-/// Fast filter: returns `false` if a concrete counterexample is found.
-pub fn sequences_valid_rewrite_random(
-    input: &[StackTy],
-    lhs: &[SemOp],
-    rhs: &[SemOp],
-    num_tests: usize,
-) -> bool {
-    if !is_type_valid(input, lhs) || !is_type_valid(input, rhs) {
-        return false;
-    }
-    if !same_stack_effect(input, lhs, rhs) {
-        return false;
-    }
-    if num_tests == 0 {
-        return true;
-    }
-
-    let mut rng = Lcg::new(0xE6A3_9A1B_CDE2_4701);
-    for case in 0..num_tests {
-        let (stack_in, state_in) = concrete_inputs_for_test(input, &mut rng, case);
-        let lhs_r = exec_sequence_concrete(lhs, stack_in.clone(), state_in.clone());
-        let rhs_r = exec_sequence_concrete(rhs, stack_in, state_in);
-        if !concrete_valid_rewrite(&lhs_r, &rhs_r) {
-            return false;
-        }
-    }
-    true
-}
-
-// ---------------------------------------------------------------------------
-// Z3 machine state
-// ---------------------------------------------------------------------------
-
-pub struct Z3State<'ctx> {
-    pub locals: Array<'ctx>,
-    pub memory: Array<'ctx>,
-}
-
-impl<'ctx> Clone for Z3State<'ctx> {
-    fn clone(&self) -> Self {
-        Self {
-            locals: self.locals.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-}
-
-impl<'ctx> Z3State<'ctx> {
-    pub fn fresh(ctx: &'ctx Context, prefix: &str) -> Self {
-        let i32_sort = Sort::bitvector(ctx, I32_BITS);
-        let idx_sort = Sort::bitvector(ctx, I32_BITS);
-        let locals = Array::fresh_const(ctx, &format!("{prefix}_locals"), &idx_sort, &i32_sort);
-        let memory = Array::fresh_const(ctx, &format!("{prefix}_mem"), &idx_sort, &i32_sort);
-        Self { locals, memory }
-    }
-}
-
-/// Locals / memory slots written during execution (reads affect the stack only).
-#[derive(Default)]
-pub struct StateTouches<'ctx> {
-    pub local_writes: std::collections::HashSet<u32>,
-    pub mem_writes: Vec<BV<'ctx>>,
-}
-
-pub struct ExecResult<'ctx> {
-    pub stack: Vec<BV<'ctx>>,
-    pub state: Z3State<'ctx>,
-    pub trap: Bool<'ctx>,
-    pub touches: StateTouches<'ctx>,
-}
-
-pub fn exec_op<'ctx>(
-    ctx: &'ctx Context,
-    op: &SemOp,
-    stack: &mut Vec<BV<'ctx>>,
-    state: &mut Z3State<'ctx>,
-    touches: &mut StateTouches<'ctx>,
-) -> Bool<'ctx> {
-    if let Some(steps) = rule_instrs_for(op) {
-        return exec_instrs_z3(ctx, &steps, stack, state, touches, &STRAIGHT_LINE_EMBED);
-    }
-    let al = al_spec_for(op);
-    exec_al_z3(ctx, &al, stack, state, touches, &STRAIGHT_LINE_EMBED)
-}
-
-pub fn exec_sequence<'ctx>(
-    ctx: &'ctx Context,
-    ops: &[SemOp],
-    mut stack: Vec<BV<'ctx>>,
-    mut state: Z3State<'ctx>,
-) -> ExecResult<'ctx> {
-    let mut trap = Bool::from_bool(ctx, false);
-    let mut touches = StateTouches::default();
-    for op in ops {
-        let t = exec_op(ctx, op, &mut stack, &mut state, &mut touches);
-        trap = Bool::or(ctx, &[&trap, &t]);
-    }
-    ExecResult {
-        stack,
-        state,
-        trap,
-        touches,
-    }
-}
-
-fn state_diff_z3<'ctx>(
-    ctx: &'ctx Context,
-    lhs: &ExecResult<'ctx>,
-    rhs: &ExecResult<'ctx>,
-) -> Bool<'ctx> {
-    let mut diff = Bool::from_bool(ctx, false);
-    if lhs.stack.len() != rhs.stack.len() {
-        return Bool::from_bool(ctx, true);
-    }
-    for (l, r) in lhs.stack.iter().zip(rhs.stack.iter()) {
-        diff = Bool::or(ctx, &[&diff, &l._eq(r).not()]);
-    }
-
-    for idx in 0..LOCAL_SLOTS {
-        let idx_bv = BV::from_u64(ctx, idx as u64, I32_BITS);
-        diff = Bool::or(
-            ctx,
-            &[
-                &diff,
-                &lhs.state
-                    .locals
-                    .select(&idx_bv)
-                    .as_bv()
-                    .expect("locals array stores i32")
-                    ._eq(
-                        &rhs.state
-                            .locals
-                            .select(&idx_bv)
-                            .as_bv()
-                            .expect("locals array stores i32"),
-                    )
-                    .not(),
-            ],
-        );
-    }
-
-    for addr in lhs
-        .touches
-        .mem_writes
-        .iter()
-        .chain(rhs.touches.mem_writes.iter())
-    {
-        diff = Bool::or(
-            ctx,
-            &[
-                &diff,
-                &lhs.state
-                    .memory
-                    .select(addr)
-                    ._eq(&rhs.state.memory.select(addr))
-                    .not(),
-            ],
-        );
-    }
-
-    diff
-}
-
-/// Z3 proof only (call after `sequences_valid_rewrite_random` passes).
-pub fn sequences_valid_rewrite_z3(
-    ctx: &Context,
-    input: &[StackTy],
-    source: &[SemOp],
-    target: &[SemOp],
-) -> bool {
-    if !same_stack_effect(input, source, target) {
-        return false;
-    }
-    let stack_in: Vec<BV<'_>> = (0..input.len())
-        .map(|i| BV::new_const(ctx, format!("in_{i}"), I32_BITS))
-        .collect();
-
-    let init = Z3State::fresh(ctx, "init");
-    let source_r = exec_sequence(ctx, source, stack_in.clone(), init.clone());
-    let target_r = exec_sequence(ctx, target, stack_in, init);
-
-    let solver = z3::Solver::new(ctx);
-
-    // δ_s ⇒ δ_t and trap preservation (trap kinds are not distinguished).
-    let trap_violation = source_r.trap.xor(&target_r.trap);
-    let defined_both = Bool::and(ctx, &[&source_r.trap.not(), &target_r.trap.not()]);
-    let diff = state_diff_z3(ctx, &source_r, &target_r);
-    let value_violation = Bool::and(ctx, &[&defined_both, &diff]);
-
-    solver.assert(&Bool::or(ctx, &[&trap_violation, &value_violation]));
-    matches!(solver.check(), z3::SatResult::Unsat)
 }
 
 pub fn simulate_stack_effect(input: &[StackTy], ops: &[SemOp]) -> Option<Vec<StackTy>> {
@@ -813,12 +486,6 @@ pub fn synthesis_inputs() -> Vec<Vec<StackTy>> {
     (1..=3).map(|h| vec![StackTy::I32; h]).collect()
 }
 
-pub fn z3_context() -> Context {
-    let mut cfg = Config::new();
-    cfg.set_timeout_msec(5_000);
-    Context::new(&cfg)
-}
-
 /// Human-readable summary of instruction semantics (for `--print-semantics`).
 pub fn print_semantics_table() {
     println!("=== Wasm instruction semantics ===\n");
@@ -848,6 +515,7 @@ pub fn print_semantics_table() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::al::{ConcreteState, LOCAL_SLOTS, MEM_SLOTS, exec_sequence_concrete};
 
     #[test]
     fn synthesis_arithmetic_ops_has_minimal_constant_pool() {
@@ -864,7 +532,7 @@ mod tests {
         let input = vec![StackTy::I32];
         let catalog = OpCatalog::from_ops(&concrete_ops());
         let by_output = enumerate_sequences_by_output(&input, &catalog, 2);
-        let state = ConcreteState::new([0; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
+        let state = ConcreteState::new([0; LOCAL_SLOTS], [0; MEM_SLOTS]);
         for (sig, seqs) in &by_output {
             for seq in seqs {
                 assert!(is_type_valid(&input, seq), "invalid: {seq:?}");
@@ -893,16 +561,6 @@ mod tests {
     }
 
     #[test]
-    fn add_const0_equivalent_to_identity() {
-        let ctx = z3_context();
-        let input = vec![StackTy::I32];
-        let add = vec![SemOp::I32Const(0), SemOp::I32Add];
-        let identity = vec![];
-        assert!(sequences_valid_rewrite_random(&input, &add, &identity, 200));
-        assert!(sequences_valid_rewrite_z3(&ctx, &input, &add, &identity));
-    }
-
-    #[test]
     fn same_stack_effect_rejects_invalid_pairs() {
         let input = vec![StackTy::I32];
         let pushes = vec![SemOp::I32Const(0)];
@@ -912,114 +570,11 @@ mod tests {
     }
 
     #[test]
-    fn mul_const2_equivalent_to_shl_const1_via_z3() {
-        let ctx = z3_context();
-        let input = vec![StackTy::I32];
-        let mul_seq = vec![SemOp::I32Const(2), SemOp::I32Mul];
-        let shl_seq = vec![SemOp::I32Const(1), SemOp::I32Shl];
-        assert!(sequences_valid_rewrite_z3(&ctx, &input, &mul_seq, &shl_seq));
-    }
-
-    #[test]
-    fn div_s_not_equivalent_to_div_u_via_z3() {
-        let ctx = z3_context();
-        let input = vec![StackTy::I32, StackTy::I32];
-        let div_s = vec![SemOp::I32DivS];
-        let div_u = vec![SemOp::I32DivU];
-        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &div_s, &div_u));
-    }
-
-    #[test]
-    fn div_s_const1_not_equivalent_to_mul_const2_via_z3() {
-        let ctx = z3_context();
-        let input = vec![StackTy::I32];
-        let div_s = vec![SemOp::I32Const(2), SemOp::I32DivS];
-        let mul = vec![SemOp::I32Const(2), SemOp::I32Mul];
-        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &div_s, &mul));
-    }
-
-    #[test]
-    fn defined_source_must_not_trap_on_target() {
-        let ctx = z3_context();
-        let input = vec![StackTy::I32, StackTy::I32];
-        // δ_s ⇒ δ_t: when div_u is defined (divisor ≠ 0), mul must not trap.
-        let div_u = vec![SemOp::I32DivU];
-        let mul = vec![SemOp::I32Mul];
-        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &div_u, &mul));
-    }
-
-    #[test]
-    fn trap_preservation_rejects_removing_div_trap() {
-        let input = vec![StackTy::I32, StackTy::I32];
-        let div_u = vec![SemOp::I32DivU];
-        let mul = vec![SemOp::I32Mul];
-        assert!(!sequences_valid_rewrite_random(&input, &div_u, &mul, 200));
-    }
-
-    #[test]
     fn uses_all_input_slots_filters_pass_through() {
         let input = vec![StackTy::I32, StackTy::I32];
         let seq = vec![SemOp::I32Const(1), SemOp::I32Mul];
         assert!(is_type_valid(&input, &seq));
         assert_eq!(initial_inputs_consumed(&input, &seq), Some(1));
         assert!(!uses_all_input_slots(&input, &seq));
-    }
-
-    #[test]
-    fn div_u_const1_equivalent_to_add_const0_via_z3() {
-        let ctx = z3_context();
-        let input = vec![StackTy::I32];
-        let div_u = vec![SemOp::I32Const(1), SemOp::I32DivU];
-        let add = vec![SemOp::I32Const(0), SemOp::I32Add];
-        assert!(sequences_valid_rewrite_random(&input, &div_u, &add, 200));
-        assert!(sequences_valid_rewrite_z3(&ctx, &input, &div_u, &add));
-    }
-
-    #[test]
-    fn local_get_pushes_state_concrete() {
-        let state = ConcreteState::new([42; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
-        let mut stack = vec![];
-        exec_op_concrete(&SemOp::LocalGet(0), &mut stack, &mut state.clone());
-        assert_eq!(stack, vec![42]);
-    }
-
-    #[test]
-    fn local_set_writes_state_concrete() {
-        let mut state = ConcreteState::new([0; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
-        let mut stack = vec![99];
-        exec_op_concrete(&SemOp::LocalSet(0), &mut stack, &mut state);
-        assert_eq!(stack, Vec::<i32>::new());
-        assert_eq!(state.locals[0], 99);
-    }
-
-    #[test]
-    fn local_tee_preserves_stack_concrete() {
-        let mut state = ConcreteState::new([0; LOCAL_SLOTS as usize], [0; MEM_SLOTS as usize]);
-        let mut stack = vec![77];
-        exec_op_concrete(&SemOp::LocalTee(1), &mut stack, &mut state);
-        assert_eq!(stack, vec![77]);
-        assert_eq!(state.locals[1], 77);
-    }
-
-    #[test]
-    fn local_tee_not_equivalent_to_nop_via_rewrite_checks() {
-        let ctx = z3_context();
-        let input = vec![StackTy::I32];
-        let tee = vec![SemOp::LocalTee(0)];
-        let nop = vec![];
-        assert!(same_stack_effect(&input, &tee, &nop));
-        assert!(!sequences_valid_rewrite_random(&input, &tee, &nop, 100));
-        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &tee, &nop));
-    }
-
-    #[test]
-    fn local_get_not_equivalent_to_const0_via_z3() {
-        let ctx = z3_context();
-        let input = vec![];
-        let get = vec![SemOp::LocalGet(0)];
-        let c0 = vec![SemOp::I32Const(0)];
-        assert!(same_stack_effect(&input, &get, &c0));
-        assert!(!sequences_valid_rewrite_random(&input, &get, &c0, 100));
-        assert!(!sequences_valid_rewrite_z3(&ctx, &input, &get, &c0));
     }
 }

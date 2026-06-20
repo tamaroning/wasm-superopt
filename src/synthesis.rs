@@ -1,7 +1,8 @@
 //! Exhaustive rule candidate generation and Z3 equivalence checking.
 
+use crate::al::z3_context;
 use crate::lang::ValueLang;
-use crate::semantics::{StackTy, synthesis_inputs, z3_context};
+use crate::semantics::{StackTy, synthesis_inputs};
 use crate::value::{
     ValueAst, asts_valid_rewrite_random, asts_valid_rewrite_z3, enumerate_value_asts,
     is_ast_rewrite_pair, is_directed_ast_pair,

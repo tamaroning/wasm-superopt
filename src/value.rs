@@ -1,9 +1,11 @@
 //! Pure i32 value DAG (no stack/local containers) for equality saturation.
 
+use crate::al::I32_BITS;
+use crate::al::z3_context;
 use crate::lang::ValueLang;
 use crate::semantics::{
-    DagStackStep, I32_BITS, SemOp, StackTy, dag_stack_step, simulate_stack_effect, spec_for,
-    synthesis_constants, value_lang_from_kind, z3_context,
+    DagStackStep, SemOp, StackTy, dag_stack_step, simulate_stack_effect, spec_for,
+    synthesis_constants, value_lang_from_kind,
 };
 use crate::stack::WasmOp;
 use egg::{Id, Language, RecExpr};

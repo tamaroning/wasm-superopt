@@ -4,7 +4,7 @@ use super::super::env::AlEnv;
 use super::super::ir::{AlCond, AlExpr, AlSpec, AlStep, BinOpKind};
 use super::super::policy::EmbeddingPolicy;
 use super::super::util::{else_push_expr, is_trap_else_push};
-use crate::semantics::{I32_BITS, StateTouches, Z3State};
+use crate::al::{I32_BITS, StateTouches, Z3State};
 use z3::Context;
 use z3::ast::{BV, Bool};
 

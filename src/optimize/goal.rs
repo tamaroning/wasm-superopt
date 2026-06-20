@@ -12,7 +12,7 @@ pub const MAX_LOCAL_SLOT: u32 = 2;
 pub type ValueExpr = RecExpr<ValueLang>;
 
 /// Local slot requirement in a residual goal: don't-care (⋆) or a needed value expression.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LocalReq {
     /// Slot may hold any value (⋆).
     DontCare,
@@ -21,7 +21,7 @@ pub enum LocalReq {
 }
 
 /// Residual goal: operand stack (bottom-to-top) plus local slot requirements.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MachineState {
     pub stack: Vec<ValueExpr>,
     pub locals: BTreeMap<u32, LocalReq>,

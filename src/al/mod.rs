@@ -28,8 +28,18 @@ pub use derive::{
 };
 pub use eval::alspec::exec_al_concrete;
 pub use eval::instr::exec_instrs_concrete;
+pub use eval::sequence::{
+    DEFAULT_RANDOM_TESTS, exec_op_concrete, exec_sequence_concrete, sequences_valid_rewrite_random,
+};
+pub use eval::state::{ConcreteResult, ConcreteState, LOCAL_SLOTS, MEM_SLOTS};
 pub use ir::format_al_pretty;
 pub use policy::STRAIGHT_LINE_EMBED;
 pub use specs::{al_spec_for, rule_instrs_for};
 pub use symbolic::alspec::exec_al_z3;
+pub use symbolic::context::z3_context;
 pub use symbolic::instr::exec_instrs_z3;
+pub use symbolic::sequence::{exec_op, exec_sequence, sequences_valid_rewrite_z3};
+pub use symbolic::state::{ExecResult, StateTouches, Z3State};
+
+/// Bit width of Wasm `i32` in AL / Z3 lowering.
+pub const I32_BITS: u32 = 32;

@@ -37,30 +37,44 @@ impl Canonizer {
         if let Some(&id) = self.str_cache.get(&key) {
             return id;
         }
+        // Bare symbols never share ids with saturated expressions.
+        if matches!(&expr[expr.root()], ValueLang::Symbol(_)) {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.str_cache.insert(key, id);
+            return id;
+        }
         let runner = Runner::default()
             .with_iter_limit(20)
             .with_node_limit(10_000)
             .with_expr(expr)
             .run(&self.rules);
         let root = runner.roots[0];
-        let class = usize::from(runner.egraph.find(root));
-        if let Some(&id) = self.class_cache.get(&class) {
-            self.str_cache.insert(key, id);
-            return id;
+        let class_id = runner.egraph.find(root);
+        let class = usize::from(class_id);
+        if allow_class_merge(&runner, class_id) {
+            if let Some(&id) = self.class_cache.get(&class) {
+                self.str_cache.insert(key, id);
+                return id;
+            }
         }
         let extractor = Extractor::new(&runner.egraph, AstSize);
         let (_, best) = extractor.find_best(root);
         let canon_str = best.to_string();
         if let Some(&id) = self.str_cache.get(&canon_str) {
-            self.class_cache.insert(class, id);
             self.str_cache.insert(key, id);
+            if allow_class_merge(&runner, class_id) {
+                self.class_cache.insert(class, id);
+            }
             return id;
         }
         let id = self.next_id;
         self.next_id += 1;
         self.str_cache.insert(key, id);
         self.str_cache.insert(canon_str, id);
-        self.class_cache.insert(class, id);
+        if allow_class_merge(&runner, class_id) {
+            self.class_cache.insert(class, id);
+        }
         id
     }
 
@@ -122,5 +136,61 @@ impl Canonizer {
             }
         }
         out
+    }
+}
+
+/// Share e-class ids unless the class mixes bare symbols with bare constants.
+fn allow_class_merge(runner: &Runner<ValueLang, ()>, class_id: Id) -> bool {
+    let eclass = &runner.egraph[class_id];
+    let has_symbol = eclass
+        .iter()
+        .any(|node| matches!(node, ValueLang::Symbol(_)));
+    let has_const = eclass
+        .iter()
+        .any(|node| matches!(node, ValueLang::I32Const(_)));
+    !(has_symbol && has_const)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synthesis::{
+        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
+    };
+    use crate::value::parse_value_expr;
+
+    fn canonizer() -> Canonizer {
+        Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
+            TEST_SYNTHESIS_AST_SIZE,
+            10,
+        )))
+    }
+
+    #[test]
+    fn canon_distinguishes_symbol_from_const() {
+        let mut c = canonizer();
+        let l0 = parse_value_expr("?L0");
+        let one = parse_value_expr("1");
+        let three = parse_value_expr("3");
+        assert_ne!(c.canon(&l0), c.canon(&one));
+        assert_ne!(c.canon(&l0), c.canon(&three));
+    }
+
+    #[test]
+    fn saturate_mul_includes_shl_form() {
+        let c = canonizer();
+        let mul = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
+        let runner = c.saturate(&mul);
+        let class = runner.egraph.find(runner.roots[0]);
+        let kinds: Vec<_> = runner.egraph[class]
+            .iter()
+            .filter_map(|n| match n {
+                ValueLang::I32Mul(_) => Some("mul"),
+                ValueLang::I32Shl(_) => Some("shl"),
+                _ => None,
+            })
+            .collect();
+        assert!(kinds.contains(&"mul"));
+        assert!(kinds.contains(&"shl"));
     }
 }

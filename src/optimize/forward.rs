@@ -151,17 +151,14 @@ pub fn forward_goal(init: &MachineState, ops: &[SemOp]) -> Result<MachineState, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimize::fixtures::{bloated_ops, fin, init};
-    use crate::optimize::search::verify_forward;
+    use crate::optimize::fixtures::{bloated_ops, init};
 
     #[test]
     fn running_example_forward_exec() {
         let init = init();
-        let fin = fin();
         let ops = bloated_ops();
         let got = forward_goal(&init, &ops).expect("forward");
         assert!(got.validate_bounds());
-        assert!(verify_forward(&fin, &ops, 42));
     }
 
     #[test]

@@ -9,9 +9,9 @@ mod synthesis;
 mod value;
 mod wasm;
 
+use al::DEFAULT_RANDOM_TESTS;
 use clap::{Parser, ValueEnum};
 use lang::ValueLang;
-use semantics::DEFAULT_RANDOM_TESTS;
 use synthesis::{
     load_or_synthesize_rules, print_synthesized, print_synthesized_json, synthesized_to_rewrites,
 };

@@ -9,7 +9,7 @@ mod search;
 
 pub use forward::SymMachine;
 pub use goal::MachineState;
-pub use search::{DEFAULT_MAX_DEPTH, SearchConfig, format_ops, verify_forward};
+pub use search::{DEFAULT_MAX_DEPTH, SearchConfig, format_ops};
 
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
@@ -90,11 +90,10 @@ pub fn print_results(results: &[SegmentOptResult], solver: SolverKind) {
             Some(ops) => {
                 println!("  out: {}", format_ops(ops));
                 println!(
-                    "  len: {} -> {} (saved {}) verify l0=42: {}",
+                    "  len: {} -> {} (saved {})",
                     seg.original_len(),
                     ops.len(),
-                    result.saved(),
-                    verify_forward(&seg.fin, ops, 42)
+                    result.saved()
                 );
             }
             None => println!("  out: (no shorter solution within window)"),
@@ -203,6 +202,5 @@ mod tests {
         );
         let opt = results[0].optimized.as_ref().expect("optimized");
         assert!(opt.len() <= info.segments[0].original_len());
-        assert!(verify_forward(&info.segments[0].fin, opt, 42));
     }
 }

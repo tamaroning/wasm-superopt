@@ -4,7 +4,7 @@ use super::super::env::AlEnv;
 use super::super::ir::{AlCond, AlExpr, AlSpec, AlStep, BinOpKind};
 use super::super::policy::EmbeddingPolicy;
 use super::super::util::{else_push_expr, is_trap_else_push};
-use crate::semantics::ConcreteState;
+use crate::al::ConcreteState;
 
 fn eval_cond(cond: &AlCond, env: &AlEnv<i32>) -> bool {
     match cond {

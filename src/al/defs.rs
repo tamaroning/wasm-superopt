@@ -9,7 +9,7 @@
 #![allow(dead_code)] // mirrors spectec/*.al; not every def is wired to instantiate yet
 
 pub mod types {
-    use crate::semantics::I32_BITS;
+    use crate::al::I32_BITS;
     use z3::Context;
     use z3::ast::{Ast, BV, Bool};
 
