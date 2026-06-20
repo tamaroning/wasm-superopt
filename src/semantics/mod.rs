@@ -14,6 +14,7 @@ use crate::al::{
 pub fn spec_for(op: &SemOp) -> InstSpec {
     match op {
         SemOp::I32Add => derive_rule_binop_spec(InstKind::I32Add),
+        SemOp::I32Sub => derive_rule_binop_spec(InstKind::I32Sub),
         SemOp::I32Mul => derive_rule_binop_spec(InstKind::I32Mul),
         SemOp::I32Shl => derive_rule_binop_spec(InstKind::I32Shl),
         SemOp::I32DivU => derive_rule_binop_spec(InstKind::I32DivU),
@@ -31,6 +32,7 @@ pub fn spec_for(op: &SemOp) -> InstSpec {
 fn binop_wasm(op: &SemOp) -> Option<(NumType, WasmBinOp)> {
     match op {
         SemOp::I32Add => Some((NumType::I32, WasmBinOp::Add)),
+        SemOp::I32Sub => Some((NumType::I32, WasmBinOp::Sub)),
         SemOp::I32Mul => Some((NumType::I32, WasmBinOp::Mul)),
         SemOp::I32Shl => Some((NumType::I32, WasmBinOp::Shl)),
         SemOp::I32DivU => Some((NumType::I32, WasmBinOp::Div(Sign::U))),

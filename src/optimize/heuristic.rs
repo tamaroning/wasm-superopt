@@ -1,8 +1,9 @@
 //! Admissible heuristics for backward A*.
 
 use super::canon::{CanonId, Canonizer, ValueExpr};
-use crate::sym::{LocalReq, MAX_LOCAL_SLOT, SymState, all_subtree_exprs, subtree_expr};
+use crate::sym::{LocalReq, SymState, all_subtree_exprs, subtree_expr};
 use crate::lang::ValueLang;
+use crate::wasm::SegmentBounds;
 use std::collections::HashSet;
 
 pub fn h_stack(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
@@ -15,9 +16,9 @@ pub fn h_stack(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
     g.stack.len().saturating_sub(k)
 }
 
-pub fn h_local(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
+pub fn h_local(g: &SymState, init: &SymState, bounds: &SegmentBounds, canon: &mut Canonizer) -> usize {
     let mut n = 0usize;
-    for slot in 0..=MAX_LOCAL_SLOT {
+    for slot in 0..=bounds.max_local {
         let cur = g.locals.get(&slot);
         let init_v = init.locals.get(&slot);
         let need = match cur {
@@ -105,10 +106,16 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
     match &expr[expr.root()] {
         ValueLang::I32Const(_) | ValueLang::Symbol(_) => 1,
         ValueLang::I32Add([a, b])
+        | ValueLang::I32Sub([a, b])
         | ValueLang::I32Mul([a, b])
         | ValueLang::I32Shl([a, b])
         | ValueLang::I32DivU([a, b])
-        | ValueLang::I32DivS([a, b]) => {
+        | ValueLang::I32DivS([a, b])
+        | ValueLang::I32Eq([a, b])
+        | ValueLang::I32Ne([a, b])
+        | ValueLang::I32LtS([a, b])
+        | ValueLang::I32LeS([a, b])
+        | ValueLang::I32GtS([a, b]) => {
             let da = residual_depth(&subtree_expr(expr, *a), avail, canon);
             let db = residual_depth(&subtree_expr(expr, *b), avail, canon);
             1 + da.max(db)
@@ -116,9 +123,9 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
     }
 }
 
-pub fn h_goal(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
+pub fn h_goal(g: &SymState, init: &SymState, bounds: &SegmentBounds, canon: &mut Canonizer) -> usize {
     h_stack(g, init, canon)
-        .max(h_local(g, init, canon))
+        .max(h_local(g, init, bounds, canon))
         .max(h_node(g, init, canon))
         .max(h_dep(g, init, canon))
 }
@@ -171,12 +178,14 @@ mod tests {
         assert!(nodes >= 1, "needs at least one residual subtree, got {nodes}");
     }
 
+    use crate::wasm::SegmentBounds;
+
     #[test]
     fn h_goal_includes_h_dep() {
         let init = init();
         let fin = fin();
         let mut canon = canonizer();
-        let goal = h_goal(&fin, &init, &mut canon);
+        let goal = h_goal(&fin, &init, &SegmentBounds::new(1, 4), &mut canon);
         let dep = h_dep(&fin, &init, &mut canon);
         assert!(goal >= dep);
     }

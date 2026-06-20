@@ -119,6 +119,7 @@ impl Canonizer {
         for node in eclass.iter() {
             let parsed = match node {
                 ValueLang::I32Add([a, b]) => Some((InstKind::I32Add, *a, *b)),
+                ValueLang::I32Sub([a, b]) => Some((InstKind::I32Sub, *a, *b)),
                 ValueLang::I32Mul([a, b]) => Some((InstKind::I32Mul, *a, *b)),
                 ValueLang::I32Shl([a, b]) => Some((InstKind::I32Shl, *a, *b)),
                 ValueLang::I32DivU([a, b]) => Some((InstKind::I32DivU, *a, *b)),

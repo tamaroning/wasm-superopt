@@ -11,10 +11,11 @@ mod wasm;
 
 use al::DEFAULT_RANDOM_TESTS;
 use clap::{Parser, ValueEnum};
-use lang::ValueLang;
+use std::io::{self, Write};
 use synthesis::{
     load_or_synthesize_rules, print_synthesized, print_synthesized_json, synthesized_to_rewrites,
 };
+use wasm::{parse_wasm_file, print_input_summary};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -53,6 +54,10 @@ struct Cli {
     /// Maximum peel depth (instruction window) for backward search.
     #[arg(long, default_value_t = optimize::DEFAULT_MAX_DEPTH)]
     window: usize,
+
+    /// Use 300s timeout per segment (SuperStack `-w` / DIRECT_TIMEOUT).
+    #[arg(long, short = 'w')]
+    direct_timeout: bool,
 }
 
 impl From<SolverKind> for optimize::SolverKind {
@@ -76,47 +81,6 @@ enum SolverKind {
     Astar,
 }
 
-fn run_wasm(cli: &Cli, path: &std::path::Path, rules: &[egg::Rewrite<ValueLang, ()>]) {
-    use optimize::{SearchConfig, format_ops};
-    use wasm::parse_wasm_file;
-
-    let info = parse_wasm_file(path).unwrap_or_else(|e| {
-        eprintln!("error parsing {}: {e}", path.display());
-        std::process::exit(1);
-    });
-
-    println!(
-        "Parsed {} — {} straight-line segment(s)\n",
-        path.display(),
-        info.segments.len()
-    );
-
-    if cli.segments_only {
-        for seg in &info.segments {
-            println!(
-                "func {} segment {} ({} instr): {}",
-                seg.func_index,
-                seg.segment_index,
-                seg.original_len(),
-                format_ops(&seg.ops)
-            );
-        }
-        return;
-    }
-
-    let cfg = SearchConfig {
-        max_depth: cli.window,
-    };
-    let results = optimize::optimize_segments(&info.segments, rules, &cfg, cli.solver.into());
-    optimize::print_results(&results, cli.solver.into());
-    let (orig, opt, improved) = optimize::summarize(&results);
-    println!(
-        "Total: {orig} -> {opt} instructions across {} segment(s) ({} improved)",
-        results.len(),
-        improved
-    );
-}
-
 fn main() {
     let cli = Cli::parse();
 
@@ -135,11 +99,56 @@ fn main() {
     }
 
     let path = cli.input.clone().expect("WASM path required");
+
+    let info = parse_wasm_file(&path).unwrap_or_else(|e| {
+        eprintln!("error parsing {}: {e}", path.display());
+        std::process::exit(1);
+    });
+    print_input_summary(&path, &info);
+    for warning in &info.warnings {
+        eprintln!("warning: {warning}");
+    }
+    let _ = io::stdout().flush();
+
     let max_ast = cli.max_ast_size.clamp(1, 8);
     let syn = load_or_synthesize_rules(max_ast, cli.random_tests);
     if !cli.segments_only {
         print_synthesized(&syn, cli.random_tests);
+        let _ = io::stdout().flush();
     }
     let rules = synthesized_to_rewrites(&syn);
-    run_wasm(&cli, &path, &rules);
+
+    if cli.segments_only {
+        use optimize::format_ops;
+        for seg in &info.segments {
+            println!(
+                "func {} segment {} ({} instr): {}",
+                seg.func_index,
+                seg.segment_index,
+                seg.original_len(),
+                format_ops(&seg.ops)
+            );
+        }
+        let _ = io::stdout().flush();
+        return;
+    }
+
+    let cfg = optimize::SearchConfig {
+        max_depth: cli.window,
+        timeout_secs: None,
+        direct_timeout: cli.direct_timeout,
+    };
+    let results = optimize::optimize_and_print_segments(
+        &info.segments,
+        &rules,
+        &cfg,
+        cli.solver.into(),
+    );
+    let (orig, opt, improved) = optimize::summarize(&results);
+    println!(
+        "Total: {orig} -> {opt} instructions across {} segment(s) ({} improved)",
+        results.len(),
+        improved
+    );
+    let _ = io::stdout().flush();
 }

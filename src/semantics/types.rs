@@ -11,10 +11,16 @@ pub enum StackTy {
 pub enum SemOp {
     I32Const(i32),
     I32Add,
+    I32Sub,
     I32Mul,
     I32DivU,
     I32DivS,
     I32Shl,
+    I32Eq,
+    I32Ne,
+    I32LtS,
+    I32LeS,
+    I32GtS,
     LocalGet(u32),
     LocalSet(u32),
     LocalTee(u32),
@@ -25,14 +31,42 @@ impl SemOp {
         match self {
             SemOp::I32Const(_) => "i32.const",
             SemOp::I32Add => "i32.add",
+            SemOp::I32Sub => "i32.sub",
             SemOp::I32Mul => "i32.mul",
             SemOp::I32DivU => "i32.div_u",
             SemOp::I32DivS => "i32.div_s",
             SemOp::I32Shl => "i32.shl",
+            SemOp::I32Eq => "i32.eq",
+            SemOp::I32Ne => "i32.ne",
+            SemOp::I32LtS => "i32.lt_s",
+            SemOp::I32LeS => "i32.le_s",
+            SemOp::I32GtS => "i32.gt_s",
             SemOp::LocalGet(x) => local_op_name("local.get", *x),
             SemOp::LocalSet(x) => local_op_name("local.set", *x),
             SemOp::LocalTee(x) => local_op_name("local.tee", *x),
         }
+    }
+
+    /// Side-effect ops that split segments (memory/call/global); none appear in collected ops today.
+    pub fn is_storage_boundary(&self) -> bool {
+        false
+    }
+
+    pub fn is_peelable_binop(&self) -> bool {
+        matches!(
+            self,
+            SemOp::I32Add
+                | SemOp::I32Sub
+                | SemOp::I32Mul
+                | SemOp::I32DivU
+                | SemOp::I32DivS
+                | SemOp::I32Shl
+                | SemOp::I32Eq
+                | SemOp::I32Ne
+                | SemOp::I32LtS
+                | SemOp::I32LeS
+                | SemOp::I32GtS
+        )
     }
 
     /// Whether this op reads or writes implicit machine state (not representable in the egg DAG).
@@ -49,10 +83,16 @@ impl fmt::Display for SemOp {
         match self {
             SemOp::I32Const(n) => write!(f, "i32.const {n}"),
             SemOp::I32Add => write!(f, "i32.add"),
+            SemOp::I32Sub => write!(f, "i32.sub"),
             SemOp::I32Mul => write!(f, "i32.mul"),
             SemOp::I32DivU => write!(f, "i32.div_u"),
             SemOp::I32DivS => write!(f, "i32.div_s"),
             SemOp::I32Shl => write!(f, "i32.shl"),
+            SemOp::I32Eq => write!(f, "i32.eq"),
+            SemOp::I32Ne => write!(f, "i32.ne"),
+            SemOp::I32LtS => write!(f, "i32.lt_s"),
+            SemOp::I32LeS => write!(f, "i32.le_s"),
+            SemOp::I32GtS => write!(f, "i32.gt_s"),
             SemOp::LocalGet(x) => write!(f, "local.get {x}"),
             SemOp::LocalSet(x) => write!(f, "local.set {x}"),
             SemOp::LocalTee(x) => write!(f, "local.tee {x}"),
@@ -71,7 +111,7 @@ fn local_op_name(kind: &'static str, x: u32) -> &'static str {
         ("local.tee", 0) => "local.tee 0",
         ("local.tee", 1) => "local.tee 1",
         ("local.tee", 2) => "local.tee 2",
-        _ => panic!("local op name only defined for indices 0..2"),
+        _ => kind,
     }
 }
 
@@ -79,10 +119,16 @@ fn local_op_name(kind: &'static str, x: u32) -> &'static str {
 pub enum InstKind {
     I32Const,
     I32Add,
+    I32Sub,
     I32Mul,
     I32DivU,
     I32DivS,
     I32Shl,
+    I32Eq,
+    I32Ne,
+    I32LtS,
+    I32LeS,
+    I32GtS,
     LocalGet(u32),
     LocalSet(u32),
     LocalTee(u32),
@@ -93,10 +139,16 @@ impl InstKind {
         matches!(
             self,
             InstKind::I32Add
+                | InstKind::I32Sub
                 | InstKind::I32Mul
                 | InstKind::I32DivU
                 | InstKind::I32DivS
                 | InstKind::I32Shl
+                | InstKind::I32Eq
+                | InstKind::I32Ne
+                | InstKind::I32LtS
+                | InstKind::I32LeS
+                | InstKind::I32GtS
         )
     }
 }

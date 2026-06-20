@@ -2,8 +2,7 @@
 
 mod parse;
 mod segment;
+mod stack_analysis;
 
-pub use parse::parse_wasm_file;
-#[allow(unused_imports)]
-pub use parse::parse_wasm_bytes;
-pub use segment::StraightSegment;
+pub use parse::{parse_wasm_bytes, parse_wasm_file, print_input_summary, WasmModuleInfo};
+pub use segment::{SegmentBounds, StraightSegment};

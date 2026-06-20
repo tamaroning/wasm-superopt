@@ -1,9 +1,11 @@
 //! Inverse peel rules (backward search steps).
 
 use super::canon::Canonizer;
-use crate::sym::{LocalReq, MAX_LOCAL_SLOT, MAX_STACK_HEIGHT, SymState};
 use crate::lang::ValueLang;
 use crate::semantics::{InstKind, SemOp};
+use crate::sym::{LocalReq, SymState, subtree_expr};
+use crate::wasm::SegmentBounds;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PeelAction {
     Forward(SemOp),
@@ -11,22 +13,23 @@ pub enum PeelAction {
 
 pub fn applicable_peels(
     g: &SymState,
+    bounds: &SegmentBounds,
     canon: &mut Canonizer,
 ) -> Vec<(PeelAction, SymState)> {
-    if !g.validate_bounds() {
+    if !g.validate_bounds(bounds) {
         return vec![];
     }
     let mut out = Vec::new();
 
     for (&slot, req) in &g.locals {
-        if slot > MAX_LOCAL_SLOT {
+        if slot > bounds.max_local {
             continue;
         }
         if let LocalReq::Need(v) = req {
             let mut next = g.clone();
             next.locals.insert(slot, LocalReq::DontCare);
             next.stack.push(v.clone());
-            if next.stack.len() <= MAX_STACK_HEIGHT {
+            if next.stack.len() <= bounds.max_stack {
                 out.push((PeelAction::Forward(SemOp::LocalSet(slot)), next));
             }
         }
@@ -34,7 +37,7 @@ pub fn applicable_peels(
 
     if let Some(top) = g.top() {
         for (&slot, req) in &g.locals {
-            if slot > MAX_LOCAL_SLOT {
+            if slot > bounds.max_local {
                 continue;
             }
             if let LocalReq::Need(v) = req {
@@ -60,14 +63,24 @@ pub fn applicable_peels(
             next.stack.pop();
             next.stack.push(e1);
             next.stack.push(e2);
-            if next.stack.len() <= MAX_STACK_HEIGHT {
+            if next.stack.len() <= bounds.max_stack {
+                out.push((PeelAction::Forward(sem), next));
+            }
+        }
+
+        if let Some((sem, a, b)) = structural_binop_peel(&top) {
+            let mut next = g.clone();
+            next.stack.pop();
+            next.stack.push(a);
+            next.stack.push(b);
+            if next.stack.len() <= bounds.max_stack {
                 out.push((PeelAction::Forward(sem), next));
             }
         }
 
         if !g.stack.is_empty() {
             let v = top;
-            for slot in 0..=MAX_LOCAL_SLOT {
+            for slot in 0..=bounds.max_local {
                 let mut next = g.clone();
                 next.stack.pop();
                 match next.locals.get(&slot) {
@@ -85,13 +98,56 @@ pub fn applicable_peels(
     out
 }
 
+fn structural_binop_peel(top: &crate::sym::ValueExpr) -> Option<(SemOp, crate::sym::ValueExpr, crate::sym::ValueExpr)> {
+    let root = top.root();
+    match &top[root] {
+        ValueLang::I32Sub([a, b]) => Some((
+            SemOp::I32Sub,
+            subtree_expr(top, *a),
+            subtree_expr(top, *b),
+        )),
+        ValueLang::I32Eq([a, b]) => Some((
+            SemOp::I32Eq,
+            subtree_expr(top, *a),
+            subtree_expr(top, *b),
+        )),
+        ValueLang::I32Ne([a, b]) => Some((
+            SemOp::I32Ne,
+            subtree_expr(top, *a),
+            subtree_expr(top, *b),
+        )),
+        ValueLang::I32LtS([a, b]) => Some((
+            SemOp::I32LtS,
+            subtree_expr(top, *a),
+            subtree_expr(top, *b),
+        )),
+        ValueLang::I32LeS([a, b]) => Some((
+            SemOp::I32LeS,
+            subtree_expr(top, *a),
+            subtree_expr(top, *b),
+        )),
+        ValueLang::I32GtS([a, b]) => Some((
+            SemOp::I32GtS,
+            subtree_expr(top, *a),
+            subtree_expr(top, *b),
+        )),
+        _ => None,
+    }
+}
+
 fn inst_kind_to_sem(kind: InstKind) -> SemOp {
     match kind {
         InstKind::I32Add => SemOp::I32Add,
+        InstKind::I32Sub => SemOp::I32Sub,
         InstKind::I32Mul => SemOp::I32Mul,
         InstKind::I32Shl => SemOp::I32Shl,
         InstKind::I32DivU => SemOp::I32DivU,
         InstKind::I32DivS => SemOp::I32DivS,
+        InstKind::I32Eq => SemOp::I32Eq,
+        InstKind::I32Ne => SemOp::I32Ne,
+        InstKind::I32LtS => SemOp::I32LtS,
+        InstKind::I32LeS => SemOp::I32LeS,
+        InstKind::I32GtS => SemOp::I32GtS,
         other => panic!("not a peelable binop: {other:?}"),
     }
 }
@@ -104,6 +160,7 @@ mod tests {
         TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
     use crate::value::parse_value_expr;
+    use crate::wasm::SegmentBounds;
 
     fn canonizer() -> Canonizer {
         Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
@@ -115,15 +172,15 @@ mod tests {
     #[test]
     fn memo_convergence_mul_vs_shl() {
         let mut canon = canonizer();
-        // Use (L+1)*2 so mul/shl equivalences both appear in the e-graph.
         let top = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
         let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
         let mut locals = std::collections::BTreeMap::new();
         locals.insert(0, crate::sym::LocalReq::Need(l_plus_1));
-        let g = crate::sym::SymState {
+        let g = SymState {
             stack: vec![top],
             locals,
         };
+        let bounds = SegmentBounds::new(1, 4);
         let top_expr = g.stack.last().expect("top");
         let decomps = canon.binop_decompositions(top_expr);
         assert!(decomps.iter().any(|(k, _, _)| *k == InstKind::I32Mul));
@@ -135,7 +192,7 @@ mod tests {
         after_mul.stack.pop();
         after_mul.stack.push(e1.clone());
         after_mul.stack.push(e2.clone());
-        after_mul.stack.pop(); // peel `i32.const 2`
+        after_mul.stack.pop();
         let key_mul_stack: Vec<_> = after_mul.stack.iter().map(|e| canon.canon(e)).collect();
         let (_, e1s, e2s) = decomps
             .iter()
@@ -145,10 +202,11 @@ mod tests {
         after_shl.stack.pop();
         after_shl.stack.push(e1s.clone());
         after_shl.stack.push(e2s.clone());
-        after_shl.stack.pop(); // peel `i32.const 1`
+        after_shl.stack.pop();
         let key_shl_stack: Vec<_> = after_shl.stack.iter().map(|e| canon.canon(e)).collect();
         assert_eq!(key_mul_stack, key_shl_stack);
         assert_eq!(key_mul_stack.len(), 1, "both paths require only L+1");
+        let _ = bounds;
     }
 
     #[test]
@@ -156,6 +214,7 @@ mod tests {
         let mut canon = canonizer();
         let init = init();
         let mut g = fin();
+        let bounds = SegmentBounds::new(1, 4);
         let manual: Vec<SemOp> = vec![
             SemOp::LocalTee(0),
             SemOp::I32Shl,
@@ -165,9 +224,8 @@ mod tests {
             SemOp::I32Const(3),
             SemOp::LocalGet(0),
         ];
-        let _forward: Vec<SemOp> = manual.iter().rev().cloned().collect();
         for op in manual {
-            let peels = applicable_peels(&g, &mut canon);
+            let peels = applicable_peels(&g, &bounds, &mut canon);
             let next = peels
                 .into_iter()
                 .find(|(a, _)| match (&a, &op) {
@@ -184,6 +242,11 @@ mod tests {
                 .expect("peel step");
             g = next;
         }
-        assert!(crate::optimize::search::is_grounded(&g, &init, &mut canon));
+        assert!(crate::optimize::search::is_grounded(
+            &g,
+            &init,
+            &bounds,
+            &mut canon
+        ));
     }
 }

@@ -3,11 +3,9 @@
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::value::parse_value_expr;
+use crate::wasm::SegmentBounds;
 use egg::{Id, RecExpr};
 use std::collections::{BTreeMap, HashMap};
-
-pub const MAX_STACK_HEIGHT: usize = 4;
-pub const MAX_LOCAL_SLOT: u32 = 2;
 
 pub type ValueExpr = RecExpr<ValueLang>;
 
@@ -24,12 +22,20 @@ pub struct SymState {
 }
 
 impl SymState {
-    pub fn validate_bounds(&self) -> bool {
-        self.stack.len() <= MAX_STACK_HEIGHT && self.locals.keys().all(|&s| s <= MAX_LOCAL_SLOT)
+    pub fn validate_bounds(&self, bounds: &SegmentBounds) -> bool {
+        self.stack.len() <= bounds.max_stack
+            && self
+                .locals
+                .keys()
+                .all(|&s| s <= bounds.max_local)
     }
 
     pub fn top(&self) -> Option<&ValueExpr> {
         self.stack.last()
+    }
+
+    pub fn local_slots(&self) -> impl Iterator<Item = u32> + '_ {
+        self.locals.keys().copied()
     }
 }
 
@@ -57,6 +63,11 @@ fn go_subtree(
             let b = go_subtree(src, *b, dst, memo);
             dst.add(ValueLang::I32Add([a, b]))
         }
+        ValueLang::I32Sub([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Sub([a, b]))
+        }
         ValueLang::I32Mul([a, b]) => {
             let a = go_subtree(src, *a, dst, memo);
             let b = go_subtree(src, *b, dst, memo);
@@ -77,6 +88,31 @@ fn go_subtree(
             let b = go_subtree(src, *b, dst, memo);
             dst.add(ValueLang::I32DivS([a, b]))
         }
+        ValueLang::I32Eq([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Eq([a, b]))
+        }
+        ValueLang::I32Ne([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Ne([a, b]))
+        }
+        ValueLang::I32LtS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32LtS([a, b]))
+        }
+        ValueLang::I32LeS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32LeS([a, b]))
+        }
+        ValueLang::I32GtS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32GtS([a, b]))
+        }
     };
     memo.insert(id, mapped);
     mapped
@@ -92,6 +128,11 @@ pub fn all_subtree_exprs(expr: &ValueExpr) -> Vec<ValueExpr> {
 pub struct SymMachine {
     stack: Vec<ValueExpr>,
     locals: BTreeMap<u32, ValueExpr>,
+    total_locals: u32,
+    num_params: u32,
+    max_stack: usize,
+    segment_start_locals: BTreeMap<u32, ValueExpr>,
+    fresh_counter: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,9 +148,9 @@ impl SymMachine {
         parse_value_expr(&format!("?L{slot}"))
     }
 
-    pub fn function_entry(num_params: u32, total_locals: u32) -> Self {
+    pub fn function_entry(num_params: u32, total_locals: u32, max_stack: usize) -> Self {
         let mut locals = BTreeMap::new();
-        for slot in 0..total_locals.min(MAX_LOCAL_SLOT + 1) {
+        for slot in 0..total_locals {
             let init = if slot < num_params {
                 Self::local_symbol(slot)
             } else {
@@ -120,6 +161,48 @@ impl SymMachine {
         Self {
             stack: Vec::new(),
             locals,
+            total_locals,
+            num_params,
+            max_stack,
+            segment_start_locals: BTreeMap::new(),
+            fresh_counter: 0,
+        }
+    }
+
+    pub fn begin_segment(&mut self) {
+        self.segment_start_locals = self.locals.clone();
+    }
+
+    pub fn to_init_state(&self) -> SymState {
+        let mut locals = BTreeMap::new();
+        for slot in 0..self.num_params {
+            locals.insert(slot, LocalReq::Need(Self::local_symbol(slot)));
+        }
+        SymState {
+            stack: self.stack.clone(),
+            locals,
+        }
+    }
+
+    pub fn to_fin_state(&self) -> SymState {
+        let mut locals = BTreeMap::new();
+        for (&slot, cur) in &self.locals {
+            if slot >= self.total_locals {
+                continue;
+            }
+            match self.segment_start_locals.get(&slot) {
+                Some(start) if start != cur => {
+                    locals.insert(slot, LocalReq::Need(cur.clone()));
+                }
+                None => {
+                    locals.insert(slot, LocalReq::Need(cur.clone()));
+                }
+                _ => {}
+            }
+        }
+        SymState {
+            stack: self.stack.clone(),
+            locals,
         }
     }
 
@@ -128,21 +211,37 @@ impl SymMachine {
             SemOp::I32Const(n) => {
                 self.push_expr(parse_value_expr(&n.to_string()))?;
             }
-            SemOp::I32Add | SemOp::I32Mul | SemOp::I32DivU | SemOp::I32DivS | SemOp::I32Shl => {
+            SemOp::I32Add
+            | SemOp::I32Sub
+            | SemOp::I32Mul
+            | SemOp::I32DivU
+            | SemOp::I32DivS
+            | SemOp::I32Shl
+            | SemOp::I32Eq
+            | SemOp::I32Ne
+            | SemOp::I32LtS
+            | SemOp::I32LeS
+            | SemOp::I32GtS => {
                 let b = self.pop()?;
                 let a = self.pop()?;
                 let expr = match op {
                     SemOp::I32Add => parse_value_expr(&format!("(i32.add {a} {b})")),
+                    SemOp::I32Sub => parse_value_expr(&format!("(i32.sub {a} {b})")),
                     SemOp::I32Mul => parse_value_expr(&format!("(i32.mul {a} {b})")),
                     SemOp::I32DivU => parse_value_expr(&format!("(i32.div_u {a} {b})")),
                     SemOp::I32DivS => parse_value_expr(&format!("(i32.div_s {a} {b})")),
                     SemOp::I32Shl => parse_value_expr(&format!("(i32.shl {a} {b})")),
+                    SemOp::I32Eq => parse_value_expr(&format!("(i32.eq {a} {b})")),
+                    SemOp::I32Ne => parse_value_expr(&format!("(i32.ne {a} {b})")),
+                    SemOp::I32LtS => parse_value_expr(&format!("(i32.lt_s {a} {b})")),
+                    SemOp::I32LeS => parse_value_expr(&format!("(i32.le_s {a} {b})")),
+                    SemOp::I32GtS => parse_value_expr(&format!("(i32.gt_s {a} {b})")),
                     _ => unreachable!(),
                 };
                 self.push_expr(expr)?;
             }
             SemOp::LocalGet(slot) => {
-                if *slot > MAX_LOCAL_SLOT {
+                if *slot >= self.total_locals {
                     return Err(ForwardError::LocalOutOfRange);
                 }
                 let v = self
@@ -153,14 +252,14 @@ impl SymMachine {
                 self.push_expr(v)?;
             }
             SemOp::LocalSet(slot) => {
-                if *slot > MAX_LOCAL_SLOT {
+                if *slot >= self.total_locals {
                     return Err(ForwardError::LocalOutOfRange);
                 }
                 let v = self.pop()?;
                 self.locals.insert(*slot, v);
             }
             SemOp::LocalTee(slot) => {
-                if *slot > MAX_LOCAL_SLOT {
+                if *slot >= self.total_locals {
                     return Err(ForwardError::LocalOutOfRange);
                 }
                 let v = self
@@ -178,28 +277,24 @@ impl SymMachine {
         self.stack.pop().ok_or(ForwardError::StackUnderflow)
     }
 
-    pub fn to_init_state(&self) -> SymState {
-        self.snapshot()
-    }
-
-    pub fn to_fin_state(&self) -> SymState {
-        self.snapshot()
-    }
-
-    fn snapshot(&self) -> SymState {
-        SymState {
-            stack: self.stack.clone(),
-            locals: self
-                .locals
-                .iter()
-                .filter(|&(&slot, _)| slot <= MAX_LOCAL_SLOT)
-                .map(|(&slot, v)| (slot, LocalReq::Need(v.clone())))
-                .collect(),
+    pub fn apply_boundary_stack(&mut self, pop: usize, push: usize) -> Result<(), ForwardError> {
+        for _ in 0..pop {
+            self.pop()?;
         }
+        for _ in 0..push {
+            self.push_fresh_symbolic()?;
+        }
+        Ok(())
+    }
+
+    fn push_fresh_symbolic(&mut self) -> Result<(), ForwardError> {
+        let name = format!("?S{}", self.fresh_counter);
+        self.fresh_counter += 1;
+        self.push_expr(parse_value_expr(&name))
     }
 
     fn push_expr(&mut self, expr: ValueExpr) -> Result<(), ForwardError> {
-        if self.stack.len() >= MAX_STACK_HEIGHT {
+        if self.stack.len() >= self.max_stack {
             return Err(ForwardError::StackTooHigh);
         }
         self.stack.push(expr);
@@ -211,10 +306,13 @@ impl SymMachine {
 mod tests {
     use super::*;
     use crate::optimize::fixtures::init;
+    use crate::wasm::SegmentBounds;
 
     #[test]
     fn function_entry_matches_running_example_init() {
-        let entry = SymMachine::function_entry(1, 1);
+        let bounds = SegmentBounds::new(1, 4);
+        let mut entry = SymMachine::function_entry(1, 1, bounds.max_stack);
+        entry.begin_segment();
         let init_state = entry.to_init_state();
         let expected = init();
         assert_eq!(init_state.stack, expected.stack);
