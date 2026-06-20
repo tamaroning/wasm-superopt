@@ -100,11 +100,16 @@ fn inst_kind_to_sem(kind: InstKind) -> SemOp {
 mod tests {
     use super::*;
     use crate::goal::{example_fin, example_init};
-    use crate::synthesis::{load_or_synthesize_rules, synthesized_to_rewrites};
+    use crate::synthesis::{
+        load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
+    };
     use crate::value::parse_value_expr;
 
     fn canonizer() -> Canonizer {
-        Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(2, 10)))
+        Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
+            TEST_SYNTHESIS_AST_SIZE,
+            10,
+        )))
     }
 
     #[test]
@@ -133,7 +138,7 @@ mod tests {
         after_mul.stack.pop();
         after_mul.stack.push(e1.clone());
         after_mul.stack.push(e2.clone());
-        after_mul.stack.push(parse_value_expr("4"));
+        after_mul.stack.push(parse_value_expr("2"));
         after_mul.stack.pop();
         let key_mul = canon.normal_goal(&after_mul);
         // peel shl path
@@ -145,7 +150,7 @@ mod tests {
         after_shl.stack.pop();
         after_shl.stack.push(e1s.clone());
         after_shl.stack.push(e2s.clone());
-        after_shl.stack.push(parse_value_expr("2"));
+        after_shl.stack.push(parse_value_expr("1"));
         after_shl.stack.pop();
         let key_shl = canon.normal_goal(&after_shl);
         assert_eq!(key_mul.stack, key_shl.stack);
@@ -161,7 +166,7 @@ mod tests {
         let manual: Vec<SemOp> = vec![
             SemOp::LocalGet(0),
             SemOp::I32Mul,
-            SemOp::I32Const(4),
+            SemOp::I32Const(2),
             SemOp::LocalTee(0),
             SemOp::I32Add,
             SemOp::I32Const(1),

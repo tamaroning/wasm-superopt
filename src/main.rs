@@ -37,9 +37,9 @@ struct Cli {
     #[arg(long)]
     print_semantics: bool,
 
-    /// Maximum instruction-sequence length for synthesis (1–4).
-    #[arg(long, default_value_t = 2)]
-    max_seq_len: usize,
+    /// Maximum AST node count for synthesis (1–8; 3 ≈ old 2-instruction sequences).
+    #[arg(long, default_value_t = 3)]
+    max_ast_size: usize,
 
     /// Randomized concrete tests per candidate before Z3 (0 skips the fast filter).
     #[arg(long, default_value_t = DEFAULT_RANDOM_TESTS)]
@@ -131,15 +131,15 @@ fn main() {
     }
 
     if cli.synthesize_only {
-        let max_len = cli.max_seq_len.clamp(1, 4);
-        let syn = load_or_synthesize_rules(max_len, cli.random_tests);
+        let max_ast = cli.max_ast_size.clamp(1, 8);
+        let syn = load_or_synthesize_rules(max_ast, cli.random_tests);
         print_synthesized_json(&syn, cli.random_tests);
         return;
     }
 
     let path = cli.input.clone().expect("WASM path required");
-    let max_len = cli.max_seq_len.clamp(1, 4);
-    let syn = load_or_synthesize_rules(max_len, cli.random_tests);
+    let max_ast = cli.max_ast_size.clamp(1, 8);
+    let syn = load_or_synthesize_rules(max_ast, cli.random_tests);
     if !cli.segments_only {
         print_synthesized(&syn, cli.random_tests);
     }

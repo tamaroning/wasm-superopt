@@ -115,11 +115,13 @@ pub fn summarize(results: &[SegmentOptResult]) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::synthesis::{load_or_synthesize_rules, synthesized_to_rewrites};
+    use crate::synthesis::{
+        load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
+    };
     use crate::wasm::parse_wasm_bytes;
 
     fn rules() -> Vec<Rewrite<ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(2, 10))
+        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10))
     }
 
     #[test]
@@ -131,7 +133,7 @@ mod tests {
                   i32.const 1
                   i32.add
                   local.tee 0
-                  i32.const 4
+                  i32.const 2
                   i32.mul
                   local.get 0
                 )

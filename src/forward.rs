@@ -163,7 +163,7 @@ mod tests {
             SemOp::I32Const(1),
             SemOp::I32Add,
             SemOp::LocalTee(0),
-            SemOp::I32Const(4),
+            SemOp::I32Const(2),
             SemOp::I32Mul,
             SemOp::LocalGet(0),
         ];

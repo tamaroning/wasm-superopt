@@ -22,7 +22,7 @@ pub enum StackTy {
     I32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SemOp {
     I32Const(i32),
     I32Add,
@@ -279,6 +279,28 @@ pub fn pure_arithmetic_ops() -> Vec<SemOp> {
         .into_iter()
         .filter(|op| !op.is_effectful())
         .collect()
+}
+
+/// Reduced constant pool for exhaustive rule synthesis.
+const SYNTHESIS_CONSTS: [i32; 6] = [0, 1, 2, -1, i32::MIN, i32::MAX];
+
+pub fn synthesis_constants() -> &'static [i32] {
+    &SYNTHESIS_CONSTS
+}
+
+/// Arithmetic ops used during rule synthesis (smaller constant pool than `concrete_ops`).
+pub fn synthesis_arithmetic_ops() -> Vec<SemOp> {
+    let mut ops = vec![
+        SemOp::I32Add,
+        SemOp::I32Mul,
+        SemOp::I32DivU,
+        SemOp::I32DivS,
+        SemOp::I32Shl,
+    ];
+    for c in SYNTHESIS_CONSTS {
+        ops.push(SemOp::I32Const(c));
+    }
+    ops
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +795,11 @@ pub fn exploration_inputs() -> Vec<Vec<StackTy>> {
     inputs
 }
 
+/// Input stacks for rule synthesis (symbolic inputs only; no constant-only stack).
+pub fn synthesis_inputs() -> Vec<Vec<StackTy>> {
+    (1..=3).map(|h| vec![StackTy::I32; h]).collect()
+}
+
 pub fn z3_context() -> Context {
     let mut cfg = Config::new();
     cfg.set_timeout_msec(5_000);
@@ -810,6 +837,16 @@ pub fn print_semantics_table() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synthesis_arithmetic_ops_has_minimal_constant_pool() {
+        assert_eq!(synthesis_arithmetic_ops().len(), 11);
+    }
+
+    #[test]
+    fn synthesis_inputs_has_no_empty_stack() {
+        assert!(synthesis_inputs().iter().all(|input| !input.is_empty()));
+    }
 
     #[test]
     fn enumerated_sequences_are_type_valid() {

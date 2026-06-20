@@ -210,10 +210,12 @@ pub fn format_ops(ops: &[SemOp]) -> String {
 mod tests {
     use super::*;
     use crate::goal::{example_fin, example_init};
-    use crate::synthesis::{load_or_synthesize_rules, synthesized_to_rewrites};
+    use crate::synthesis::{
+        load_or_synthesize_rules, synthesized_to_rewrites, TEST_SYNTHESIS_AST_SIZE,
+    };
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(2, 10))
+        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10))
     }
 
     #[test]

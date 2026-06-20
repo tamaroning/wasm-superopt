@@ -81,14 +81,14 @@ pub fn example_init() -> MachineState {
     }
 }
 
-/// Final machine state for the built-in search example: stack [(L+1)*4, L+1], local 0 = L+1.
+/// Final machine state for the built-in search example: stack [(L+1)*2, L+1], local 0 = L+1.
 pub fn example_fin() -> MachineState {
     let l_plus_1 = parse_value_expr("(i32.add ?L0 1)");
     let mut locals = BTreeMap::new();
     locals.insert(0, LocalReq::Need(l_plus_1.clone()));
     MachineState {
         stack: vec![
-            parse_value_expr("(i32.mul (i32.add ?L0 1) 4)"),
+            parse_value_expr("(i32.mul (i32.add ?L0 1) 2)"),
             l_plus_1,
         ],
         locals,
