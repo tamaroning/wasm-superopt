@@ -15,7 +15,16 @@ pub enum SemOp {
     I32Mul,
     I32DivU,
     I32DivS,
+    I32RemU,
+    I32RemS,
     I32Shl,
+    I32And,
+    I32Or,
+    I32Xor,
+    I32ShrU,
+    I32ShrS,
+    I32Rotl,
+    I32Rotr,
     I32Eq,
     I32Ne,
     I32LtS,
@@ -63,7 +72,16 @@ impl SemOp {
             SemOp::I32Mul => "i32.mul",
             SemOp::I32DivU => "i32.div_u",
             SemOp::I32DivS => "i32.div_s",
+            SemOp::I32RemU => "i32.rem_u",
+            SemOp::I32RemS => "i32.rem_s",
             SemOp::I32Shl => "i32.shl",
+            SemOp::I32And => "i32.and",
+            SemOp::I32Or => "i32.or",
+            SemOp::I32Xor => "i32.xor",
+            SemOp::I32ShrU => "i32.shr_u",
+            SemOp::I32ShrS => "i32.shr_s",
+            SemOp::I32Rotl => "i32.rotl",
+            SemOp::I32Rotr => "i32.rotr",
             SemOp::I32Eq => "i32.eq",
             SemOp::I32Ne => "i32.ne",
             SemOp::I32LtS => "i32.lt_s",
@@ -122,7 +140,16 @@ impl SemOp {
                 | SemOp::I32Mul
                 | SemOp::I32DivU
                 | SemOp::I32DivS
+                | SemOp::I32RemU
+                | SemOp::I32RemS
                 | SemOp::I32Shl
+                | SemOp::I32And
+                | SemOp::I32Or
+                | SemOp::I32Xor
+                | SemOp::I32ShrU
+                | SemOp::I32ShrS
+                | SemOp::I32Rotl
+                | SemOp::I32Rotr
                 | SemOp::I32Eq
                 | SemOp::I32Ne
                 | SemOp::I32LtS
@@ -163,7 +190,16 @@ impl fmt::Display for SemOp {
             SemOp::I32Mul => write!(f, "i32.mul"),
             SemOp::I32DivU => write!(f, "i32.div_u"),
             SemOp::I32DivS => write!(f, "i32.div_s"),
+            SemOp::I32RemU => write!(f, "i32.rem_u"),
+            SemOp::I32RemS => write!(f, "i32.rem_s"),
             SemOp::I32Shl => write!(f, "i32.shl"),
+            SemOp::I32And => write!(f, "i32.and"),
+            SemOp::I32Or => write!(f, "i32.or"),
+            SemOp::I32Xor => write!(f, "i32.xor"),
+            SemOp::I32ShrU => write!(f, "i32.shr_u"),
+            SemOp::I32ShrS => write!(f, "i32.shr_s"),
+            SemOp::I32Rotl => write!(f, "i32.rotl"),
+            SemOp::I32Rotr => write!(f, "i32.rotr"),
             SemOp::I32Eq => write!(f, "i32.eq"),
             SemOp::I32Ne => write!(f, "i32.ne"),
             SemOp::I32LtS => write!(f, "i32.lt_s"),
@@ -227,7 +263,16 @@ pub enum InstKind {
     I32Mul,
     I32DivU,
     I32DivS,
+    I32RemU,
+    I32RemS,
     I32Shl,
+    I32And,
+    I32Or,
+    I32Xor,
+    I32ShrU,
+    I32ShrS,
+    I32Rotl,
+    I32Rotr,
     I32Eq,
     I32Ne,
     I32LtS,
@@ -251,7 +296,16 @@ impl InstKind {
                 | InstKind::I32Mul
                 | InstKind::I32DivU
                 | InstKind::I32DivS
+                | InstKind::I32RemU
+                | InstKind::I32RemS
                 | InstKind::I32Shl
+                | InstKind::I32And
+                | InstKind::I32Or
+                | InstKind::I32Xor
+                | InstKind::I32ShrU
+                | InstKind::I32ShrS
+                | InstKind::I32Rotl
+                | InstKind::I32Rotr
         )
     }
 

@@ -18,9 +18,18 @@ pub fn spec_for(op: &SemOp) -> InstSpec {
         SemOp::I32Add => derive_rule_binop_spec(InstKind::I32Add),
         SemOp::I32Sub => derive_rule_binop_spec(InstKind::I32Sub),
         SemOp::I32Mul => derive_rule_binop_spec(InstKind::I32Mul),
-        SemOp::I32Shl => derive_rule_binop_spec(InstKind::I32Shl),
         SemOp::I32DivU => derive_rule_binop_spec(InstKind::I32DivU),
         SemOp::I32DivS => derive_rule_binop_spec(InstKind::I32DivS),
+        SemOp::I32RemU => derive_rule_binop_spec(InstKind::I32RemU),
+        SemOp::I32RemS => derive_rule_binop_spec(InstKind::I32RemS),
+        SemOp::I32Shl => derive_rule_binop_spec(InstKind::I32Shl),
+        SemOp::I32And => derive_rule_binop_spec(InstKind::I32And),
+        SemOp::I32Or => derive_rule_binop_spec(InstKind::I32Or),
+        SemOp::I32Xor => derive_rule_binop_spec(InstKind::I32Xor),
+        SemOp::I32ShrU => derive_rule_binop_spec(InstKind::I32ShrU),
+        SemOp::I32ShrS => derive_rule_binop_spec(InstKind::I32ShrS),
+        SemOp::I32Rotl => derive_rule_binop_spec(InstKind::I32Rotl),
+        SemOp::I32Rotr => derive_rule_binop_spec(InstKind::I32Rotr),
         SemOp::I32Eq => derive_rule_relop_spec(InstKind::I32Eq),
         SemOp::I32Ne => derive_rule_relop_spec(InstKind::I32Ne),
         SemOp::I32LtS => derive_rule_relop_spec(InstKind::I32LtS),
@@ -48,6 +57,15 @@ fn binop_wasm(op: &SemOp) -> Option<(NumType, WasmBinOp)> {
         SemOp::I32Shl => Some((NumType::I32, WasmBinOp::Shl)),
         SemOp::I32DivU => Some((NumType::I32, WasmBinOp::Div(Sign::U))),
         SemOp::I32DivS => Some((NumType::I32, WasmBinOp::Div(Sign::S))),
+        SemOp::I32RemU => Some((NumType::I32, WasmBinOp::Rem(Sign::U))),
+        SemOp::I32RemS => Some((NumType::I32, WasmBinOp::Rem(Sign::S))),
+        SemOp::I32And => Some((NumType::I32, WasmBinOp::And)),
+        SemOp::I32Or => Some((NumType::I32, WasmBinOp::Or)),
+        SemOp::I32Xor => Some((NumType::I32, WasmBinOp::Xor)),
+        SemOp::I32ShrU => Some((NumType::I32, WasmBinOp::Shr(Sign::U))),
+        SemOp::I32ShrS => Some((NumType::I32, WasmBinOp::Shr(Sign::S))),
+        SemOp::I32Rotl => Some((NumType::I32, WasmBinOp::Rotl)),
+        SemOp::I32Rotr => Some((NumType::I32, WasmBinOp::Rotr)),
         _ => None,
     }
 }
@@ -86,24 +104,27 @@ pub fn concrete_ops() -> Vec<SemOp> {
         SemOp::I32Mul,
         SemOp::I32DivU,
         SemOp::I32DivS,
+        SemOp::I32RemU,
+        SemOp::I32RemS,
         SemOp::I32Shl,
+        SemOp::I32And,
+        SemOp::I32Or,
+        SemOp::I32Xor,
+        SemOp::I32ShrU,
+        SemOp::I32ShrS,
+        SemOp::I32Rotl,
+        SemOp::I32Rotr,
         SemOp::I32Eqz,
         SemOp::I32Clz,
         SemOp::I32Ctz,
         SemOp::I32Popcnt,
     ];
-    for c in [0, 1, 2, 3, 4, 8, 16, -1, i32::MIN, i32::MAX] {
-        ops.push(SemOp::I32Const(c));
-    }
-    for x in 0..3 {
-        ops.push(SemOp::LocalGet(x));
-        ops.push(SemOp::LocalSet(x));
-        ops.push(SemOp::LocalTee(x));
-    }
+    ops.push(SemOp::I32Const(42));
+    ops.push(SemOp::LocalGet(42));
     ops
 }
 
-const SYNTHESIS_CONSTS: [i32; 6] = [0, 1, 2, -1, i32::MIN, i32::MAX];
+const SYNTHESIS_CONSTS: [i32; 4] = [0, 1, 2, -1];
 
 pub fn synthesis_constants() -> &'static [i32] {
     &SYNTHESIS_CONSTS

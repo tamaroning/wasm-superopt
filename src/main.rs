@@ -4,6 +4,7 @@ mod al;
 mod lang;
 mod sym;
 mod optimize;
+mod parallel;
 mod semantics;
 mod synthesis;
 mod value;
@@ -62,6 +63,10 @@ struct Cli {
     /// Split segments longer than N instructions (0 = no split; default 10).
     #[arg(long, default_value_t = wasm::DEFAULT_MAX_SEGMENT_INSTR)]
     split: usize,
+
+    /// Number of parallel jobs for rule synthesis and segment optimization.
+    #[arg(short = 'j', long = "jobs", default_value_t = 1)]
+    jobs: usize,
 }
 
 impl From<SolverKind> for optimize::SolverKind {
@@ -97,7 +102,7 @@ fn main() {
 
     if cli.synthesize_only {
         let max_ast = cli.max_ast_size.clamp(1, 8);
-        let syn = load_or_synthesize_rules(max_ast, cli.random_tests);
+        let syn = load_or_synthesize_rules(max_ast, cli.random_tests, cli.jobs);
         print_synthesized_json(&syn, cli.random_tests);
         return;
     }
@@ -115,7 +120,7 @@ fn main() {
     let _ = io::stdout().flush();
 
     let max_ast = cli.max_ast_size.clamp(1, 8);
-    let syn = load_or_synthesize_rules(max_ast, cli.random_tests);
+    let syn = load_or_synthesize_rules(max_ast, cli.random_tests, cli.jobs);
     if !cli.segments_only {
         print_synthesized(&syn, cli.random_tests);
         let _ = io::stdout().flush();
@@ -148,6 +153,7 @@ fn main() {
         &cfg,
         cli.solver.into(),
         cli.split,
+        cli.jobs,
     );
     let (orig, opt, improved) = optimize::summarize(&results);
     println!(

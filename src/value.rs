@@ -17,7 +17,16 @@ pub enum ValueAst {
     Mul(Box<ValueAst>, Box<ValueAst>),
     DivU(Box<ValueAst>, Box<ValueAst>),
     DivS(Box<ValueAst>, Box<ValueAst>),
+    RemU(Box<ValueAst>, Box<ValueAst>),
+    RemS(Box<ValueAst>, Box<ValueAst>),
     Shl(Box<ValueAst>, Box<ValueAst>),
+    And(Box<ValueAst>, Box<ValueAst>),
+    Or(Box<ValueAst>, Box<ValueAst>),
+    Xor(Box<ValueAst>, Box<ValueAst>),
+    ShrU(Box<ValueAst>, Box<ValueAst>),
+    ShrS(Box<ValueAst>, Box<ValueAst>),
+    Rotl(Box<ValueAst>, Box<ValueAst>),
+    Rotr(Box<ValueAst>, Box<ValueAst>),
     Eq(Box<ValueAst>, Box<ValueAst>),
     Ne(Box<ValueAst>, Box<ValueAst>),
     LtS(Box<ValueAst>, Box<ValueAst>),
@@ -36,7 +45,16 @@ enum ValueBinOp {
     Mul,
     DivU,
     DivS,
+    RemU,
+    RemS,
     Shl,
+    And,
+    Or,
+    Xor,
+    ShrU,
+    ShrS,
+    Rotl,
+    Rotr,
     Eq,
     Ne,
     LtS,
@@ -53,14 +71,23 @@ enum ValueUnOp {
 }
 
 impl ValueBinOp {
-    fn all() -> [Self; 11] {
+    fn all() -> [Self; 20] {
         [
             Self::Add,
             Self::Sub,
             Self::Mul,
             Self::DivU,
             Self::DivS,
+            Self::RemU,
+            Self::RemS,
             Self::Shl,
+            Self::And,
+            Self::Or,
+            Self::Xor,
+            Self::ShrU,
+            Self::ShrS,
+            Self::Rotl,
+            Self::Rotr,
             Self::Eq,
             Self::Ne,
             Self::LtS,
@@ -85,7 +112,16 @@ impl ValueAst {
             | Self::Mul(l, r)
             | Self::DivU(l, r)
             | Self::DivS(l, r)
+            | Self::RemU(l, r)
+            | Self::RemS(l, r)
             | Self::Shl(l, r)
+            | Self::And(l, r)
+            | Self::Or(l, r)
+            | Self::Xor(l, r)
+            | Self::ShrU(l, r)
+            | Self::ShrS(l, r)
+            | Self::Rotl(l, r)
+            | Self::Rotr(l, r)
             | Self::Eq(l, r)
             | Self::Ne(l, r)
             | Self::LtS(l, r)
@@ -110,7 +146,16 @@ impl ValueAst {
             | Self::Mul(l, r)
             | Self::DivU(l, r)
             | Self::DivS(l, r)
+            | Self::RemU(l, r)
+            | Self::RemS(l, r)
             | Self::Shl(l, r)
+            | Self::And(l, r)
+            | Self::Or(l, r)
+            | Self::Xor(l, r)
+            | Self::ShrU(l, r)
+            | Self::ShrS(l, r)
+            | Self::Rotl(l, r)
+            | Self::Rotr(l, r)
             | Self::Eq(l, r)
             | Self::Ne(l, r)
             | Self::LtS(l, r)
@@ -134,7 +179,16 @@ impl ValueAst {
             Self::Mul(l, r) => format!("(i32.mul {} {})", l.to_pattern(), r.to_pattern()),
             Self::DivU(l, r) => format!("(i32.div_u {} {})", l.to_pattern(), r.to_pattern()),
             Self::DivS(l, r) => format!("(i32.div_s {} {})", l.to_pattern(), r.to_pattern()),
+            Self::RemU(l, r) => format!("(i32.rem_u {} {})", l.to_pattern(), r.to_pattern()),
+            Self::RemS(l, r) => format!("(i32.rem_s {} {})", l.to_pattern(), r.to_pattern()),
             Self::Shl(l, r) => format!("(i32.shl {} {})", l.to_pattern(), r.to_pattern()),
+            Self::And(l, r) => format!("(i32.and {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Or(l, r) => format!("(i32.or {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Xor(l, r) => format!("(i32.xor {} {})", l.to_pattern(), r.to_pattern()),
+            Self::ShrU(l, r) => format!("(i32.shr_u {} {})", l.to_pattern(), r.to_pattern()),
+            Self::ShrS(l, r) => format!("(i32.shr_s {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Rotl(l, r) => format!("(i32.rotl {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Rotr(l, r) => format!("(i32.rotr {} {})", l.to_pattern(), r.to_pattern()),
             Self::Eq(l, r) => format!("(i32.eq {} {})", l.to_pattern(), r.to_pattern()),
             Self::Ne(l, r) => format!("(i32.ne {} {})", l.to_pattern(), r.to_pattern()),
             Self::LtS(l, r) => format!("(i32.lt_s {} {})", l.to_pattern(), r.to_pattern()),
@@ -156,7 +210,16 @@ impl ValueAst {
             ValueBinOp::Mul => Self::Mul(l, r),
             ValueBinOp::DivU => Self::DivU(l, r),
             ValueBinOp::DivS => Self::DivS(l, r),
+            ValueBinOp::RemU => Self::RemU(l, r),
+            ValueBinOp::RemS => Self::RemS(l, r),
             ValueBinOp::Shl => Self::Shl(l, r),
+            ValueBinOp::And => Self::And(l, r),
+            ValueBinOp::Or => Self::Or(l, r),
+            ValueBinOp::Xor => Self::Xor(l, r),
+            ValueBinOp::ShrU => Self::ShrU(l, r),
+            ValueBinOp::ShrS => Self::ShrS(l, r),
+            ValueBinOp::Rotl => Self::Rotl(l, r),
+            ValueBinOp::Rotr => Self::Rotr(l, r),
             ValueBinOp::Eq => Self::Eq(l, r),
             ValueBinOp::Ne => Self::Ne(l, r),
             ValueBinOp::LtS => Self::LtS(l, r),
@@ -357,6 +420,46 @@ fn eval_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> AstEvalResult {
                 trap: false,
             }
         }
+        ValueAst::RemU(l, r) => {
+            let l = eval_ast_concrete(l, inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_ast_concrete(r, inputs);
+            if r.trap {
+                return r;
+            }
+            if r.value == 0 {
+                return AstEvalResult {
+                    value: 0,
+                    trap: true,
+                };
+            }
+            AstEvalResult {
+                value: (l.value as u32).wrapping_rem(r.value as u32) as i32,
+                trap: false,
+            }
+        }
+        ValueAst::RemS(l, r) => {
+            let l = eval_ast_concrete(l, inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_ast_concrete(r, inputs);
+            if r.trap {
+                return r;
+            }
+            if r.value == 0 {
+                return AstEvalResult {
+                    value: 0,
+                    trap: true,
+                };
+            }
+            AstEvalResult {
+                value: l.value.wrapping_rem(r.value),
+                trap: false,
+            }
+        }
         ValueAst::Shl(l, r) => {
             let l = eval_ast_concrete(l, inputs);
             if l.trap {
@@ -368,6 +471,65 @@ fn eval_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> AstEvalResult {
             }
             AstEvalResult {
                 value: l.value.wrapping_shl((r.value as u32) & 31),
+                trap: false,
+            }
+        }
+        ValueAst::And(l, r) => eval_children(l, r, inputs, |a, b| a & b),
+        ValueAst::Or(l, r) => eval_children(l, r, inputs, |a, b| a | b),
+        ValueAst::Xor(l, r) => eval_children(l, r, inputs, |a, b| a ^ b),
+        ValueAst::ShrU(l, r) => {
+            let l = eval_ast_concrete(l, inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_ast_concrete(r, inputs);
+            if r.trap {
+                return r;
+            }
+            AstEvalResult {
+                value: ((l.value as u32).wrapping_shr((r.value as u32) & 31)) as i32,
+                trap: false,
+            }
+        }
+        ValueAst::ShrS(l, r) => {
+            let l = eval_ast_concrete(l, inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_ast_concrete(r, inputs);
+            if r.trap {
+                return r;
+            }
+            AstEvalResult {
+                value: l.value.wrapping_shr((r.value as u32) & 31),
+                trap: false,
+            }
+        }
+        ValueAst::Rotl(l, r) => {
+            let l = eval_ast_concrete(l, inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_ast_concrete(r, inputs);
+            if r.trap {
+                return r;
+            }
+            AstEvalResult {
+                value: (l.value as u32).rotate_left((r.value as u32) & 31) as i32,
+                trap: false,
+            }
+        }
+        ValueAst::Rotr(l, r) => {
+            let l = eval_ast_concrete(l, inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_ast_concrete(r, inputs);
+            if r.trap {
+                return r;
+            }
+            AstEvalResult {
+                value: (l.value as u32).rotate_right((r.value as u32) & 31) as i32,
                 trap: false,
             }
         }
@@ -393,25 +555,33 @@ fn concrete_valid_ast_rewrite(lhs: &AstEvalResult, rhs: &AstEvalResult) -> bool 
     lhs.value == rhs.value
 }
 
+const AST_CORNER_INPUTS: [i32; 6] = [0, 1, -1, 2, i32::MIN, i32::MAX];
+
+fn asts_match_on_inputs(lhs: &ValueAst, rhs: &ValueAst, inputs: &[i32]) -> bool {
+    let lhs_r = eval_ast_concrete(lhs, inputs);
+    let rhs_r = eval_ast_concrete(rhs, inputs);
+    concrete_valid_ast_rewrite(&lhs_r, &rhs_r)
+}
+
 /// Fast filter: returns `false` if a concrete counterexample is found.
+/// Always runs fixed corner-case inputs, then `num_tests` random vectors.
 pub fn asts_valid_rewrite_random(
     num_inputs: usize,
     lhs: &ValueAst,
     rhs: &ValueAst,
     num_tests: usize,
 ) -> bool {
-    if num_tests == 0 {
-        return true;
+    for &v in &AST_CORNER_INPUTS {
+        let inputs = vec![v; num_inputs];
+        if !asts_match_on_inputs(lhs, rhs, &inputs) {
+            return false;
+        }
     }
 
     let mut rng = AstLcg::new(0xE6A3_9A1B_CDE2_4701);
-    for case in 0..num_tests {
-        let inputs: Vec<i32> = (0..num_inputs)
-            .map(|i| ast_concrete_input(&mut rng, case, i))
-            .collect();
-        let lhs_r = eval_ast_concrete(lhs, &inputs);
-        let rhs_r = eval_ast_concrete(rhs, &inputs);
-        if !concrete_valid_ast_rewrite(&lhs_r, &rhs_r) {
+    for _ in 0..num_tests {
+        let inputs: Vec<i32> = (0..num_inputs).map(|_| rng.next_i32()).collect();
+        if !asts_match_on_inputs(lhs, rhs, &inputs) {
             return false;
         }
     }
@@ -432,18 +602,6 @@ impl AstLcg {
 
     fn next_i32(&mut self) -> i32 {
         self.next_u64() as i32
-    }
-}
-
-fn ast_concrete_input(rng: &mut AstLcg, case: usize, slot: usize) -> i32 {
-    match (case + slot) % 7 {
-        0 => 0,
-        1 => 1,
-        2 => -1,
-        3 => 2,
-        4 => i32::MIN,
-        5 => i32::MAX,
-        _ => rng.next_i32(),
     }
 }
 
@@ -531,12 +689,73 @@ fn eval_ast_z3<'ctx>(
             let result = lv.bvsdiv(&rv);
             (result, trap)
         }
+        ValueAst::RemU(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            let zero = BV::from_u64(ctx, 0, I32_BITS);
+            let rem_trap = rv._eq(&zero);
+            let trap = Bool::or(ctx, &[&lt, &rt, &rem_trap]);
+            let result = lv.bvurem(&rv);
+            (result, trap)
+        }
+        ValueAst::RemS(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            let zero = BV::from_u64(ctx, 0, I32_BITS);
+            let rem_trap = rv._eq(&zero);
+            let trap = Bool::or(ctx, &[&lt, &rt, &rem_trap]);
+            let result = lv.bvsrem(&rv);
+            (result, trap)
+        }
         ValueAst::Shl(l, r) => {
             let (lv, lt) = eval_ast_z3(ctx, l, vars);
             let (rv, rt) = eval_ast_z3(ctx, r, vars);
             let mask = BV::from_u64(ctx, 31, I32_BITS);
             let shift = rv.bvand(&mask);
             (lv.bvshl(&shift), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::And(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (lv.bvand(&rv), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Or(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (lv.bvor(&rv), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Xor(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (lv.bvxor(&rv), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::ShrU(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            let mask = BV::from_u64(ctx, 31, I32_BITS);
+            let shift = rv.bvand(&mask);
+            (lv.bvlshr(&shift), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::ShrS(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            let mask = BV::from_u64(ctx, 31, I32_BITS);
+            let shift = rv.bvand(&mask);
+            (lv.bvashr(&shift), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Rotl(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            let mask = BV::from_u64(ctx, 31, I32_BITS);
+            let shift = rv.bvand(&mask);
+            (lv.bvrotl(&shift), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Rotr(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            let mask = BV::from_u64(ctx, 31, I32_BITS);
+            let shift = rv.bvand(&mask);
+            (lv.bvrotr(&shift), Bool::or(ctx, &[&lt, &rt]))
         }
         ValueAst::Eq(l, r) => {
             let (lv, lt) = eval_ast_z3(ctx, l, vars);
@@ -630,6 +849,9 @@ fn is_commutative_swap(lhs: &ValueAst, rhs: &ValueAst) -> bool {
     match (lhs, rhs) {
         (ValueAst::Add(l1, r1), ValueAst::Add(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         (ValueAst::Mul(l1, r1), ValueAst::Mul(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
+        (ValueAst::And(l1, r1), ValueAst::And(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
+        (ValueAst::Or(l1, r1), ValueAst::Or(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
+        (ValueAst::Xor(l1, r1), ValueAst::Xor(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         (ValueAst::Eq(l1, r1), ValueAst::Eq(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         (ValueAst::Ne(l1, r1), ValueAst::Ne(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         _ => false,

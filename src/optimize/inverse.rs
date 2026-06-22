@@ -269,6 +269,15 @@ fn inst_kind_to_sem(kind: InstKind) -> SemOp {
         InstKind::I32Shl => SemOp::I32Shl,
         InstKind::I32DivU => SemOp::I32DivU,
         InstKind::I32DivS => SemOp::I32DivS,
+        InstKind::I32RemU => SemOp::I32RemU,
+        InstKind::I32RemS => SemOp::I32RemS,
+        InstKind::I32And => SemOp::I32And,
+        InstKind::I32Or => SemOp::I32Or,
+        InstKind::I32Xor => SemOp::I32Xor,
+        InstKind::I32ShrU => SemOp::I32ShrU,
+        InstKind::I32ShrS => SemOp::I32ShrS,
+        InstKind::I32Rotl => SemOp::I32Rotl,
+        InstKind::I32Rotr => SemOp::I32Rotr,
         InstKind::I32Eq => SemOp::I32Eq,
         InstKind::I32Ne => SemOp::I32Ne,
         InstKind::I32LtS => SemOp::I32LtS,
@@ -320,6 +329,7 @@ mod tests {
         Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
             TEST_SYNTHESIS_AST_SIZE,
             10,
+            1,
         )))
     }
 

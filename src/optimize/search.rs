@@ -392,7 +392,7 @@ mod tests {
     use crate::wasm::SegmentBounds;
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10))
+        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10, 1))
     }
 
     fn example_segment() -> StraightSegment {

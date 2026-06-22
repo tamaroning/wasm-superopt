@@ -86,11 +86,21 @@ pub fn optimize_segments(
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
     solver: SolverKind,
+    jobs: usize,
 ) -> Vec<SegmentOptResult> {
-    segments
-        .iter()
-        .map(|segment| optimize_segment(segment, rules, cfg, solver))
-        .collect()
+    if jobs <= 1 {
+        return segments
+            .iter()
+            .map(|segment| optimize_segment(segment, rules, cfg, solver))
+            .collect();
+    }
+    crate::parallel::run_with_threads(jobs, || {
+        use rayon::prelude::*;
+        segments
+            .par_iter()
+            .map(|segment| optimize_segment(segment, rules, cfg, solver))
+            .collect()
+    })
 }
 
 fn default_timeout_label(cfg: &SearchConfig) -> String {
@@ -132,13 +142,14 @@ pub fn print_segment_result(result: &SegmentOptResult) {
     }
 }
 
-/// Optimize segments one-by-one, printing progress and flushing after each.
+/// Optimize segments, printing progress and flushing after each (sequential) or in batch (parallel).
 pub fn optimize_and_print_segments(
     segments: &[StraightSegment],
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
     solver: SolverKind,
     max_segment_instr: usize,
+    jobs: usize,
 ) -> Vec<SegmentOptResult> {
     let segments = crate::wasm::split_segments(segments, max_segment_instr);
     let total = segments.len();
@@ -147,29 +158,47 @@ pub fn optimize_and_print_segments(
     } else {
         String::new()
     };
+    let jobs_note = if jobs > 1 {
+        format!(", jobs={jobs}")
+    } else {
+        String::new()
+    };
     println!(
-        "=== Optimizing {total} segment(s) (solver: {solver:?}, timeout: {}{split_note}) ===\n",
-        default_timeout_label(cfg)
+        "=== Optimizing {total} segment(s) (solver: {solver:?}, timeout: {}{}{jobs_note}) ===\n",
+        default_timeout_label(cfg),
+        split_note
     );
     let _ = io::stdout().flush();
 
-    let mut results = Vec::with_capacity(total);
-    for (i, segment) in segments.iter().enumerate() {
-        eprintln!(
-            "[{}/{}] func {} segment {} — {} instr ...",
-            i + 1,
-            total,
-            segment.func_index,
-            segment.label(),
-            segment.original_len(),
-        );
-        let _ = io::stderr().flush();
+    if jobs <= 1 {
+        let mut results = Vec::with_capacity(total);
+        for (i, segment) in segments.iter().enumerate() {
+            eprintln!(
+                "[{}/{}] func {} segment {} — {} instr ...",
+                i + 1,
+                total,
+                segment.func_index,
+                segment.label(),
+                segment.original_len(),
+            );
+            let _ = io::stderr().flush();
 
-        let result = optimize_segment(segment, rules, cfg, solver);
-        print_segment_result(&result);
-        let _ = io::stdout().flush();
-        results.push(result);
+            let result = optimize_segment(segment, rules, cfg, solver);
+            print_segment_result(&result);
+            let _ = io::stdout().flush();
+            results.push(result);
+        }
+        println!();
+        return results;
     }
+
+    eprintln!("optimizing {total} segment(s) with {jobs} threads …");
+    let _ = io::stderr().flush();
+    let results = optimize_segments(&segments, rules, cfg, solver, jobs);
+    for result in &results {
+        print_segment_result(result);
+    }
+    let _ = io::stdout().flush();
     println!();
     results
 }
@@ -212,7 +241,7 @@ mod tests {
     use crate::wasm::parse_wasm_bytes;
 
     fn rules() -> Vec<Rewrite<ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10))
+        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10, 1))
     }
 
     #[test]
@@ -238,6 +267,7 @@ mod tests {
             &rules(),
             &SearchConfig::default(),
             SolverKind::Astar,
+            1,
         );
         let opt = results[0].optimized.as_ref().expect("optimized");
         assert!(opt.len() <= info.segments[0].original_len());
@@ -300,6 +330,7 @@ mod tests {
             &rules(),
             &SearchConfig::default(),
             SolverKind::Astar,
+            1,
         );
         let opt = results[0].optimized.as_ref().expect("optimized");
         assert!(

@@ -104,7 +104,10 @@ pub fn derive_rule_binop_spec(kind: InstKind) -> InstSpec {
         kind,
         pops: POPS_2,
         pushes: PUSHES_1,
-        can_trap: matches!(kind, InstKind::I32DivU | InstKind::I32DivS),
+        can_trap: matches!(
+            kind,
+            InstKind::I32DivU | InstKind::I32DivS | InstKind::I32RemU | InstKind::I32RemS
+        ),
     }
 }
 

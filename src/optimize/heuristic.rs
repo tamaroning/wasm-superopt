@@ -111,6 +111,15 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         | ValueLang::I32Shl([a, b])
         | ValueLang::I32DivU([a, b])
         | ValueLang::I32DivS([a, b])
+        | ValueLang::I32RemU([a, b])
+        | ValueLang::I32RemS([a, b])
+        | ValueLang::I32And([a, b])
+        | ValueLang::I32Or([a, b])
+        | ValueLang::I32Xor([a, b])
+        | ValueLang::I32ShrU([a, b])
+        | ValueLang::I32ShrS([a, b])
+        | ValueLang::I32Rotl([a, b])
+        | ValueLang::I32Rotr([a, b])
         | ValueLang::I32Eq([a, b])
         | ValueLang::I32Ne([a, b])
         | ValueLang::I32LtS([a, b])
@@ -149,6 +158,7 @@ mod tests {
         Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
             TEST_SYNTHESIS_AST_SIZE,
             10,
+            1,
         )))
     }
 

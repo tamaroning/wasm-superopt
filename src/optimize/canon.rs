@@ -124,6 +124,15 @@ impl Canonizer {
                 ValueLang::I32Shl([a, b]) => Some((InstKind::I32Shl, *a, *b)),
                 ValueLang::I32DivU([a, b]) => Some((InstKind::I32DivU, *a, *b)),
                 ValueLang::I32DivS([a, b]) => Some((InstKind::I32DivS, *a, *b)),
+                ValueLang::I32RemU([a, b]) => Some((InstKind::I32RemU, *a, *b)),
+                ValueLang::I32RemS([a, b]) => Some((InstKind::I32RemS, *a, *b)),
+                ValueLang::I32And([a, b]) => Some((InstKind::I32And, *a, *b)),
+                ValueLang::I32Or([a, b]) => Some((InstKind::I32Or, *a, *b)),
+                ValueLang::I32Xor([a, b]) => Some((InstKind::I32Xor, *a, *b)),
+                ValueLang::I32ShrU([a, b]) => Some((InstKind::I32ShrU, *a, *b)),
+                ValueLang::I32ShrS([a, b]) => Some((InstKind::I32ShrS, *a, *b)),
+                ValueLang::I32Rotl([a, b]) => Some((InstKind::I32Rotl, *a, *b)),
+                ValueLang::I32Rotr([a, b]) => Some((InstKind::I32Rotr, *a, *b)),
                 _ => None,
             };
             if let Some((kind, a, b)) = parsed {
@@ -164,7 +173,7 @@ mod tests {
     use crate::value::parse_value_expr;
 
     fn rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10))
+        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10, 1))
     }
 
     #[test]

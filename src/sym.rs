@@ -92,6 +92,51 @@ fn go_subtree(
             let b = go_subtree(src, *b, dst, memo);
             dst.add(ValueLang::I32DivS([a, b]))
         }
+        ValueLang::I32RemU([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32RemU([a, b]))
+        }
+        ValueLang::I32RemS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32RemS([a, b]))
+        }
+        ValueLang::I32And([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32And([a, b]))
+        }
+        ValueLang::I32Or([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Or([a, b]))
+        }
+        ValueLang::I32Xor([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Xor([a, b]))
+        }
+        ValueLang::I32ShrU([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32ShrU([a, b]))
+        }
+        ValueLang::I32ShrS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32ShrS([a, b]))
+        }
+        ValueLang::I32Rotl([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Rotl([a, b]))
+        }
+        ValueLang::I32Rotr([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I32Rotr([a, b]))
+        }
         ValueLang::I32Eq([a, b]) => {
             let a = go_subtree(src, *a, dst, memo);
             let b = go_subtree(src, *b, dst, memo);
@@ -249,7 +294,16 @@ impl SymMachine {
             | SemOp::I32Mul
             | SemOp::I32DivU
             | SemOp::I32DivS
+            | SemOp::I32RemU
+            | SemOp::I32RemS
             | SemOp::I32Shl
+            | SemOp::I32And
+            | SemOp::I32Or
+            | SemOp::I32Xor
+            | SemOp::I32ShrU
+            | SemOp::I32ShrS
+            | SemOp::I32Rotl
+            | SemOp::I32Rotr
             | SemOp::I32Eq
             | SemOp::I32Ne
             | SemOp::I32LtS
@@ -263,7 +317,16 @@ impl SymMachine {
                     SemOp::I32Mul => parse_value_expr(&format!("(i32.mul {a} {b})")),
                     SemOp::I32DivU => parse_value_expr(&format!("(i32.div_u {a} {b})")),
                     SemOp::I32DivS => parse_value_expr(&format!("(i32.div_s {a} {b})")),
+                    SemOp::I32RemU => parse_value_expr(&format!("(i32.rem_u {a} {b})")),
+                    SemOp::I32RemS => parse_value_expr(&format!("(i32.rem_s {a} {b})")),
                     SemOp::I32Shl => parse_value_expr(&format!("(i32.shl {a} {b})")),
+                    SemOp::I32And => parse_value_expr(&format!("(i32.and {a} {b})")),
+                    SemOp::I32Or => parse_value_expr(&format!("(i32.or {a} {b})")),
+                    SemOp::I32Xor => parse_value_expr(&format!("(i32.xor {a} {b})")),
+                    SemOp::I32ShrU => parse_value_expr(&format!("(i32.shr_u {a} {b})")),
+                    SemOp::I32ShrS => parse_value_expr(&format!("(i32.shr_s {a} {b})")),
+                    SemOp::I32Rotl => parse_value_expr(&format!("(i32.rotl {a} {b})")),
+                    SemOp::I32Rotr => parse_value_expr(&format!("(i32.rotr {a} {b})")),
                     SemOp::I32Eq => parse_value_expr(&format!("(i32.eq {a} {b})")),
                     SemOp::I32Ne => parse_value_expr(&format!("(i32.ne {a} {b})")),
                     SemOp::I32LtS => parse_value_expr(&format!("(i32.lt_s {a} {b})")),

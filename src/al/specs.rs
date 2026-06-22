@@ -14,7 +14,16 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         | SemOp::I32Mul
         | SemOp::I32Shl
         | SemOp::I32DivU
-        | SemOp::I32DivS => {
+        | SemOp::I32DivS
+        | SemOp::I32RemU
+        | SemOp::I32RemS
+        | SemOp::I32And
+        | SemOp::I32Or
+        | SemOp::I32Xor
+        | SemOp::I32ShrU
+        | SemOp::I32ShrS
+        | SemOp::I32Rotl
+        | SemOp::I32Rotr => {
             panic!("binop {op:?} uses meta AL (Step_pure/binop), not flat AlSpec")
         }
         SemOp::I32Eq

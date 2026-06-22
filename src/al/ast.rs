@@ -153,6 +153,14 @@ pub enum Expr {
     BitOr(Box<Expr>, Box<Expr>),
     /// Bitwise xor (`$ixor_`).
     BitXor(Box<Expr>, Box<Expr>),
+    /// Logical right shift (`$ishr_` U).
+    LShr(Box<Expr>, Box<Expr>),
+    /// Arithmetic right shift (`$ishr_` S).
+    AShr(Box<Expr>, Box<Expr>),
+    /// Rotate left (`$irotl_`).
+    Rotl(Box<Expr>, Box<Expr>),
+    /// Rotate right (`$irotr_`).
+    Rotr(Box<Expr>, Box<Expr>),
     /// `BinE Pow` — exponentiation.
     Pow(Box<Expr>, Box<Expr>),
     /// `UnE` negation on integers.

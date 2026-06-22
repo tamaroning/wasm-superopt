@@ -49,9 +49,18 @@ pub fn semop_stack_effect(op: &SemOp) -> (usize, usize) {
         SemOp::I32Add
         | SemOp::I32Sub
         | SemOp::I32Mul
-        | SemOp::I32DivU
+        |         SemOp::I32DivU
         | SemOp::I32DivS
+        | SemOp::I32RemU
+        | SemOp::I32RemS
         | SemOp::I32Shl
+        | SemOp::I32And
+        | SemOp::I32Or
+        | SemOp::I32Xor
+        | SemOp::I32ShrU
+        | SemOp::I32ShrS
+        | SemOp::I32Rotl
+        | SemOp::I32Rotr
         | SemOp::I32Eq
         | SemOp::I32Ne
         | SemOp::I32LtS
@@ -76,9 +85,18 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         Operator::I32Add
         | Operator::I32Sub
         | Operator::I32Mul
-        | Operator::I32DivU
+        |         Operator::I32DivU
         | Operator::I32DivS
+        | Operator::I32RemU
+        | Operator::I32RemS
         | Operator::I32Shl
+        | Operator::I32And
+        | Operator::I32Or
+        | Operator::I32Xor
+        | Operator::I32ShrU
+        | Operator::I32ShrS
+        | Operator::I32Rotl
+        | Operator::I32Rotr
         | Operator::I32Eq
         | Operator::I32Ne
         | Operator::I32LtS

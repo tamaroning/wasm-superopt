@@ -42,7 +42,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 9;
+const RULES_CACHE_FORMAT_VERSION: u32 = 10;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
@@ -88,17 +88,20 @@ fn save_cached_rules(max_ast_size: usize, random_tests: usize, rules: &[Synthesi
     ));
 }
 
-pub fn load_or_synthesize_rules(max_ast_size: usize, random_tests: usize) -> Vec<SynthesizedRule> {
+pub fn load_or_synthesize_rules(
+    max_ast_size: usize,
+    random_tests: usize,
+    jobs: usize,
+) -> Vec<SynthesizedRule> {
     if let Some(rules) = load_cached_rules(max_ast_size) {
         return rules;
     }
-    let rules = synthesize_rules(max_ast_size, random_tests);
+    let rules = synthesize_rules(max_ast_size, random_tests, jobs);
     save_cached_rules(max_ast_size, random_tests, &rules);
     rules
 }
 
-pub fn synthesize_rules(max_ast_size: usize, random_tests: usize) -> Vec<SynthesizedRule> {
-    let ctx = z3_context();
+pub fn synthesize_rules(max_ast_size: usize, random_tests: usize, jobs: usize) -> Vec<SynthesizedRule> {
     let inputs = synthesis_inputs();
     let mut proven = Vec::new();
     let mut seen = HashSet::new();
@@ -106,91 +109,80 @@ pub fn synthesize_rules(max_ast_size: usize, random_tests: usize) -> Vec<Synthes
     let mut z3_queries = 0usize;
 
     report_progress(&format!(
-        "synthesis: max_ast_size={max_ast_size}, random_tests={random_tests}, {} input stacks",
+        "synthesis: max_ast_size={max_ast_size}, random_tests={random_tests}, jobs={jobs}, {} input stacks",
         inputs.len()
     ));
 
-    for (input_idx, input) in inputs.iter().enumerate() {
-        let num_inputs = input.len();
-        let stack_desc = format_input_stack(input);
-        report_progress(&format!(
-            "[{}/{}] input stack {stack_desc}: enumerating ASTs…",
-            input_idx + 1,
-            inputs.len()
-        ));
+    crate::parallel::run_with_threads(jobs, || {
+        for (input_idx, input) in inputs.iter().enumerate() {
+            let num_inputs = input.len();
+            let stack_desc = format_input_stack(input);
+            report_progress(&format!(
+                "[{}/{}] input stack {stack_desc}: enumerating ASTs…",
+                input_idx + 1,
+                inputs.len()
+            ));
 
-        let asts: Vec<ValueAst> = enumerate_value_asts(max_ast_size, num_inputs)
-            .into_iter()
-            .filter(|ast| ast.uses_each_symbol_once(num_inputs))
-            .collect();
-        let total_pairs = count_candidate_pairs(num_inputs, &asts);
+            let asts: Vec<ValueAst> = enumerate_value_asts(max_ast_size, num_inputs)
+                .into_iter()
+                .filter(|ast| ast.uses_each_symbol_once(num_inputs))
+                .collect();
+            let candidates = collect_candidate_indices(num_inputs, &asts);
+            let total_pairs = candidates.len();
 
-        report_progress(&format!(
-            "  {} ASTs (all symbols used), {total_pairs} candidate pairs",
-            asts.len()
-        ));
+            report_progress(&format!(
+                "  {} ASTs (all symbols used), {total_pairs} candidate pairs",
+                asts.len()
+            ));
 
-        let mut pairs_in_input = 0usize;
-        for i in 0..asts.len() {
-            for j in 0..asts.len() {
-                if i == j {
-                    continue;
-                }
-                let lhs = &asts[i];
-                let rhs = &asts[j];
-                if !is_directed_ast_pair(lhs, rhs) {
-                    continue;
-                }
-                if !is_ast_rewrite_pair(num_inputs, lhs, rhs) {
-                    continue;
-                }
-                pairs_checked += 1;
-                pairs_in_input += 1;
+            let batch = if jobs <= 1 {
+                check_candidates_sequential(
+                    num_inputs,
+                    &asts,
+                    &candidates,
+                    random_tests,
+                    &mut pairs_checked,
+                    &mut z3_queries,
+                    total_pairs,
+                    proven.len(),
+                )
+            } else {
+                let (batch, checked, z3) = check_candidates_parallel(
+                    num_inputs,
+                    &asts,
+                    &candidates,
+                    random_tests,
+                    jobs,
+                    proven.len(),
+                );
+                pairs_checked += checked;
+                z3_queries += z3;
+                batch
+            };
 
-                let report_interval = (total_pairs / 20).clamp(1, 100);
-                if pairs_in_input == 1
-                    || pairs_in_input.is_multiple_of(report_interval)
-                    || pairs_in_input == total_pairs
-                {
+            for rule in batch {
+                if seen.insert(rule.key) {
+                    let name = format!("syn-{}", proven.len());
+                    proven.push(SynthesizedRule {
+                        name,
+                        lhs: rule.lhs_pat,
+                        rhs: rule.rhs_pat,
+                        input: input.clone(),
+                    });
                     report_progress(&format!(
-                        "  pairs {pairs_in_input}/{total_pairs} (total {pairs_checked}), Z3 {z3_queries}, rules {}",
+                        "  + rule {} ({} rules total)",
+                        proven.last().expect("just pushed").name,
                         proven.len()
                     ));
                 }
-
-                if !asts_valid_rewrite_random(num_inputs, lhs, rhs, random_tests) {
-                    continue;
-                }
-                z3_queries += 1;
-                if !asts_valid_rewrite_z3(&ctx, num_inputs, lhs, rhs) {
-                    continue;
-                }
-                let lhs_pat = lhs.to_pattern();
-                let rhs_pat = rhs.to_pattern();
-                let key = canonical_key(&lhs_pat, &rhs_pat);
-                if !seen.insert(key) {
-                    continue;
-                }
-                let name = format!("syn-{}", proven.len());
-                proven.push(SynthesizedRule {
-                    name,
-                    lhs: lhs_pat,
-                    rhs: rhs_pat,
-                    input: input.clone(),
-                });
-                report_progress(&format!(
-                    "  + rule {} ({} rules total)",
-                    proven.last().expect("just pushed").name,
-                    proven.len()
-                ));
             }
-        }
 
-        report_progress(&format!(
-            "  done input stack {stack_desc}: {} rules so far",
-            proven.len()
-        ));
-    }
+            report_progress(&format!(
+                "  done input stack {stack_desc}: {} rules so far",
+                proven.len()
+            ));
+        }
+    });
 
     report_progress(&format!(
         "synthesis complete: {pairs_checked} pairs checked, {z3_queries} Z3 queries, {} rules",
@@ -200,8 +192,123 @@ pub fn synthesize_rules(max_ast_size: usize, random_tests: usize) -> Vec<Synthes
     proven
 }
 
-fn count_candidate_pairs(num_inputs: usize, asts: &[ValueAst]) -> usize {
-    let mut n = 0usize;
+struct CandidateRule {
+    key: (String, String),
+    lhs_pat: String,
+    rhs_pat: String,
+}
+
+const PAIR_REPORT_INTERVAL: usize = 1000;
+
+fn should_report_pair_progress(done: usize, total_pairs: usize) -> bool {
+    done.is_multiple_of(PAIR_REPORT_INTERVAL) || done == total_pairs
+}
+
+fn check_candidates_sequential(
+    num_inputs: usize,
+    asts: &[ValueAst],
+    candidates: &[(usize, usize)],
+    random_tests: usize,
+    pairs_checked: &mut usize,
+    z3_queries: &mut usize,
+    total_pairs: usize,
+    rules_so_far: usize,
+) -> Vec<CandidateRule> {
+    let ctx = z3_context();
+    let mut found = Vec::new();
+    for (pairs_in_input, &(i, j)) in candidates.iter().enumerate() {
+        let lhs = &asts[i];
+        let rhs = &asts[j];
+        *pairs_checked += 1;
+        let done = pairs_in_input + 1;
+
+        if should_report_pair_progress(done, total_pairs) {
+            report_progress(&format!(
+                "  pairs {done}/{total_pairs} (total {pairs_checked}), Z3 {z3_queries}, rules {}",
+                rules_so_far + found.len(),
+            ));
+        }
+
+        if !asts_valid_rewrite_random(num_inputs, lhs, rhs, random_tests) {
+            continue;
+        }
+        *z3_queries += 1;
+        if !asts_valid_rewrite_z3(&ctx, num_inputs, lhs, rhs) {
+            continue;
+        }
+        let lhs_pat = lhs.to_pattern();
+        let rhs_pat = rhs.to_pattern();
+        found.push(CandidateRule {
+            key: canonical_key(&lhs_pat, &rhs_pat),
+            lhs_pat,
+            rhs_pat,
+        });
+    }
+    found
+}
+
+fn check_candidates_parallel(
+    num_inputs: usize,
+    asts: &[ValueAst],
+    candidates: &[(usize, usize)],
+    random_tests: usize,
+    jobs: usize,
+    rules_so_far: usize,
+) -> (Vec<CandidateRule>, usize, usize) {
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let pairs_done = AtomicUsize::new(0);
+    let z3_done = AtomicUsize::new(0);
+    let rules_found = AtomicUsize::new(0);
+    let total_pairs = candidates.len();
+
+    report_progress(&format!("  checking {total_pairs} pairs with {jobs} threads…"));
+
+    let found: Vec<CandidateRule> = candidates
+        .par_iter()
+        .filter_map(|&(i, j)| {
+            let lhs = &asts[i];
+            let rhs = &asts[j];
+            let n = pairs_done.fetch_add(1, Ordering::Relaxed) + 1;
+            if should_report_pair_progress(n, total_pairs) {
+                report_progress(&format!(
+                    "  pairs {n}/{total_pairs}, Z3 {}, rules {}",
+                    z3_done.load(Ordering::Relaxed),
+                    rules_so_far + rules_found.load(Ordering::Relaxed),
+                ));
+            }
+            if !asts_valid_rewrite_random(num_inputs, lhs, rhs, random_tests) {
+                return None;
+            }
+            z3_done.fetch_add(1, Ordering::Relaxed);
+            let ctx = z3_context();
+            if !asts_valid_rewrite_z3(&ctx, num_inputs, lhs, rhs) {
+                return None;
+            }
+            rules_found.fetch_add(1, Ordering::Relaxed);
+            let lhs_pat = lhs.to_pattern();
+            let rhs_pat = rhs.to_pattern();
+            Some(CandidateRule {
+                key: canonical_key(&lhs_pat, &rhs_pat),
+                lhs_pat,
+                rhs_pat,
+            })
+        })
+        .collect();
+
+    let checked = pairs_done.load(Ordering::Relaxed);
+    let z3 = z3_done.load(Ordering::Relaxed);
+    report_progress(&format!(
+        "  parallel check done: {checked} pairs, {z3} Z3 queries, {} candidates, {} rules",
+        found.len(),
+        rules_so_far + rules_found.load(Ordering::Relaxed),
+    ));
+    (found, checked, z3)
+}
+
+fn collect_candidate_indices(num_inputs: usize, asts: &[ValueAst]) -> Vec<(usize, usize)> {
+    let mut indices = Vec::new();
     for i in 0..asts.len() {
         for j in 0..asts.len() {
             if i == j {
@@ -210,11 +317,11 @@ fn count_candidate_pairs(num_inputs: usize, asts: &[ValueAst]) -> usize {
             let lhs = &asts[i];
             let rhs = &asts[j];
             if is_directed_ast_pair(lhs, rhs) && is_ast_rewrite_pair(num_inputs, lhs, rhs) {
-                n += 1;
+                indices.push((i, j));
             }
         }
     }
-    n
+    indices
 }
 
 fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
@@ -327,11 +434,11 @@ mod tests {
                 .into_iter()
                 .filter(|ast| ast.uses_each_symbol_once(input.len()))
                 .collect();
-            total_pairs += count_candidate_pairs(input.len(), &asts);
+            total_pairs += collect_candidate_indices(input.len(), &asts).len();
         }
         assert!(
-            total_pairs < 2_000_000,
-            "expected pruned pair count under 2M, got {total_pairs}"
+            total_pairs < 6_000_000,
+            "expected pruned pair count under 6M, got {total_pairs}"
         );
     }
 }

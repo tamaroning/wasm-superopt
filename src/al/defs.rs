@@ -57,6 +57,10 @@ pub mod types {
         Rem(Sign),
         And,
         Or,
+        Xor,
+        Shr(Sign),
+        Rotl,
+        Rotr,
     }
 
     impl WasmBinOp {
@@ -72,6 +76,11 @@ pub mod types {
                 WasmBinOp::Rem(Sign::S) => Some(BinOpKind::RemS),
                 WasmBinOp::And => Some(BinOpKind::And),
                 WasmBinOp::Or => Some(BinOpKind::Or),
+                WasmBinOp::Xor => Some(BinOpKind::Xor),
+                WasmBinOp::Shr(Sign::U) => Some(BinOpKind::ShrU),
+                WasmBinOp::Shr(Sign::S) => Some(BinOpKind::ShrS),
+                WasmBinOp::Rotl => Some(BinOpKind::Rotl),
+                WasmBinOp::Rotr => Some(BinOpKind::Rotr),
             }
         }
 
@@ -101,6 +110,11 @@ pub mod types {
         Shl,
         And,
         Or,
+        Xor,
+        ShrU,
+        ShrS,
+        Rotl,
+        Rotr,
     }
 
     impl BinOpKind {
@@ -116,6 +130,11 @@ pub mod types {
                 BinOpKind::Shl => "Shl",
                 BinOpKind::And => "And",
                 BinOpKind::Or => "Or",
+                BinOpKind::Xor => "Xor",
+                BinOpKind::ShrU => "ShrU",
+                BinOpKind::ShrS => "ShrS",
+                BinOpKind::Rotl => "Rotl",
+                BinOpKind::Rotr => "Rotr",
             }
         }
 
@@ -130,7 +149,12 @@ pub mod types {
                 | BinOpKind::Mul
                 | BinOpKind::Shl
                 | BinOpKind::And
-                | BinOpKind::Or => false,
+                | BinOpKind::Or
+                | BinOpKind::Xor
+                | BinOpKind::ShrU
+                | BinOpKind::ShrS
+                | BinOpKind::Rotl
+                | BinOpKind::Rotr => false,
             }
         }
 
@@ -160,8 +184,13 @@ pub mod types {
                 | BinOpKind::Sub
                 | BinOpKind::Mul
                 | BinOpKind::Shl
-                |                 BinOpKind::And
-                | BinOpKind::Or => Bool::from_bool(ctx, false),
+                | BinOpKind::And
+                | BinOpKind::Or
+                | BinOpKind::Xor
+                | BinOpKind::ShrU
+                | BinOpKind::ShrS
+                | BinOpKind::Rotl
+                | BinOpKind::Rotr => Bool::from_bool(ctx, false),
             }
         }
     }
@@ -450,6 +479,39 @@ fn inn_ior(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
 fn inn_ishl(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
     wrap_mod(
         Expr::Shl(
+            Box::new(i_1),
+            Box::new(Expr::Rem(Box::new(i_2), Box::new(n.clone()))),
+        ),
+        full_modulus(n),
+    )
+}
+
+fn inn_ixor(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
+    wrap_mod(Expr::BitXor(Box::new(i_1), Box::new(i_2)), full_modulus(n))
+}
+
+fn inn_ishr(n: Expr, sx: Sign, i_1: Expr, i_2: Expr) -> Expr {
+    let amount = Expr::Rem(Box::new(i_2), Box::new(n.clone()));
+    let shifted = match sx {
+        Sign::U => Expr::LShr(Box::new(i_1), Box::new(amount)),
+        Sign::S => Expr::AShr(Box::new(i_1), Box::new(amount)),
+    };
+    wrap_mod(shifted, full_modulus(n))
+}
+
+fn inn_irotl(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
+    wrap_mod(
+        Expr::Rotl(
+            Box::new(i_1),
+            Box::new(Expr::Rem(Box::new(i_2), Box::new(n.clone()))),
+        ),
+        full_modulus(n),
+    )
+}
+
+fn inn_irotr(n: Expr, i_1: Expr, i_2: Expr) -> Expr {
+    wrap_mod(
+        Expr::Rotr(
             Box::new(i_1),
             Box::new(Expr::Rem(Box::new(i_2), Box::new(n.clone()))),
         ),
@@ -1026,6 +1088,61 @@ pub fn binop_def() -> FuncA {
         Instr::IfI {
             cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Or)),
             then_steps: vec![singleton_binop(inn_ior(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Xor)),
+            then_steps: vec![singleton_binop(inn_ixor(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpCaseIs(p("binop_"), BinOpCase::Shr)),
+            then_steps: vec![
+                Instr::LetI {
+                    lhs: LetLhs::BinOpCase(BinOpCase::Shr, "sx"),
+                    expr: p("binop_"),
+                },
+                Instr::IfI {
+                    cond: InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::U))),
+                    then_steps: vec![singleton_binop(inn_ishr(
+                        sizenn_nt.clone(),
+                        Sign::U,
+                        i_1.clone(),
+                        i_2.clone(),
+                    ))],
+                    else_steps: vec![Instr::AssertI(InstrCond::Pred(eq(
+                        p("sx"),
+                        Expr::SignLit(Sign::S),
+                    ))), singleton_binop(inn_ishr(
+                        sizenn_nt.clone(),
+                        Sign::S,
+                        i_1.clone(),
+                        i_2.clone(),
+                    ))],
+                },
+            ],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Rotl)),
+            then_steps: vec![singleton_binop(inn_irotl(
+                sizenn_nt.clone(),
+                i_1.clone(),
+                i_2.clone(),
+            ))],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Rotr)),
+            then_steps: vec![singleton_binop(inn_irotr(
                 sizenn_nt.clone(),
                 i_1.clone(),
                 i_2.clone(),
