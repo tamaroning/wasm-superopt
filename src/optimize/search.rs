@@ -142,13 +142,13 @@ fn reverse_ops(path: &[SemOp]) -> Vec<SemOp> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct MemoKey {
+pub(crate) struct MemoKey {
     goal: NormalizedGoal,
     remaining_storage: Vec<u32>,
     used_opaque: Vec<u32>,
 }
 
-fn memo_key(state: &SearchState, canon: &mut Canonizer) -> MemoKey {
+pub(crate) fn memo_key(state: &SearchState, canon: &mut Canonizer) -> MemoKey {
     MemoKey {
         goal: canon.normalize_state(&state.goal),
         remaining_storage: state.remaining_storage.iter().copied().collect(),
@@ -195,6 +195,18 @@ pub fn solve_bfs(
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> SearchResult {
+    solve_bfs_traced(segment, rules, cfg, None)
+}
+
+pub fn solve_bfs_traced(
+    segment: &StraightSegment,
+    rules: &[Rewrite<ValueLang, ()>],
+    cfg: &SearchConfig,
+    mut trace: Option<&mut super::search_graph::SearchTrace>,
+) -> SearchResult {
+    use super::search_graph::NodeKind;
+    use super::search::memo_key;
+
     let init = &segment.init;
     let bounds = &segment.bounds;
     let deadline = cfg.timeout_secs.map(SearchDeadline::new);
@@ -202,17 +214,34 @@ pub fn solve_bfs(
     let mut canon = Canonizer::new(rules.to_vec());
     let mut memo = HashMap::new();
     let mut queue = VecDeque::new();
-    queue.push_back((SearchState::initial(segment, &segment.fin), Vec::new(), 0usize));
+    let initial = SearchState::initial(segment, &segment.fin);
+    if let Some(tr) = trace.as_deref_mut() {
+        let key = memo_key(&initial, &mut canon);
+        tr.intern(&key, &initial, 0, NodeKind::Root);
+    }
+    queue.push_back((initial, Vec::new(), 0usize));
     let mut best = None;
     while let Some((state, path, depth)) = queue.pop_front() {
         if deadline.as_ref().is_some_and(|d| d.expired()) {
             timed_out = true;
             break;
         }
+        let parent_key = memo_key(&state, &mut canon);
+        let parent_id = trace
+            .as_ref()
+            .and_then(|tr| tr.node_id(&parent_key));
         if memo_seen(&memo, &state, depth, &mut canon) {
+            if let (Some(tr), Some(pid)) = (trace.as_deref_mut(), parent_id) {
+                tr.mark_memo_skip(pid);
+            }
             continue;
         }
-        if is_solution(&state, init, bounds, &mut canon) {
+        let is_sol = is_solution(&state, init, bounds, &mut canon);
+        if is_sol {
+            if let Some(tr) = trace.as_deref_mut() {
+                let key = memo_key(&state, &mut canon);
+                tr.intern(&key, &state, depth, NodeKind::Solution);
+            }
             if let Some(ops) = accept_solution(&path, segment, init, bounds, &mut canon) {
                 best = Some(ops);
                 break;
@@ -223,9 +252,18 @@ pub fn solve_bfs(
             continue;
         }
         for (PeelAction::Forward(op), next) in applicable_peels(&state, segment, bounds, &mut canon) {
+            let child_depth = depth + 1;
+            let child_key = memo_key(&next, &mut canon);
+            let pruned = memo
+                .get(&child_key)
+                .is_some_and(|&best_depth| best_depth <= child_depth);
+            if let (Some(tr), Some(pid)) = (trace.as_deref_mut(), parent_id) {
+                let child_id = tr.intern(&child_key, &next, child_depth, NodeKind::Intermediate);
+                tr.add_edge(pid, child_id, &op, pruned);
+            }
             let mut next_path = path.clone();
             next_path.push(op);
-            queue.push_back((next, next_path, depth + 1));
+            queue.push_back((next, next_path, child_depth));
         }
     }
     SearchResult {

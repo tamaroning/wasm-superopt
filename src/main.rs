@@ -63,6 +63,10 @@ struct Cli {
     #[arg(long, default_value_t = wasm::DEFAULT_MAX_SEGMENT_INSTR)]
     split: usize,
 
+    /// Dump BFS exploration DAG as Graphviz DOT to this path.
+    #[arg(long, value_name = "PATH")]
+    dump_search: Option<std::path::PathBuf>,
+
     /// Number of parallel jobs for rule synthesis and segment optimization.
     #[arg(short = 'j', long = "jobs", default_value_t = 1)]
     jobs: usize,
@@ -149,6 +153,7 @@ fn main() {
         cli.solver.into(),
         cli.split,
         cli.jobs,
+        cli.dump_search.as_deref(),
     );
     let (orig, opt, improved) = optimize::summarize(&results);
     println!(

@@ -6,19 +6,22 @@ pub(crate) mod fixtures;
 mod heuristic;
 mod inverse;
 mod search;
+mod search_graph;
 
 pub use search::{
     DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
     format_ops,
 };
+pub use search_graph::{SearchTrace, format_sym_state};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::wasm::StraightSegment;
 use egg::Rewrite;
-use search::{solve_astar, solve_bfs, solve_greedy_inv};
+use search::{solve_astar, solve_bfs_traced, solve_greedy_inv};
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SolverKind {
     Bfs,
     Greedy,
@@ -49,6 +52,16 @@ pub fn optimize_segment(
     cfg: &SearchConfig,
     solver: SolverKind,
 ) -> SegmentOptResult {
+    optimize_segment_with_trace(segment, rules, cfg, solver, None)
+}
+
+pub fn optimize_segment_with_trace(
+    segment: &StraightSegment,
+    rules: &[Rewrite<ValueLang, ()>],
+    cfg: &SearchConfig,
+    solver: SolverKind,
+    dump_search: Option<&Path>,
+) -> SegmentOptResult {
     let segment_cfg = cfg.for_segment(segment);
     if segment.ops.is_empty() {
         return SegmentOptResult {
@@ -64,16 +77,44 @@ pub fn optimize_segment(
             timed_out: false,
         };
     }
-    let result = match solver {
-        SolverKind::Bfs => solve_bfs(segment, rules, &segment_cfg),
-        SolverKind::Greedy => solve_greedy_inv(segment, rules, &segment_cfg),
-        SolverKind::Astar => solve_astar(segment, rules, &segment_cfg),
+    if dump_search.is_some() && solver != SolverKind::Bfs {
+        eprintln!("warning: --dump-search uses BFS (ignoring --solver {solver:?})");
+    }
+    let mut trace = dump_search.map(|_| SearchTrace::default());
+    let result = match (solver, dump_search.is_some()) {
+        (_, true) | (SolverKind::Bfs, _) => solve_bfs_traced(
+            segment,
+            rules,
+            &segment_cfg,
+            trace.as_mut(),
+        ),
+        (SolverKind::Greedy, _) => solve_greedy_inv(segment, rules, &segment_cfg),
+        (SolverKind::Astar, _) => solve_astar(segment, rules, &segment_cfg),
     };
+    if let (Some(path), Some(tr)) = (dump_search, trace.as_ref()) {
+        if let Err(e) = std::fs::write(path, tr.to_dot()) {
+            eprintln!("warning: failed to write {}: {e}", path.display());
+        } else {
+            eprintln!("wrote search graph to {}", path.display());
+        }
+    }
     SegmentOptResult {
         segment: segment.clone(),
         optimized: result.ops,
         timed_out: result.timed_out,
     }
+}
+
+fn dump_search_path(base: &Path, segment: &StraightSegment, _index: usize, total: usize) -> PathBuf {
+    if total <= 1 {
+        return base.to_path_buf();
+    }
+    let parent = base.parent().unwrap_or_else(|| Path::new("."));
+    let stem = base
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "search".to_string());
+    parent.join(format!("{stem}-f{}-s{}.dot", segment.func_index, segment.label()))
 }
 
 pub fn optimize_segments(
@@ -145,6 +186,7 @@ pub fn optimize_and_print_segments(
     solver: SolverKind,
     max_segment_instr: usize,
     jobs: usize,
+    dump_search: Option<&Path>,
 ) -> Vec<SegmentOptResult> {
     let segments = crate::wasm::split_segments(segments, max_segment_instr);
     let total = segments.len();
@@ -153,6 +195,10 @@ pub fn optimize_and_print_segments(
     } else {
         String::new()
     };
+    if jobs > 1 && dump_search.is_some() {
+        eprintln!("warning: --dump-search forces sequential optimization (jobs=1)");
+    }
+    let jobs = if dump_search.is_some() { 1 } else { jobs };
     let jobs_note = if jobs > 1 {
         format!(", jobs={jobs}")
     } else {
@@ -178,7 +224,14 @@ pub fn optimize_and_print_segments(
             );
             let _ = io::stderr().flush();
 
-            let result = optimize_segment(segment, rules, cfg, solver);
+            let dump_path = dump_search.map(|base| dump_search_path(base, segment, i, total));
+            let result = optimize_segment_with_trace(
+                segment,
+                rules,
+                cfg,
+                solver,
+                dump_path.as_deref(),
+            );
             print_segment_result(&result);
             let _ = io::stdout().flush();
             results.push(result);
