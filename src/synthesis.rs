@@ -42,7 +42,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 8;
+const RULES_CACHE_FORMAT_VERSION: u32 = 9;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
@@ -300,6 +300,15 @@ mod tests {
             Box::new(ValueAst::Symbol(1)),
         );
         assert_eq!(eq.to_pattern(), "(i32.eq ?a ?b)");
+    }
+
+    #[test]
+    fn ast_pattern_for_sub() {
+        let sub = ValueAst::Sub(
+            Box::new(ValueAst::Symbol(0)),
+            Box::new(ValueAst::Const(1)),
+        );
+        assert_eq!(sub.to_pattern(), "(i32.sub ?a 1)");
     }
 
     #[test]

@@ -103,7 +103,12 @@ fn default_timeout_label(cfg: &SearchConfig) -> String {
 
 pub fn print_segment_result(result: &SegmentOptResult) {
     let seg = &result.segment;
-    print!("func {} segment {} — {} instr", seg.func_index, seg.segment_index, seg.original_len());
+    print!(
+        "func {} segment {} — {} instr",
+        seg.func_index,
+        seg.label(),
+        seg.original_len()
+    );
     match &result.optimized {
         Some(ops) if ops.len() < seg.original_len() => {
             println!(
@@ -133,10 +138,17 @@ pub fn optimize_and_print_segments(
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
     solver: SolverKind,
+    max_segment_instr: usize,
 ) -> Vec<SegmentOptResult> {
+    let segments = crate::wasm::split_segments(segments, max_segment_instr);
     let total = segments.len();
+    let split_note = if max_segment_instr > 0 {
+        format!(", max {max_segment_instr} instr/chunk")
+    } else {
+        String::new()
+    };
     println!(
-        "=== Optimizing {total} segment(s) (solver: {solver:?}, timeout: {}) ===\n",
+        "=== Optimizing {total} segment(s) (solver: {solver:?}, timeout: {}{split_note}) ===\n",
         default_timeout_label(cfg)
     );
     let _ = io::stdout().flush();
@@ -148,7 +160,7 @@ pub fn optimize_and_print_segments(
             i + 1,
             total,
             segment.func_index,
-            segment.segment_index,
+            segment.label(),
             segment.original_len(),
         );
         let _ = io::stderr().flush();

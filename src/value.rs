@@ -13,6 +13,7 @@ pub enum ValueAst {
     Symbol(usize),
     Const(i32),
     Add(Box<ValueAst>, Box<ValueAst>),
+    Sub(Box<ValueAst>, Box<ValueAst>),
     Mul(Box<ValueAst>, Box<ValueAst>),
     DivU(Box<ValueAst>, Box<ValueAst>),
     DivS(Box<ValueAst>, Box<ValueAst>),
@@ -31,6 +32,7 @@ pub enum ValueAst {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ValueBinOp {
     Add,
+    Sub,
     Mul,
     DivU,
     DivS,
@@ -51,9 +53,10 @@ enum ValueUnOp {
 }
 
 impl ValueBinOp {
-    fn all() -> [Self; 10] {
+    fn all() -> [Self; 11] {
         [
             Self::Add,
+            Self::Sub,
             Self::Mul,
             Self::DivU,
             Self::DivS,
@@ -78,6 +81,7 @@ impl ValueAst {
         match self {
             Self::Symbol(_) | Self::Const(_) => 1,
             Self::Add(l, r)
+            | Self::Sub(l, r)
             | Self::Mul(l, r)
             | Self::DivU(l, r)
             | Self::DivS(l, r)
@@ -102,6 +106,7 @@ impl ValueAst {
             Self::Symbol(i) => counts[*i] += 1,
             Self::Const(_) => {}
             Self::Add(l, r)
+            | Self::Sub(l, r)
             | Self::Mul(l, r)
             | Self::DivU(l, r)
             | Self::DivS(l, r)
@@ -125,6 +130,7 @@ impl ValueAst {
             Self::Symbol(i) => format!("?{}", (b'a' + *i as u8) as char),
             Self::Const(n) => n.to_string(),
             Self::Add(l, r) => format!("(i32.add {} {})", l.to_pattern(), r.to_pattern()),
+            Self::Sub(l, r) => format!("(i32.sub {} {})", l.to_pattern(), r.to_pattern()),
             Self::Mul(l, r) => format!("(i32.mul {} {})", l.to_pattern(), r.to_pattern()),
             Self::DivU(l, r) => format!("(i32.div_u {} {})", l.to_pattern(), r.to_pattern()),
             Self::DivS(l, r) => format!("(i32.div_s {} {})", l.to_pattern(), r.to_pattern()),
@@ -146,6 +152,7 @@ impl ValueAst {
         let r = Box::new(right);
         match op {
             ValueBinOp::Add => Self::Add(l, r),
+            ValueBinOp::Sub => Self::Sub(l, r),
             ValueBinOp::Mul => Self::Mul(l, r),
             ValueBinOp::DivU => Self::DivU(l, r),
             ValueBinOp::DivS => Self::DivS(l, r),
@@ -279,6 +286,20 @@ fn eval_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> AstEvalResult {
             }
             AstEvalResult {
                 value: l.value.wrapping_add(r.value),
+                trap: false,
+            }
+        }
+        ValueAst::Sub(l, r) => {
+            let l = eval_ast_concrete(l, inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_ast_concrete(r, inputs);
+            if r.trap {
+                return r;
+            }
+            AstEvalResult {
+                value: l.value.wrapping_sub(r.value),
                 trap: false,
             }
         }
@@ -481,6 +502,11 @@ fn eval_ast_z3<'ctx>(
             let (lv, lt) = eval_ast_z3(ctx, l, vars);
             let (rv, rt) = eval_ast_z3(ctx, r, vars);
             (lv.bvadd(&rv), Bool::or(ctx, &[&lt, &rt]))
+        }
+        ValueAst::Sub(l, r) => {
+            let (lv, lt) = eval_ast_z3(ctx, l, vars);
+            let (rv, rt) = eval_ast_z3(ctx, r, vars);
+            (lv.bvsub(&rv), Bool::or(ctx, &[&lt, &rt]))
         }
         ValueAst::Mul(l, r) => {
             let (lv, lt) = eval_ast_z3(ctx, l, vars);

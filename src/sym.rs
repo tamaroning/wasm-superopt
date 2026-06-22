@@ -226,6 +226,14 @@ impl SymMachine {
         }
     }
 
+    /// Init state for a sub-chunk starting at the current machine position.
+    pub fn to_chunk_init_state(&self) -> SymState {
+        SymState {
+            stack: self.stack.clone(),
+            locals: BTreeMap::new(),
+        }
+    }
+
     pub fn exec(&mut self, op: &SemOp) -> Result<(), ForwardError> {
         self.exec_with_meta(op).map(|_| ())
     }

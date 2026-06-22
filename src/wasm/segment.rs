@@ -42,6 +42,8 @@ impl OpaqueMeta {
 pub struct StraightSegment {
     pub func_index: u32,
     pub segment_index: usize,
+    /// When set, this segment is part `0..part_total` of a split parent segment.
+    pub split_part: Option<(usize, usize)>,
     pub ops: Vec<SemOp>,
     pub init: SymState,
     pub fin: SymState,
@@ -53,6 +55,15 @@ pub struct StraightSegment {
 impl StraightSegment {
     pub fn original_len(&self) -> usize {
         self.ops.len()
+    }
+
+    pub fn label(&self) -> String {
+        match self.split_part {
+            Some((part, total)) if total > 1 => {
+                format!("{} part {}/{}", self.segment_index, part + 1, total)
+            }
+            _ => self.segment_index.to_string(),
+        }
     }
 
     pub fn storage_ids(&self) -> impl Iterator<Item = u32> + '_ {

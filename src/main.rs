@@ -58,6 +58,10 @@ struct Cli {
     /// Use 300s timeout per segment (SuperStack `-w` / DIRECT_TIMEOUT).
     #[arg(long, short = 'w')]
     direct_timeout: bool,
+
+    /// Split segments longer than N instructions (0 = no split; default 10).
+    #[arg(long, default_value_t = wasm::DEFAULT_MAX_SEGMENT_INSTR)]
+    split: usize,
 }
 
 impl From<SolverKind> for optimize::SolverKind {
@@ -143,6 +147,7 @@ fn main() {
         &rules,
         &cfg,
         cli.solver.into(),
+        cli.split,
     );
     let (orig, opt, improved) = optimize::summarize(&results);
     println!(

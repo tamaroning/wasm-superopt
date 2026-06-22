@@ -82,6 +82,7 @@ fn unop_wasm(op: &SemOp) -> Option<(NumType, WasmUnOp)> {
 pub fn concrete_ops() -> Vec<SemOp> {
     let mut ops = vec![
         SemOp::I32Add,
+        SemOp::I32Sub,
         SemOp::I32Mul,
         SemOp::I32DivU,
         SemOp::I32DivS,

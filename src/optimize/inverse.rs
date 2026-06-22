@@ -292,6 +292,7 @@ pub fn applicable_peels_arithmetic_only(
     let empty = StraightSegment {
         func_index: 0,
         segment_index: 0,
+        split_part: None,
         ops: vec![],
         init: g.clone(),
         fin: g.clone(),

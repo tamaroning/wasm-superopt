@@ -441,6 +441,7 @@ fn flush_segment(
     out.push(StraightSegment {
         func_index,
         segment_index: *segment_index,
+        split_part: None,
         ops: ops.clone(),
         init: init.clone(),
         fin,

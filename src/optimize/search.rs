@@ -401,6 +401,7 @@ mod tests {
         StraightSegment {
             func_index: 0,
             segment_index: 0,
+            split_part: None,
             ops: vec![],
             init: init.clone(),
             fin: fin.clone(),
