@@ -4,6 +4,7 @@ mod al;
 mod lang;
 mod optimize;
 mod parallel;
+mod ruler;
 mod semantics;
 mod sym;
 mod synthesis;

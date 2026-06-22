@@ -3,7 +3,7 @@
 use crate::al::I32_BITS;
 use crate::lang::ValueLang;
 use crate::semantics::synthesis_constants;
-use egg::RecExpr;
+use egg::{Id, RecExpr, Symbol};
 use z3::ast::{Ast, BV, Bool};
 use z3::{Context, SatResult};
 
@@ -39,7 +39,7 @@ pub enum ValueAst {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ValueBinOp {
+pub(crate) enum ValueBinOp {
     Add,
     Sub,
     Mul,
@@ -63,7 +63,7 @@ enum ValueBinOp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ValueUnOp {
+pub(crate) enum ValueUnOp {
     Eqz,
     Clz,
     Ctz,
@@ -71,7 +71,7 @@ enum ValueUnOp {
 }
 
 impl ValueBinOp {
-    fn all() -> [Self; 20] {
+    pub(crate) fn all() -> [Self; 20] {
         [
             Self::Add,
             Self::Sub,
@@ -98,7 +98,7 @@ impl ValueBinOp {
 }
 
 impl ValueUnOp {
-    fn all() -> [Self; 4] {
+    pub(crate) fn all() -> [Self; 4] {
         [Self::Eqz, Self::Clz, Self::Ctz, Self::Popcnt]
     }
 }
@@ -855,6 +855,264 @@ fn is_commutative_swap(lhs: &ValueAst, rhs: &ValueAst) -> bool {
         (ValueAst::Eq(l1, r1), ValueAst::Eq(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         (ValueAst::Ne(l1, r1), ValueAst::Ne(l2, r2)) if **l1 == **r2 && **r1 == **l2 => true,
         _ => false,
+    }
+}
+
+/// Variable symbol for synthesis (`?a`, `?b`, …).
+pub fn synthesis_symbol(i: usize) -> Symbol {
+    assert!(i < 26, "synthesis supports at most 26 inputs");
+    format!("?{}", (b'a' + i as u8) as char)
+        .parse()
+        .expect("valid synthesis symbol")
+}
+
+/// Build an egg enode for a binary operator with e-class children.
+pub fn binop_enode(op: ValueBinOp, left: Id, right: Id) -> ValueLang {
+    match op {
+        ValueBinOp::Add => ValueLang::I32Add([left, right]),
+        ValueBinOp::Sub => ValueLang::I32Sub([left, right]),
+        ValueBinOp::Mul => ValueLang::I32Mul([left, right]),
+        ValueBinOp::DivU => ValueLang::I32DivU([left, right]),
+        ValueBinOp::DivS => ValueLang::I32DivS([left, right]),
+        ValueBinOp::RemU => ValueLang::I32RemU([left, right]),
+        ValueBinOp::RemS => ValueLang::I32RemS([left, right]),
+        ValueBinOp::Shl => ValueLang::I32Shl([left, right]),
+        ValueBinOp::And => ValueLang::I32And([left, right]),
+        ValueBinOp::Or => ValueLang::I32Or([left, right]),
+        ValueBinOp::Xor => ValueLang::I32Xor([left, right]),
+        ValueBinOp::ShrU => ValueLang::I32ShrU([left, right]),
+        ValueBinOp::ShrS => ValueLang::I32ShrS([left, right]),
+        ValueBinOp::Rotl => ValueLang::I32Rotl([left, right]),
+        ValueBinOp::Rotr => ValueLang::I32Rotr([left, right]),
+        ValueBinOp::Eq => ValueLang::I32Eq([left, right]),
+        ValueBinOp::Ne => ValueLang::I32Ne([left, right]),
+        ValueBinOp::LtS => ValueLang::I32LtS([left, right]),
+        ValueBinOp::LeS => ValueLang::I32LeS([left, right]),
+        ValueBinOp::GtS => ValueLang::I32GtS([left, right]),
+    }
+}
+
+/// Build an egg enode for a unary operator with an e-class child.
+pub fn unop_enode(op: ValueUnOp, child: Id) -> ValueLang {
+    match op {
+        ValueUnOp::Eqz => ValueLang::I32Eqz([child]),
+        ValueUnOp::Clz => ValueLang::I32Clz([child]),
+        ValueUnOp::Ctz => ValueLang::I32Ctz([child]),
+        ValueUnOp::Popcnt => ValueLang::I32Popcnt([child]),
+    }
+}
+
+/// Convert a synthesis AST into a [`RecExpr`] for the e-graph.
+pub fn value_ast_to_expr(ast: &ValueAst) -> RecExpr<ValueLang> {
+    let mut expr = RecExpr::default();
+    fn go(ast: &ValueAst, expr: &mut RecExpr<ValueLang>) -> Id {
+        match ast {
+            ValueAst::Symbol(i) => expr.add(ValueLang::Symbol(synthesis_symbol(*i))),
+            ValueAst::Const(n) => expr.add(ValueLang::I32Const(*n)),
+            ValueAst::Add(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Add([l, r]))
+            }
+            ValueAst::Sub(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Sub([l, r]))
+            }
+            ValueAst::Mul(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Mul([l, r]))
+            }
+            ValueAst::DivU(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32DivU([l, r]))
+            }
+            ValueAst::DivS(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32DivS([l, r]))
+            }
+            ValueAst::RemU(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32RemU([l, r]))
+            }
+            ValueAst::RemS(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32RemS([l, r]))
+            }
+            ValueAst::Shl(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Shl([l, r]))
+            }
+            ValueAst::And(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32And([l, r]))
+            }
+            ValueAst::Or(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Or([l, r]))
+            }
+            ValueAst::Xor(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Xor([l, r]))
+            }
+            ValueAst::ShrU(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32ShrU([l, r]))
+            }
+            ValueAst::ShrS(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32ShrS([l, r]))
+            }
+            ValueAst::Rotl(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Rotl([l, r]))
+            }
+            ValueAst::Rotr(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Rotr([l, r]))
+            }
+            ValueAst::Eq(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Eq([l, r]))
+            }
+            ValueAst::Ne(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32Ne([l, r]))
+            }
+            ValueAst::LtS(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32LtS([l, r]))
+            }
+            ValueAst::LeS(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32LeS([l, r]))
+            }
+            ValueAst::GtS(l, r) => {
+                let l = go(l, expr);
+                let r = go(r, expr);
+                expr.add(ValueLang::I32GtS([l, r]))
+            }
+            ValueAst::Eqz(c) => {
+                let c = go(c, expr);
+                expr.add(ValueLang::I32Eqz([c]))
+            }
+            ValueAst::Clz(c) => {
+                let c = go(c, expr);
+                expr.add(ValueLang::I32Clz([c]))
+            }
+            ValueAst::Ctz(c) => {
+                let c = go(c, expr);
+                expr.add(ValueLang::I32Ctz([c]))
+            }
+            ValueAst::Popcnt(c) => {
+                let c = go(c, expr);
+                expr.add(ValueLang::I32Popcnt([c]))
+            }
+        }
+    }
+    go(ast, &mut expr);
+    expr
+}
+
+fn synthesis_symbol_index(sym: &Symbol) -> Option<usize> {
+    let name = sym.as_str();
+    let mut chars = name.chars();
+    if chars.next()? != '?' {
+        return None;
+    }
+    let ch = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+    let i = ch as u8;
+    if !(b'a'..=b'z').contains(&i) {
+        return None;
+    }
+    Some((i - b'a') as usize)
+}
+
+/// Recover a synthesis AST from a [`RecExpr`] (synthesis symbols only).
+pub fn value_ast_from_expr(expr: &RecExpr<ValueLang>) -> Option<ValueAst> {
+    fn go(id: Id, expr: &RecExpr<ValueLang>) -> Option<ValueAst> {
+        match &expr[id] {
+            ValueLang::Symbol(s) => Some(ValueAst::Symbol(synthesis_symbol_index(s)?)),
+            ValueLang::I32Const(n) => Some(ValueAst::Const(*n)),
+            ValueLang::I32Add([l, r]) => Some(ValueAst::Add(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Sub([l, r]) => Some(ValueAst::Sub(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Mul([l, r]) => Some(ValueAst::Mul(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32DivU([l, r]) => Some(ValueAst::DivU(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32DivS([l, r]) => Some(ValueAst::DivS(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32RemU([l, r]) => Some(ValueAst::RemU(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32RemS([l, r]) => Some(ValueAst::RemS(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Shl([l, r]) => Some(ValueAst::Shl(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32And([l, r]) => Some(ValueAst::And(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Or([l, r]) => Some(ValueAst::Or(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Xor([l, r]) => Some(ValueAst::Xor(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32ShrU([l, r]) => Some(ValueAst::ShrU(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32ShrS([l, r]) => Some(ValueAst::ShrS(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Rotl([l, r]) => Some(ValueAst::Rotl(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Rotr([l, r]) => Some(ValueAst::Rotr(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Eq([l, r]) => Some(ValueAst::Eq(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Ne([l, r]) => Some(ValueAst::Ne(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32LtS([l, r]) => Some(ValueAst::LtS(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32LeS([l, r]) => Some(ValueAst::LeS(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32GtS([l, r]) => Some(ValueAst::GtS(Box::new(go(*l, expr)?), Box::new(go(*r, expr)?))),
+            ValueLang::I32Eqz([c]) => Some(ValueAst::Eqz(Box::new(go(*c, expr)?))),
+            ValueLang::I32Clz([c]) => Some(ValueAst::Clz(Box::new(go(*c, expr)?))),
+            ValueLang::I32Ctz([c]) => Some(ValueAst::Ctz(Box::new(go(*c, expr)?))),
+            ValueLang::I32Popcnt([c]) => Some(ValueAst::Popcnt(Box::new(go(*c, expr)?))),
+        }
+    }
+    go(expr.root(), expr)
+}
+
+/// Fixed concrete inputs for characteristic-vector matching (Ruler-style cvecs).
+pub fn cvec_test_inputs(num_inputs: usize) -> Vec<Vec<i32>> {
+    let mut out: Vec<Vec<i32>> = AST_CORNER_INPUTS
+        .iter()
+        .map(|&v| vec![v; num_inputs])
+        .collect();
+    let mut rng = AstLcg::new(0xC0FF_EE42);
+    for _ in 0..32 {
+        let inputs: Vec<i32> = (0..num_inputs).map(|_| rng.next_i32()).collect();
+        out.push(inputs);
+    }
+    out
+}
+
+/// Characteristic vector: concrete evaluation on a fixed input suite.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AstEvalSignature {
+    samples: Vec<(bool, i32)>,
+}
+
+impl AstEvalSignature {
+    pub fn of(ast: &ValueAst, test_inputs: &[Vec<i32>]) -> Self {
+        let samples = test_inputs
+            .iter()
+            .map(|inputs| {
+                let r = eval_ast_concrete(ast, inputs);
+                (r.trap, r.value)
+            })
+            .collect();
+        Self { samples }
     }
 }
 
