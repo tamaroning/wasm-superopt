@@ -2,10 +2,10 @@
 
 mod al;
 mod lang;
-mod sym;
 mod optimize;
 mod parallel;
 mod semantics;
+mod sym;
 mod synthesis;
 mod value;
 mod wasm;
@@ -13,9 +13,7 @@ mod wasm;
 use al::DEFAULT_RANDOM_TESTS;
 use clap::{Parser, ValueEnum};
 use std::io::{self, Write};
-use synthesis::{
-    load_or_synthesize_rules, print_synthesized, print_synthesized_json, synthesized_to_rewrites,
-};
+use synthesis::{load_or_synthesize_rules, print_synthesized_json, synthesized_to_rewrites};
 use wasm::{parse_wasm_file, print_input_summary};
 
 #[derive(Parser, Debug)]
@@ -121,10 +119,6 @@ fn main() {
 
     let max_ast = cli.max_ast_size.clamp(1, 8);
     let syn = load_or_synthesize_rules(max_ast, cli.random_tests, cli.jobs);
-    if !cli.segments_only {
-        print_synthesized(&syn, cli.random_tests);
-        let _ = io::stdout().flush();
-    }
     let rules = synthesized_to_rewrites(&syn);
 
     if cli.segments_only {

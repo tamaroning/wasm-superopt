@@ -352,16 +352,6 @@ struct SynthesizedRulesOutput<'a> {
     rules: &'a [SynthesizedRule],
 }
 
-pub fn print_synthesized(rules: &[SynthesizedRule], random_tests: usize) {
-    println!("=== Synthesized rules (random + Z3-verified) ===");
-    println!("random tests per candidate: {random_tests}");
-    println!("count: {}", rules.len());
-    for r in rules {
-        println!(r#"rw!("{}"; "{}" => "{}")"#, r.name, r.lhs, r.rhs);
-    }
-    println!();
-}
-
 pub fn print_synthesized_json(rules: &[SynthesizedRule], random_tests: usize) {
     let output = SynthesizedRulesOutput {
         random_tests_per_candidate: random_tests,

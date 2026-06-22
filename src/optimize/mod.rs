@@ -9,7 +9,7 @@ mod search;
 
 pub use search::{
     DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
-    format_ops, segment_timeout_secs,
+    format_ops,
 };
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
@@ -31,7 +31,6 @@ pub struct SegmentOptResult {
     pub segment: StraightSegment,
     pub optimized: Option<Vec<SemOp>>,
     pub timed_out: bool,
-    pub timeout_secs: u64,
 }
 
 impl SegmentOptResult {
@@ -50,14 +49,12 @@ pub fn optimize_segment(
     cfg: &SearchConfig,
     solver: SolverKind,
 ) -> SegmentOptResult {
-    let timeout_secs = segment_timeout_secs(segment, cfg.direct_timeout);
     let segment_cfg = cfg.for_segment(segment);
     if segment.ops.is_empty() {
         return SegmentOptResult {
             segment: segment.clone(),
             optimized: None,
             timed_out: false,
-            timeout_secs,
         };
     }
     if !segment.init.validate_bounds(&segment.bounds) || !segment.fin.validate_bounds(&segment.bounds) {
@@ -65,7 +62,6 @@ pub fn optimize_segment(
             segment: segment.clone(),
             optimized: None,
             timed_out: false,
-            timeout_secs,
         };
     }
     let result = match solver {
@@ -77,7 +73,6 @@ pub fn optimize_segment(
         segment: segment.clone(),
         optimized: result.ops,
         timed_out: result.timed_out,
-        timeout_secs,
     }
 }
 
@@ -203,14 +198,6 @@ pub fn optimize_and_print_segments(
     results
 }
 
-pub fn print_results(results: &[SegmentOptResult], solver: SolverKind) {
-    println!("=== Wasm segment optimization (solver: {solver:?}) ===\n");
-    for result in results {
-        print_segment_result(result);
-        println!();
-    }
-}
-
 pub fn summarize(results: &[SegmentOptResult]) -> (usize, usize, usize) {
     let mut total_orig = 0usize;
     let mut total_opt = 0usize;
@@ -232,7 +219,7 @@ pub fn summarize(results: &[SegmentOptResult]) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimize::search::{validate_solution_ops, SearchConfig};
+    use crate::optimize::search::{segment_timeout_secs, validate_solution_ops, SearchConfig};
     use crate::semantics::SemOp;
     use crate::synthesis::{
         TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,

@@ -73,11 +73,4 @@ impl StraightSegment {
             .filter_map(|op| op.opaque_id())
     }
 
-    pub fn opaque_meta_for(&self, id: u32) -> Option<&OpaqueMeta> {
-        self.opaque_meta.iter().find(|m| m.id == id)
-    }
-
-    pub fn has_opaque(&self) -> bool {
-        !self.opaque_meta.is_empty()
-    }
 }

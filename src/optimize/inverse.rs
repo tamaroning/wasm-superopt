@@ -287,34 +287,6 @@ fn inst_kind_to_sem(kind: InstKind) -> SemOp {
     }
 }
 
-/// Backward-compatible peel API for arithmetic-only segments/tests.
-pub fn applicable_peels_arithmetic_only(
-    g: &SymState,
-    bounds: &SegmentBounds,
-    canon: &mut Canonizer,
-) -> Vec<(PeelAction, SymState)> {
-    let state = SearchState {
-        goal: g.clone(),
-        remaining_storage: BTreeSet::new(),
-        used_opaque: BTreeSet::new(),
-    };
-    let empty = StraightSegment {
-        func_index: 0,
-        segment_index: 0,
-        split_part: None,
-        ops: vec![],
-        init: g.clone(),
-        fin: g.clone(),
-        bounds: *bounds,
-        opaque_meta: vec![],
-        dependencies: vec![],
-    };
-    applicable_peels(&state, &empty, bounds, canon)
-        .into_iter()
-        .map(|(a, s)| (a, s.goal))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,6 +296,33 @@ mod tests {
     };
     use crate::value::parse_value_expr;
     use crate::wasm::SegmentBounds;
+
+    fn applicable_peels_arithmetic_only(
+        g: &SymState,
+        bounds: &SegmentBounds,
+        canon: &mut Canonizer,
+    ) -> Vec<(PeelAction, SymState)> {
+        let state = SearchState {
+            goal: g.clone(),
+            remaining_storage: BTreeSet::new(),
+            used_opaque: BTreeSet::new(),
+        };
+        let empty = StraightSegment {
+            func_index: 0,
+            segment_index: 0,
+            split_part: None,
+            ops: vec![],
+            init: g.clone(),
+            fin: g.clone(),
+            bounds: *bounds,
+            opaque_meta: vec![],
+            dependencies: vec![],
+        };
+        applicable_peels(&state, &empty, bounds, canon)
+            .into_iter()
+            .map(|(a, s)| (a, s.goal))
+            .collect()
+    }
 
     fn canonizer() -> Canonizer {
         Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(

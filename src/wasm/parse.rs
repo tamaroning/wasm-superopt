@@ -287,7 +287,7 @@ fn extract_from_ops(
 
     let mut collected: Vec<SemOp> = Vec::new();
     let mut opaque_meta: Vec<OpaqueMeta> = Vec::new();
-    let mut segment_init: SymState = machine.to_init_state();
+    let segment_init: SymState = machine.to_init_state();
     let mut collecting = true;
     let mut ctx = OpClassCtx {
         module_func_types,
@@ -659,7 +659,7 @@ mod tests {
         let info = parse_wasm_bytes(&wasm).expect("parse");
         assert_eq!(info.segments.len(), 1, "expected single segment");
         assert_eq!(info.segments[0].ops.len(), 8);
-        assert!(info.segments[0].has_opaque());
+        assert!(!info.segments[0].opaque_meta.is_empty());
     }
 
     #[test]

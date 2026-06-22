@@ -38,9 +38,6 @@ impl SymState {
         self.stack.last()
     }
 
-    pub fn local_slots(&self) -> impl Iterator<Item = u32> + '_ {
-        self.locals.keys().copied()
-    }
 }
 
 pub fn subtree_expr(expr: &ValueExpr, node: Id) -> ValueExpr {
@@ -197,7 +194,6 @@ pub struct SymMachine {
     num_params: u32,
     max_stack: usize,
     segment_start_locals: BTreeMap<u32, ValueExpr>,
-    fresh_counter: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -230,7 +226,6 @@ impl SymMachine {
             num_params,
             max_stack,
             segment_start_locals: BTreeMap::new(),
-            fresh_counter: 0,
         }
     }
 
@@ -452,22 +447,6 @@ impl SymMachine {
 
     pub fn pop(&mut self) -> Result<ValueExpr, ForwardError> {
         self.stack.pop().ok_or(ForwardError::StackUnderflow)
-    }
-
-    pub fn apply_boundary_stack(&mut self, pop: usize, push: usize) -> Result<(), ForwardError> {
-        for _ in 0..pop {
-            self.pop()?;
-        }
-        for _ in 0..push {
-            self.push_fresh_symbolic()?;
-        }
-        Ok(())
-    }
-
-    fn push_fresh_symbolic(&mut self) -> Result<(), ForwardError> {
-        let name = format!("?S{}", self.fresh_counter);
-        self.fresh_counter += 1;
-        self.push_expr(parse_value_expr(&name))
     }
 
     fn push_expr(&mut self, expr: ValueExpr) -> Result<(), ForwardError> {

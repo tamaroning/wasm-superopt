@@ -6,8 +6,6 @@ use std::collections::{BTreeSet, HashMap};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MemWidth {
-    B1,
-    B2,
     B4,
 }
 
@@ -30,20 +28,12 @@ struct VarAccess {
     index: u32,
 }
 
-fn mem_width_for_op(op: &SemOp) -> MemWidth {
-    MemWidth::B4
-}
-
 fn overlap_address(a: i64, w1: i64, b: i64, w2: i64) -> bool {
     a <= b && b < a + w1 || b <= a && a < b + w2
 }
 
-fn width_bytes(w: MemWidth) -> i64 {
-    match w {
-        MemWidth::B1 => 1,
-        MemWidth::B2 => 2,
-        MemWidth::B4 => 4,
-    }
+fn width_bytes(_w: MemWidth) -> i64 {
+    4
 }
 
 fn effective_addr(addr_symbol: &str, offset: u32) -> Option<i64> {
@@ -121,7 +111,7 @@ fn collect_mem_accesses(ops: &[SemOp], meta: &[OpaqueMeta]) -> Vec<MemAccess> {
                     is_call: false,
                     mem: *mem,
                     offset: *offset,
-                    width: mem_width_for_op(op),
+                    width: MemWidth::B4,
                     addr_symbol: addr,
                 });
             }
@@ -139,7 +129,7 @@ fn collect_mem_accesses(ops: &[SemOp], meta: &[OpaqueMeta]) -> Vec<MemAccess> {
                     is_call: false,
                     mem: *mem,
                     offset: *offset,
-                    width: mem_width_for_op(op),
+                    width: MemWidth::B4,
                     addr_symbol: addr,
                 });
             }

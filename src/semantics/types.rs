@@ -102,17 +102,6 @@ impl SemOp {
         }
     }
 
-    pub fn is_opaque(&self) -> bool {
-        matches!(
-            self,
-            SemOp::I32Load { .. }
-                | SemOp::I32Store { .. }
-                | SemOp::Call { .. }
-                | SemOp::GlobalGet { .. }
-                | SemOp::GlobalSet { .. }
-        )
-    }
-
     pub fn opaque_id(&self) -> Option<u32> {
         match self {
             SemOp::I32Load { id, .. }
@@ -132,32 +121,6 @@ impl SemOp {
         )
     }
 
-    pub fn is_peelable_binop(&self) -> bool {
-        matches!(
-            self,
-            SemOp::I32Add
-                | SemOp::I32Sub
-                | SemOp::I32Mul
-                | SemOp::I32DivU
-                | SemOp::I32DivS
-                | SemOp::I32RemU
-                | SemOp::I32RemS
-                | SemOp::I32Shl
-                | SemOp::I32And
-                | SemOp::I32Or
-                | SemOp::I32Xor
-                | SemOp::I32ShrU
-                | SemOp::I32ShrS
-                | SemOp::I32Rotl
-                | SemOp::I32Rotr
-                | SemOp::I32Eq
-                | SemOp::I32Ne
-                | SemOp::I32LtS
-                | SemOp::I32LeS
-                | SemOp::I32GtS
-        )
-    }
-
     /// Whether this op reads or writes implicit machine state (not representable in the egg DAG).
     pub fn is_effectful(&self) -> bool {
         matches!(
@@ -173,12 +136,6 @@ impl SemOp {
         )
     }
 
-    pub fn call_arity(&self) -> Option<(u8, u8)> {
-        match self {
-            SemOp::Call { pops, pushes, .. } => Some((*pops, *pushes)),
-            _ => None,
-        }
-    }
 }
 
 impl fmt::Display for SemOp {
