@@ -17,17 +17,9 @@ use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::wasm::StraightSegment;
 use egg::Rewrite;
-use search::{solve_astar, solve_bfs_traced, solve_greedy_inv};
+use search::solve_astar_traced;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SolverKind {
-    Bfs,
-    Greedy,
-    #[default]
-    Astar,
-}
 
 #[derive(Clone, Debug)]
 pub struct SegmentOptResult {
@@ -50,16 +42,14 @@ pub fn optimize_segment(
     segment: &StraightSegment,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
-    solver: SolverKind,
 ) -> SegmentOptResult {
-    optimize_segment_with_trace(segment, rules, cfg, solver, None)
+    optimize_segment_with_trace(segment, rules, cfg, None)
 }
 
 pub fn optimize_segment_with_trace(
     segment: &StraightSegment,
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
-    solver: SolverKind,
     dump_search: Option<&Path>,
 ) -> SegmentOptResult {
     let segment_cfg = cfg.for_segment(segment);
@@ -77,25 +67,30 @@ pub fn optimize_segment_with_trace(
             timed_out: false,
         };
     }
-    if dump_search.is_some() && solver != SolverKind::Bfs {
-        eprintln!("warning: --dump-search uses BFS (ignoring --solver {solver:?})");
-    }
     let mut trace = dump_search.map(|_| SearchTrace::default());
-    let result = match (solver, dump_search.is_some()) {
-        (_, true) | (SolverKind::Bfs, _) => solve_bfs_traced(
-            segment,
-            rules,
-            &segment_cfg,
-            trace.as_mut(),
-        ),
-        (SolverKind::Greedy, _) => solve_greedy_inv(segment, rules, &segment_cfg),
-        (SolverKind::Astar, _) => solve_astar(segment, rules, &segment_cfg),
-    };
-    if let (Some(path), Some(tr)) = (dump_search, trace.as_ref()) {
-        if let Err(e) = std::fs::write(path, tr.to_dot()) {
-            eprintln!("warning: failed to write {}: {e}", path.display());
-        } else {
-            eprintln!("wrote search graph to {}", path.display());
+    let result = solve_astar_traced(segment, rules, &segment_cfg, trace.as_mut());
+    if let Some(path) = dump_search {
+        if let Some(tr) = trace.as_ref() {
+            let mut dot = tr.to_dot();
+            if let Some(ops) = &result.ops {
+                let orig = segment.original_len();
+                let opt = ops.len();
+                if opt < orig {
+                    dot = dot.replacen(
+                        "digraph search {",
+                        &format!(
+                            "digraph search {{\n  label=\"{orig} instr -> {opt} (saved {})\"; labelloc=t;",
+                            orig - opt
+                        ),
+                        1,
+                    );
+                }
+            }
+            if let Err(e) = std::fs::write(path, dot) {
+                eprintln!("warning: failed to write {}: {e}", path.display());
+            } else {
+                eprintln!("wrote search graph to {}", path.display());
+            }
         }
     }
     SegmentOptResult {
@@ -121,20 +116,19 @@ pub fn optimize_segments(
     segments: &[StraightSegment],
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
-    solver: SolverKind,
     jobs: usize,
 ) -> Vec<SegmentOptResult> {
     if jobs <= 1 {
         return segments
             .iter()
-            .map(|segment| optimize_segment(segment, rules, cfg, solver))
+            .map(|segment| optimize_segment(segment, rules, cfg))
             .collect();
     }
     crate::parallel::run_with_threads(jobs, || {
         use rayon::prelude::*;
         segments
             .par_iter()
-            .map(|segment| optimize_segment(segment, rules, cfg, solver))
+            .map(|segment| optimize_segment(segment, rules, cfg))
             .collect()
     })
 }
@@ -183,7 +177,6 @@ pub fn optimize_and_print_segments(
     segments: &[StraightSegment],
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
-    solver: SolverKind,
     max_segment_instr: usize,
     jobs: usize,
     dump_search: Option<&Path>,
@@ -205,7 +198,7 @@ pub fn optimize_and_print_segments(
         String::new()
     };
     println!(
-        "=== Optimizing {total} segment(s) (solver: {solver:?}, timeout: {}{}{jobs_note}) ===\n",
+        "=== Optimizing {total} segment(s) (A*, timeout: {}{}{jobs_note}) ===\n",
         default_timeout_label(cfg),
         split_note
     );
@@ -229,7 +222,6 @@ pub fn optimize_and_print_segments(
                 segment,
                 rules,
                 cfg,
-                solver,
                 dump_path.as_deref(),
             );
             print_segment_result(&result);
@@ -242,7 +234,7 @@ pub fn optimize_and_print_segments(
 
     eprintln!("optimizing {total} segment(s) with {jobs} threads …");
     let _ = io::stderr().flush();
-    let results = optimize_segments(&segments, rules, cfg, solver, jobs);
+    let results = optimize_segments(&segments, rules, cfg, jobs);
     for result in &results {
         print_segment_result(result);
     }
@@ -306,7 +298,6 @@ mod tests {
             &info.segments,
             &rules(),
             &SearchConfig::default(),
-            SolverKind::Astar,
             1,
         );
         let opt = results[0].optimized.as_ref().expect("optimized");
@@ -369,7 +360,6 @@ mod tests {
             &info.segments,
             &rules(),
             &SearchConfig::default(),
-            SolverKind::Astar,
             1,
         );
         let opt = results[0].optimized.as_ref().expect("optimized");
@@ -412,7 +402,7 @@ mod tests {
         assert_eq!(info.segments.len(), 1);
         let segment = &info.segments[0];
         assert!(segment.ops.iter().any(|op| op.is_storage_boundary()));
-        let result = optimize_segment(segment, &rules(), &SearchConfig::default(), SolverKind::Astar);
+        let result = optimize_segment(segment, &rules(), &SearchConfig::default());
         let opt = result.optimized.as_ref().expect("expected optimized ops");
         assert!(
             crate::wasm::storage_ops_preserved(&segment.ops, opt),

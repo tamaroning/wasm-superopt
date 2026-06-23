@@ -1,4 +1,4 @@
-//! Record backward BFS exploration and emit Graphviz DOT.
+//! Record backward A* exploration and emit Graphviz DOT.
 
 use super::inverse::SearchState;
 use super::search::MemoKey;
@@ -18,7 +18,7 @@ pub enum NodeKind {
 struct TraceNode {
     id: u32,
     label: String,
-    depth: usize,
+    cost: usize,
     kind: NodeKind,
 }
 
@@ -30,7 +30,7 @@ struct TraceEdge {
     pruned: bool,
 }
 
-/// Exploration DAG collected during BFS (nodes keyed by memo-normalized state).
+/// Exploration DAG collected during A* (nodes keyed by memo-normalized state).
 #[derive(Clone, Debug, Default)]
 pub struct SearchTrace {
     key_to_id: HashMap<MemoKey, u32>,
@@ -44,14 +44,14 @@ impl SearchTrace {
         &mut self,
         key: &MemoKey,
         state: &SearchState,
-        depth: usize,
+        cost: usize,
         kind: NodeKind,
     ) -> u32 {
         if let Some(&id) = self.key_to_id.get(key) {
             if kind == NodeKind::Solution || kind == NodeKind::Root {
                 if let Some(node) = self.nodes.iter_mut().find(|n| n.id == id) {
                     node.kind = kind;
-                    node.label = format_node_label(state, depth, kind);
+                    node.label = format_node_label(state, cost, kind);
                 }
                 if kind == NodeKind::Solution {
                     self.solution_id = Some(id);
@@ -60,12 +60,12 @@ impl SearchTrace {
             return id;
         }
         let id = self.nodes.len() as u32;
-        let label = format_node_label(state, depth, kind);
+        let label = format_node_label(state, cost, kind);
         self.key_to_id.insert(key.clone(), id);
         self.nodes.push(TraceNode {
             id,
             label,
-            depth,
+            cost,
             kind,
         });
         if kind == NodeKind::Solution {
@@ -175,12 +175,12 @@ pub fn format_sym_state(state: &SymState) -> String {
     format!("⟨{stack}, {{{locals}}}⟩")
 }
 
-fn format_node_label(state: &SearchState, depth: usize, kind: NodeKind) -> String {
+fn format_node_label(state: &SearchState, cost: usize, kind: NodeKind) -> String {
     let state = format_sym_state(&state.goal);
     match kind {
-        NodeKind::Root => format!("fin\ndepth={depth}\n{state}"),
-        NodeKind::Solution => format!("init\ndepth={depth}\n{state}"),
-        NodeKind::MemoSkip | NodeKind::Intermediate => format!("depth={depth}\n{state}"),
+        NodeKind::Root => format!("fin\ncost={cost}\n{state}"),
+        NodeKind::Solution => format!("init\ncost={cost}\n{state}"),
+        NodeKind::MemoSkip | NodeKind::Intermediate => format!("cost={cost}\n{state}"),
     }
 }
 
@@ -195,7 +195,7 @@ fn dot_escape(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::optimize::fixtures::{fin, init};
-    use crate::optimize::search::{solve_bfs_traced, SearchConfig};
+    use crate::optimize::search::{solve_astar_traced, SearchConfig};
     use crate::synthesis::{
         TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
@@ -226,7 +226,7 @@ mod tests {
             1,
         ));
         let mut trace = SearchTrace::default();
-        let result = solve_bfs_traced(
+        let result = solve_astar_traced(
             &segment,
             &rules,
             &SearchConfig::default(),

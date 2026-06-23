@@ -12,7 +12,7 @@ mod value;
 mod wasm;
 
 use al::DEFAULT_RANDOM_TESTS;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use std::io::{self, Write};
 use synthesis::{load_or_synthesize_rules, print_synthesized_json, synthesized_to_rewrites};
 use wasm::{parse_wasm_file, print_input_summary};
@@ -43,10 +43,6 @@ struct Cli {
     #[arg(long, default_value_t = DEFAULT_RANDOM_TESTS)]
     random_tests: usize,
 
-    /// Search strategy for backward search.
-    #[arg(long, value_enum, default_value_t = SolverKind::Astar)]
-    solver: SolverKind,
-
     /// Only list extracted segments without running the optimizer.
     #[arg(long)]
     segments_only: bool,
@@ -63,34 +59,13 @@ struct Cli {
     #[arg(long, default_value_t = wasm::DEFAULT_MAX_SEGMENT_INSTR)]
     split: usize,
 
-    /// Dump BFS exploration DAG as Graphviz DOT to this path.
+    /// Dump A* exploration DAG as Graphviz DOT to this path.
     #[arg(long, value_name = "PATH")]
     dump_search: Option<std::path::PathBuf>,
 
     /// Number of parallel jobs for rule synthesis and segment optimization.
     #[arg(short = 'j', long = "jobs", default_value_t = 1)]
     jobs: usize,
-}
-
-impl From<SolverKind> for optimize::SolverKind {
-    fn from(k: SolverKind) -> Self {
-        match k {
-            SolverKind::Bfs => optimize::SolverKind::Bfs,
-            SolverKind::Greedy => optimize::SolverKind::Greedy,
-            SolverKind::Astar => optimize::SolverKind::Astar,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum SolverKind {
-    /// Breadth-first search with memoization (shortest path).
-    Bfs,
-    /// Greedy inverse peel (fast but may fail to find a solution).
-    Greedy,
-    /// A* with admissible heuristic, pruned by a greedy upper bound.
-    #[default]
-    Astar,
 }
 
 fn main() {
@@ -150,7 +125,6 @@ fn main() {
         &info.segments,
         &rules,
         &cfg,
-        cli.solver.into(),
         cli.split,
         cli.jobs,
         cli.dump_search.as_deref(),

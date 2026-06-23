@@ -750,10 +750,11 @@ pub fn sizenn_def() -> FuncA {
     FuncA {
         id: "sizenn",
         params: &SIZENN_PARAMS,
-        body: vec![Instr::ReturnI(call(
-            "size",
-            vec![Arg::ExpA(Box::new(p("nt")))],
-        ))],
+        body: vec![Instr::IfI {
+            cond: InstrCond::Pred(Pred::TypeIsInn(p("nt"))),
+            then_steps: vec![Instr::ReturnI(nat(NumType::I32.bit_width()))],
+            else_steps: vec![Instr::FailI],
+        }],
     }
 }
 
@@ -1619,6 +1620,44 @@ pub fn unop_def() -> FuncA {
     }
 }
 
+const ICLZ_PARAMS: &[Param] = &[mp("N", ParamType::Nat), mp("iN", ParamType::Nat)];
+const ICTZ_PARAMS: &[Param] = &[mp("N", ParamType::Nat), mp("iN", ParamType::Nat)];
+const IPOPCNT_PARAMS: &[Param] = &[mp("N", ParamType::Nat), mp("iN", ParamType::Nat)];
+const TRUNCZ_PARAMS: &[Param] = &[mp("r", ParamType::Any)];
+
+/// `iclz_` / `ictz_` / `ipopcnt_` are `hint(builtin)` in spectec; bodies live in the evaluator.
+pub fn iclz_def() -> FuncA {
+    FuncA {
+        id: "iclz_",
+        params: ICLZ_PARAMS,
+        body: vec![Instr::FailI],
+    }
+}
+
+pub fn ictz_def() -> FuncA {
+    FuncA {
+        id: "ictz_",
+        params: ICTZ_PARAMS,
+        body: vec![Instr::FailI],
+    }
+}
+
+pub fn ipopcnt_def() -> FuncA {
+    FuncA {
+        id: "ipopcnt_",
+        params: IPOPCNT_PARAMS,
+        body: vec![Instr::FailI],
+    }
+}
+
+pub fn truncz_def() -> FuncA {
+    FuncA {
+        id: "truncz",
+        params: TRUNCZ_PARAMS,
+        body: vec![Instr::FailI],
+    }
+}
+
 /// Look up a SpecTec `$fn` definition by name.
 pub fn lookup_func(name: &str) -> Option<FuncA> {
     Some(match name {
@@ -1641,6 +1680,10 @@ pub fn lookup_func(name: &str) -> Option<FuncA> {
         "idiv_" => idiv_def(),
         "irem_" => irem_def(),
         "binop_" => binop_def(),
+        "iclz_" => iclz_def(),
+        "ictz_" => ictz_def(),
+        "ipopcnt_" => ipopcnt_def(),
+        "truncz" => truncz_def(),
         "local" => local_def(),
         "with_local" => with_local_def(),
         _ => return None,
@@ -1714,5 +1757,9 @@ mod tests {
         assert!(lookup_func("relop_").is_some());
         assert!(lookup_func("testop_").is_some());
         assert!(lookup_func("unop_").is_some());
+        assert!(lookup_func("iclz_").is_some());
+        assert!(lookup_func("ictz_").is_some());
+        assert!(lookup_func("ipopcnt_").is_some());
+        assert!(lookup_func("truncz").is_some());
     }
 }

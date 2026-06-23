@@ -42,7 +42,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 11;
+const RULES_CACHE_FORMAT_VERSION: u32 = 12;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
@@ -119,7 +119,7 @@ pub fn synthesize_rules(max_ast_size: usize, random_tests: usize, jobs: usize) -
             let num_inputs = input.len();
             let stack_desc = format_input_stack(input);
             report_progress(&format!(
-                "[{}/{}] input stack {stack_desc}: Ruler enumeration…",
+                "[{}/{}] input stack {stack_desc}",
                 input_idx + 1,
                 inputs.len()
             ));

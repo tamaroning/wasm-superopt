@@ -6,10 +6,10 @@
 mod ast;
 mod defs;
 mod derive;
+mod eval;
 mod ir;
 mod policy;
 mod specs;
-mod symbolic;
 mod util;
 
 pub use ast::{
@@ -28,7 +28,10 @@ pub use derive::{
 pub use ir::format_al_pretty;
 pub use policy::STRAIGHT_LINE_EMBED;
 pub use specs::al_spec_for;
-pub use symbolic::context::z3_context;
+pub use eval::{
+    asts_valid_rewrite_z3, call_func, concrete_valid_rewrite, eval_value_ast_concrete,
+    eval_value_ast_z3, EvalError, z3_context,
+};
 
 /// Default number of randomized concrete tests before invoking Z3.
 pub const DEFAULT_RANDOM_TESTS: usize = 100;
