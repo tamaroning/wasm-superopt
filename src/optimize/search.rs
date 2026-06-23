@@ -1,15 +1,15 @@
-//! Backward goal search: BFS, greedy inverse, and A*.
+//! Backward goal search with A*.
 
 use super::canon::{Canonizer, NormalizedGoal};
 use super::heuristic::h_goal;
 use super::inverse::{PeelAction, SearchState, applicable_peels};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
-use crate::sym::{LocalReq, SymState};
+use crate::sym::{LocalReq, SymMachine, SymState};
 use crate::wasm::{ops_respect_dependencies, storage_ops_preserved, SegmentBounds, StraightSegment};
 use egg::Rewrite;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::{BinaryHeap, HashSet};
 
 pub const DEFAULT_MAX_DEPTH: usize = 16;
 /// Default per-segment timeout (seconds), matching SuperStack's base `10 * (1 + storage)`.
@@ -156,167 +156,48 @@ pub(crate) fn memo_key(state: &SearchState, canon: &mut Canonizer) -> MemoKey {
     }
 }
 
-fn memo_seen(
-    memo: &HashMap<MemoKey, usize>,
-    state: &SearchState,
-    cost: usize,
-    canon: &mut Canonizer,
-) -> bool {
-    let key = memo_key(state, canon);
-    memo.get(&key).is_some_and(|&best| best <= cost)
+fn memo_seen(memo: &HashSet<MemoKey>, state: &SearchState, canon: &mut Canonizer) -> bool {
+    memo.contains(&memo_key(state, canon))
 }
 
-fn memo_record(
-    memo: &mut HashMap<MemoKey, usize>,
-    state: &SearchState,
-    cost: usize,
+fn memo_record(memo: &mut HashSet<MemoKey>, state: &SearchState, canon: &mut Canonizer) {
+    memo.insert(memo_key(state, canon));
+}
+
+fn solution_forward_valid(
+    ops: &[SemOp],
+    segment: &StraightSegment,
+    bounds: &SegmentBounds,
     canon: &mut Canonizer,
-) {
-    let key = memo_key(state, canon);
-    memo.insert(key, cost);
+) -> bool {
+    let total_locals = bounds.max_local + 1;
+    let num_params = segment.init.locals.len() as u32;
+    let mut m = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
+    m.begin_segment();
+    for op in ops {
+        if m.exec(op).is_err() {
+            return false;
+        }
+    }
+    let got = m.to_fin_state();
+    is_grounded(&got, &segment.fin, bounds, canon)
 }
 
 fn accept_solution(
     path: &[SemOp],
     segment: &StraightSegment,
     _init: &SymState,
-    _bounds: &SegmentBounds,
-    _canon: &mut Canonizer,
+    bounds: &SegmentBounds,
+    canon: &mut Canonizer,
 ) -> Option<Vec<SemOp>> {
     let ops = reverse_ops(path);
     if !validate_solution_ops(&ops, segment) {
         return None;
     }
+    if !solution_forward_valid(&ops, segment, bounds, canon) {
+        return None;
+    }
     Some(ops)
-}
-
-pub fn solve_bfs(
-    segment: &StraightSegment,
-    rules: &[Rewrite<ValueLang, ()>],
-    cfg: &SearchConfig,
-) -> SearchResult {
-    solve_bfs_traced(segment, rules, cfg, None)
-}
-
-pub fn solve_bfs_traced(
-    segment: &StraightSegment,
-    rules: &[Rewrite<ValueLang, ()>],
-    cfg: &SearchConfig,
-    mut trace: Option<&mut super::search_graph::SearchTrace>,
-) -> SearchResult {
-    use super::search_graph::NodeKind;
-    use super::search::memo_key;
-
-    let init = &segment.init;
-    let bounds = &segment.bounds;
-    let deadline = cfg.timeout_secs.map(SearchDeadline::new);
-    let mut timed_out = false;
-    let mut canon = Canonizer::new(rules.to_vec());
-    let mut memo = HashMap::new();
-    let mut queue = VecDeque::new();
-    let initial = SearchState::initial(segment, &segment.fin);
-    if let Some(tr) = trace.as_deref_mut() {
-        let key = memo_key(&initial, &mut canon);
-        tr.intern(&key, &initial, 0, NodeKind::Root);
-    }
-    queue.push_back((initial, Vec::new(), 0usize));
-    let mut best = None;
-    while let Some((state, path, depth)) = queue.pop_front() {
-        if deadline.as_ref().is_some_and(|d| d.expired()) {
-            timed_out = true;
-            break;
-        }
-        let parent_key = memo_key(&state, &mut canon);
-        let parent_id = trace
-            .as_ref()
-            .and_then(|tr| tr.node_id(&parent_key));
-        if memo_seen(&memo, &state, depth, &mut canon) {
-            if let (Some(tr), Some(pid)) = (trace.as_deref_mut(), parent_id) {
-                tr.mark_memo_skip(pid);
-            }
-            continue;
-        }
-        let is_sol = is_solution(&state, init, bounds, &mut canon);
-        if is_sol {
-            if let Some(tr) = trace.as_deref_mut() {
-                let key = memo_key(&state, &mut canon);
-                tr.intern(&key, &state, depth, NodeKind::Solution);
-            }
-            if let Some(ops) = accept_solution(&path, segment, init, bounds, &mut canon) {
-                best = Some(ops);
-                break;
-            }
-        }
-        memo_record(&mut memo, &state, depth, &mut canon);
-        if depth >= cfg.max_depth {
-            continue;
-        }
-        for (PeelAction::Forward(op), next) in applicable_peels(&state, segment, bounds, &mut canon) {
-            let child_depth = depth + 1;
-            let child_key = memo_key(&next, &mut canon);
-            let pruned = memo
-                .get(&child_key)
-                .is_some_and(|&best_depth| best_depth <= child_depth);
-            if let (Some(tr), Some(pid)) = (trace.as_deref_mut(), parent_id) {
-                let child_id = tr.intern(&child_key, &next, child_depth, NodeKind::Intermediate);
-                tr.add_edge(pid, child_id, &op, pruned);
-            }
-            let mut next_path = path.clone();
-            next_path.push(op);
-            queue.push_back((next, next_path, child_depth));
-        }
-    }
-    SearchResult {
-        ops: best,
-        timed_out,
-    }
-}
-
-pub fn solve_greedy_inv(
-    segment: &StraightSegment,
-    rules: &[Rewrite<ValueLang, ()>],
-    cfg: &SearchConfig,
-) -> SearchResult {
-    let init = &segment.init;
-    let bounds = &segment.bounds;
-    let deadline = cfg.timeout_secs.map(SearchDeadline::new);
-    let mut timed_out = false;
-    let mut canon = Canonizer::new(rules.to_vec());
-    let mut state = SearchState::initial(segment, &segment.fin);
-    let mut path = Vec::new();
-    for _ in 0..cfg.max_depth {
-        if deadline.as_ref().is_some_and(|d| d.expired()) {
-            timed_out = true;
-            break;
-        }
-        if is_solution(&state, init, bounds, &mut canon) {
-            if let Some(ops) = accept_solution(&path, segment, init, bounds, &mut canon) {
-                return SearchResult {
-                    ops: Some(ops),
-                    timed_out,
-                };
-            }
-            break;
-        }
-        let peels = applicable_peels(&state, segment, bounds, &mut canon);
-        let Some(best) = peels
-            .into_iter()
-            .min_by_key(|(_, next)| h_goal(&next.goal, init, bounds, &mut canon))
-        else {
-            break;
-        };
-        let (PeelAction::Forward(op), next) = best;
-        path.push(op);
-        state = next;
-    }
-    SearchResult {
-        ops: if is_solution(&state, init, bounds, &mut canon) {
-            accept_solution(&path, segment, init, bounds, &mut canon)
-        } else {
-            None
-        },
-        timed_out,
-    }
 }
 
 #[derive(Eq, PartialEq)]
@@ -344,20 +225,33 @@ pub fn solve_astar(
     rules: &[Rewrite<ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> SearchResult {
+    solve_astar_traced(segment, rules, cfg, None)
+}
+
+pub fn solve_astar_traced(
+    segment: &StraightSegment,
+    rules: &[Rewrite<ValueLang, ()>],
+    cfg: &SearchConfig,
+    mut trace: Option<&mut super::search_graph::SearchTrace>,
+) -> SearchResult {
+    use super::search_graph::NodeKind;
+
     let init = &segment.init;
     let bounds = &segment.bounds;
     let deadline = cfg.timeout_secs.map(SearchDeadline::new);
     let mut timed_out = false;
     let mut canon = Canonizer::new(rules.to_vec());
-    let greedy = solve_greedy_inv(segment, rules, cfg);
-    timed_out |= greedy.timed_out;
-    let mut best_path = greedy.ops.clone();
-    let mut best = best_path.as_ref().map(|p| p.len()).unwrap_or(cfg.max_depth);
+    let mut best_path = None;
+    let mut best = cfg.max_depth;
 
-    let mut memo = HashMap::new();
+    let mut memo = HashSet::new();
     let mut heap = BinaryHeap::new();
     let initial = SearchState::initial(segment, &segment.fin);
     let h0 = h_goal(&initial.goal, init, bounds, &mut canon);
+    if let Some(tr) = trace.as_deref_mut() {
+        let key = memo_key(&initial, &mut canon);
+        tr.intern(&key, &initial, 0, NodeKind::Root);
+    }
     heap.push(AstarNode {
         f: h0,
         g: 0,
@@ -373,19 +267,29 @@ pub fn solve_astar(
         if f >= best {
             continue;
         }
-        if memo_seen(&memo, &state, g, &mut canon) {
+        let parent_key = memo_key(&state, &mut canon);
+        let parent_id = trace.as_ref().and_then(|tr| tr.node_id(&parent_key));
+        if memo_seen(&memo, &state, &mut canon) {
+            if let (Some(tr), Some(pid)) = (trace.as_deref_mut(), parent_id) {
+                tr.mark_memo_skip(pid);
+            }
             continue;
         }
         if is_solution(&state, init, bounds, &mut canon) {
+            if let Some(tr) = trace.as_deref_mut() {
+                let key = memo_key(&state, &mut canon);
+                tr.intern(&key, &state, g, NodeKind::Solution);
+            }
             if let Some(ops) = accept_solution(&path, segment, init, bounds, &mut canon) {
                 if g <= best {
                     best = g;
                     best_path = Some(ops);
                 }
+                memo_record(&mut memo, &state, &mut canon);
             }
             continue;
         }
-        memo_record(&mut memo, &state, g, &mut canon);
+        memo_record(&mut memo, &state, &mut canon);
         if g >= cfg.max_depth.min(best) {
             continue;
         }
@@ -394,6 +298,12 @@ pub fn solve_astar(
             let nh = h_goal(&next.goal, init, bounds, &mut canon);
             let nf = ng + nh;
             if nf <= best {
+                let child_key = memo_key(&next, &mut canon);
+                let pruned = memo.contains(&child_key);
+                if let (Some(tr), Some(pid)) = (trace.as_deref_mut(), parent_id) {
+                    let child_id = tr.intern(&child_key, &next, ng, NodeKind::Intermediate);
+                    tr.add_edge(pid, child_id, &op, pruned);
+                }
                 let mut npath = path.clone();
                 npath.push(op);
                 heap.push(AstarNode {
@@ -427,6 +337,7 @@ mod tests {
         TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
     };
     use crate::sym::SymMachine;
+    use crate::value::parse_value_expr;
     use crate::wasm::SegmentBounds;
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
@@ -450,14 +361,14 @@ mod tests {
     }
 
     #[test]
-    fn solve_example_bfs() {
-        let segment = example_segment();
+    fn astar_finds_shortest_on_parsed_example_wat() {
+        let wasm = wat::parse_str(include_str!("../../examples/example.wat")).unwrap();
+        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
+        let segment = &info.segments[0];
         let rules = test_rules();
-        let ops = solve_bfs(&segment, &rules, &SearchConfig::default())
-            .ops
-            .expect("solution");
-        assert!(!ops.is_empty(), "ops: {}", format_ops(&ops));
-        assert!(ops.len() <= 7, "ops: {}", format_ops(&ops));
+        let cfg = SearchConfig::default();
+        let result = solve_astar(segment, &rules, &cfg);
+        assert_eq!(result.ops.as_ref().map(|o| o.len()), Some(7));
     }
 
     #[test]
@@ -468,7 +379,7 @@ mod tests {
         let ops = solve_astar(&segment, &rules, &SearchConfig::default())
             .ops
             .expect("solution");
-        assert_eq!(ops.len(), 7, "ops: {}", format_ops(&ops));
+        assert_eq!(ops.len(), 4, "ops: {}", format_ops(&ops));
 
         let mut m = SymMachine::function_entry(1, 1, bounds.max_stack);
         m.begin_segment();
@@ -523,6 +434,82 @@ mod tests {
     }
 
     #[test]
+    fn example_simple_debug_fin_and_validation() {
+        use crate::sym::SymMachine;
+        let wasm = wat::parse_str(include_str!("../../examples/example-simple.wat")).unwrap();
+        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
+        let segment = &info.segments[0];
+        println!("init stack: {:?}", segment.init.stack);
+        println!("init locals: {:?}", segment.init.locals);
+        println!("fin stack: {:?}", segment.fin.stack);
+        println!("fin locals: {:?}", segment.fin.locals);
+        let wrong = [
+            SemOp::LocalGet(0),
+            SemOp::I32Const(2),
+            SemOp::I32Shl,
+            SemOp::LocalTee(0),
+        ];
+        let right = [
+            SemOp::LocalGet(0),
+            SemOp::I32Const(2),
+            SemOp::I32Mul,
+            SemOp::LocalTee(0),
+        ];
+        let rules = test_rules();
+        let mut canon = Canonizer::new(rules.clone());
+        let bounds = segment.bounds;
+        let num_params = segment.init.locals.len() as u32;
+        let total_locals = bounds.max_local + 1;
+        for (name, ops) in [("wrong", &wrong[..]), ("right", &right[..])] {
+            let mut m = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
+            m.begin_segment();
+            for op in ops {
+                m.exec(op).unwrap();
+            }
+            let got = m.to_fin_state();
+            println!("{name} stack: {:?}", got.stack);
+            println!("{name} locals: {:?}", got.locals);
+            println!(
+                "{name} grounded: {}",
+                is_grounded(&got, &segment.fin, &bounds, &mut canon)
+            );
+        }
+        let mul = parse_value_expr("(i32.mul ?L0 2)");
+        let shl2 = parse_value_expr("(i32.shl ?L0 2)");
+        let shl1 = parse_value_expr("(i32.shl ?L0 1)");
+        println!("canon mul == shl2: {}", canon.values_equivalent(&mul, &shl2));
+        println!("canon mul == shl1: {}", canon.values_equivalent(&mul, &shl1));
+        let result = solve_astar(segment, &rules, &SearchConfig::default());
+        let ops = result.ops.as_ref().unwrap();
+        println!("solution: {}", format_ops(ops));
+        println!(
+            "forward valid: {}",
+            solution_forward_valid(ops, segment, &bounds, &mut canon)
+        );
+    }
+
+    #[test]
+    fn example_simple_prefers_mul_over_shl() {
+        let wasm = wat::parse_str(include_str!("../../examples/example-simple.wat")).unwrap();
+        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
+        let segment = &info.segments[0];
+        let rules = test_rules();
+        let ops = solve_astar(segment, &rules, &SearchConfig::default())
+            .ops
+            .expect("solution");
+        assert!(
+            ops.iter().any(|op| matches!(op, SemOp::I32Mul)),
+            "expected i32.mul in {:?}",
+            format_ops(&ops)
+        );
+        assert!(
+            !ops.iter().any(|op| matches!(op, SemOp::I32Shl)),
+            "i32.shl is unsound here: {:?}",
+            format_ops(&ops)
+        );
+    }
+
+    #[test]
     fn solve_example_astar() {
         let segment = example_segment();
         let rules = test_rules();
@@ -530,6 +517,6 @@ mod tests {
             .ops
             .expect("solution");
         assert!(!ops.is_empty());
-        assert!(ops.len() <= 7);
+        assert!(ops.len() <= 4);
     }
 }

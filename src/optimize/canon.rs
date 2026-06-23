@@ -186,6 +186,65 @@ mod tests {
     }
 
     #[test]
+    fn debug_saturated_const_merge() {
+        let canon = Canonizer::new(rules());
+        let top = parse_value_expr("(i32.shl ?L0 1)");
+        let mut runner = canon.saturate(&top);
+        for c in [0i32, 1, -1, 2] {
+            let e = parse_value_expr(&format!("{c}"));
+            let id = runner.egraph.add_expr(&e);
+            let class = usize::from(runner.egraph.find(id));
+            println!("const {c} -> eclass {class}");
+        }
+        let root = runner.roots[0];
+        let class_id = runner.egraph.find(root);
+        println!("root eclass {}", usize::from(class_id));
+        println!("nodes in root eclass:");
+        for node in runner.egraph[class_id].iter() {
+            println!("  {node:?}");
+        }
+    }
+
+    #[test]
+    fn debug_const_eclass() {
+        let mut canon = Canonizer::new(rules());
+        for c in [0i32, 1, -1, 2] {
+            let e = parse_value_expr(&format!("{c}"));
+            println!("{c} -> canon id {}", canon.canon(&e));
+        }
+    }
+
+    #[test]
+    fn debug_shl2_vs_mul2_canon() {
+        let mut canon = Canonizer::new(rules());
+        let mul = parse_value_expr("(i32.mul ?L0 2)");
+        let shl2 = parse_value_expr("(i32.shl ?L0 2)");
+        let l0 = parse_value_expr("?L0");
+        println!("L0 canon {}", canon.canon(&l0));
+        let mut runner = canon.saturate(&mul);
+        let root = runner.roots[0];
+        let extractor = egg::Extractor::new(&runner.egraph, egg::AstSize);
+        let (_, best_mul) = extractor.find_best(root);
+        println!("mul best extract: {best_mul}");
+        let mut runner2 = canon.saturate(&shl2);
+        let root2 = runner2.roots[0];
+        let (_, best_shl2) = extractor.find_best(root2);
+        println!("shl2 best extract: {best_shl2}");
+        println!("mul canon {}", canon.canon(&mul));
+        println!("shl2 canon {}", canon.canon(&shl2));
+    }
+
+    #[test]
+    fn debug_shl_decomps() {
+        let mut canon = Canonizer::new(rules());
+        let top = parse_value_expr("(i32.shl ?L0 1)");
+        let decomps = canon.binop_decompositions(&top);
+        for (k, e1, e2) in &decomps {
+            println!("{k:?}: {e1} {e2}");
+        }
+    }
+
+    #[test]
     fn sound_mul_shl_equivalence_shares_canon_id() {
         let mut canon = Canonizer::new(rules());
         let mul = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");

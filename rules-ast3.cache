@@ -1,722 +1,282 @@
 {
   "format_version": 12,
   "max_ast_size": 3,
-  "random_tests": 10,
+  "random_tests": 100,
   "rules": [
     {
       "name": "syn-0",
-      "lhs": "(i32.sub -1 ?a)",
-      "rhs": "(i32.xor ?a -1)",
+      "lhs": "(i32.xor ?a 0)",
+      "rhs": "?a",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-1",
-      "lhs": "(i32.sub -1 ?a)",
-      "rhs": "(i32.xor -1 ?a)",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.xor ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-2",
-      "lhs": "(i32.rotl -1 ?a)",
-      "rhs": "(i32.rotr -1 ?a)",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.rotl ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-3",
-      "lhs": "(i32.rotl -1 ?a)",
-      "rhs": "(i32.shr_s -1 ?a)",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.shl ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-4",
-      "lhs": "(i32.rotr -1 ?a)",
-      "rhs": "(i32.shr_s -1 ?a)",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.or 0 ?a)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-5",
-      "lhs": "(i32.or ?a -1)",
-      "rhs": "(i32.rotl -1 ?a)",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.rotr ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-6",
-      "lhs": "(i32.or ?a -1)",
-      "rhs": "(i32.rotr -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-7",
-      "lhs": "(i32.or ?a -1)",
-      "rhs": "(i32.shr_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-8",
-      "lhs": "(i32.or -1 ?a)",
-      "rhs": "(i32.rotl -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-9",
-      "lhs": "(i32.or -1 ?a)",
-      "rhs": "(i32.rotr -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-10",
-      "lhs": "(i32.or -1 ?a)",
-      "rhs": "(i32.shr_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-11",
-      "lhs": "(i32.rem_s ?a 0)",
-      "rhs": "(i32.rem_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-12",
-      "lhs": "(i32.div_s ?a 0)",
-      "rhs": "(i32.rem_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-13",
-      "lhs": "(i32.div_s ?a 0)",
-      "rhs": "(i32.rem_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-14",
-      "lhs": "(i32.div_s ?a 0)",
-      "rhs": "(i32.div_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-15",
-      "lhs": "(i32.div_u ?a 0)",
-      "rhs": "(i32.rem_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-16",
-      "lhs": "(i32.div_u ?a 0)",
-      "rhs": "(i32.rem_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-17",
-      "lhs": "(i32.and 1 ?a)",
-      "rhs": "(i32.rem_u ?a 2)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-18",
-      "lhs": "(i32.and 1 ?a)",
-      "rhs": "(i32.eqz (i32.ctz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-19",
-      "lhs": "(i32.and ?a 1)",
-      "rhs": "(i32.rem_u ?a 2)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-20",
-      "lhs": "(i32.and ?a 1)",
-      "rhs": "(i32.eqz (i32.ctz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-21",
-      "lhs": "(i32.eqz (i32.ctz ?a))",
-      "rhs": "(i32.rem_u ?a 2)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-22",
-      "lhs": "(i32.gt_s -1 ?a)",
-      "rhs": "(i32.ne ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-23",
-      "lhs": "(i32.gt_s -1 ?a)",
-      "rhs": "(i32.ne -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-24",
-      "lhs": "(i32.gt_s -1 ?a)",
-      "rhs": "(i32.lt_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-25",
-      "lhs": "(i32.lt_s ?a -1)",
-      "rhs": "(i32.ne ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-26",
-      "lhs": "(i32.lt_s ?a -1)",
-      "rhs": "(i32.ne -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-27",
-      "lhs": "(i32.gt_s ?a 2)",
-      "rhs": "(i32.lt_s 2 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-28",
-      "lhs": "(i32.popcnt (i32.eqz ?a))",
-      "rhs": "(i32.eqz ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-29",
-      "lhs": "(i32.gt_s 1 ?a)",
-      "rhs": "(i32.popcnt (i32.eqz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-30",
-      "lhs": "(i32.gt_s 1 ?a)",
-      "rhs": "(i32.lt_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-31",
-      "lhs": "(i32.gt_s 1 ?a)",
-      "rhs": "(i32.eqz ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-32",
-      "lhs": "(i32.gt_s 1 ?a)",
-      "rhs": "(i32.le_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-33",
-      "lhs": "(i32.eqz (i32.popcnt ?a))",
-      "rhs": "(i32.popcnt (i32.eqz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-34",
-      "lhs": "(i32.eqz (i32.popcnt ?a))",
-      "rhs": "(i32.gt_s 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-35",
-      "lhs": "(i32.eqz (i32.popcnt ?a))",
-      "rhs": "(i32.lt_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-36",
-      "lhs": "(i32.eqz (i32.popcnt ?a))",
-      "rhs": "(i32.eqz ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-37",
-      "lhs": "(i32.eqz (i32.popcnt ?a))",
-      "rhs": "(i32.le_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-38",
-      "lhs": "(i32.eq ?a 0)",
-      "rhs": "(i32.popcnt (i32.eqz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-39",
-      "lhs": "(i32.eq ?a 0)",
-      "rhs": "(i32.gt_s 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-40",
-      "lhs": "(i32.eq ?a 0)",
-      "rhs": "(i32.eqz (i32.popcnt ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-41",
-      "lhs": "(i32.eq ?a 0)",
-      "rhs": "(i32.lt_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-42",
-      "lhs": "(i32.eq ?a 0)",
-      "rhs": "(i32.eqz ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-43",
-      "lhs": "(i32.eq ?a 0)",
-      "rhs": "(i32.le_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-44",
-      "lhs": "(i32.eq 0 ?a)",
-      "rhs": "(i32.popcnt (i32.eqz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-45",
-      "lhs": "(i32.eq 0 ?a)",
-      "rhs": "(i32.gt_s 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-46",
-      "lhs": "(i32.eq 0 ?a)",
-      "rhs": "(i32.eqz (i32.popcnt ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-47",
-      "lhs": "(i32.eq 0 ?a)",
-      "rhs": "(i32.lt_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-48",
-      "lhs": "(i32.eq 0 ?a)",
-      "rhs": "(i32.eqz ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-49",
-      "lhs": "(i32.eq 0 ?a)",
-      "rhs": "(i32.le_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-50",
-      "lhs": "(i32.lt_s ?a 1)",
-      "rhs": "(i32.popcnt (i32.eqz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-51",
-      "lhs": "(i32.lt_s ?a 1)",
-      "rhs": "(i32.eqz ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-52",
-      "lhs": "(i32.le_s ?a 0)",
-      "rhs": "(i32.popcnt (i32.eqz ?a))",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-53",
-      "lhs": "(i32.le_s ?a 0)",
-      "rhs": "(i32.lt_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-54",
-      "lhs": "(i32.le_s ?a 0)",
-      "rhs": "(i32.eqz ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-55",
-      "lhs": "(i32.rotl 1 ?a)",
-      "rhs": "(i32.shl 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-56",
-      "lhs": "(i32.rotl ?a 1)",
-      "rhs": "(i32.rotr ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-57",
-      "lhs": "(i32.rotl ?a -1)",
-      "rhs": "(i32.rotr ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-58",
-      "lhs": "(i32.add ?a -1)",
-      "rhs": "(i32.sub ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-59",
-      "lhs": "(i32.add -1 ?a)",
-      "rhs": "(i32.sub ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-60",
-      "lhs": "(i32.shr_s 2 ?a)",
-      "rhs": "(i32.shr_u 2 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-61",
-      "lhs": "(i32.eqz (i32.clz ?a))",
-      "rhs": "(i32.shr_u ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-62",
-      "lhs": "(i32.rem_s 0 ?a)",
-      "rhs": "(i32.rem_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-63",
-      "lhs": "(i32.div_u 0 ?a)",
-      "rhs": "(i32.rem_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-64",
-      "lhs": "(i32.div_u 0 ?a)",
-      "rhs": "(i32.rem_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-65",
-      "lhs": "(i32.div_s 0 ?a)",
-      "rhs": "(i32.rem_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-66",
-      "lhs": "(i32.div_s 0 ?a)",
-      "rhs": "(i32.div_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-67",
-      "lhs": "(i32.div_s 0 ?a)",
-      "rhs": "(i32.rem_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-68",
-      "lhs": "(i32.eq ?a -1)",
-      "rhs": "(i32.le_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-69",
-      "lhs": "(i32.eq -1 ?a)",
-      "rhs": "(i32.le_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-70",
-      "lhs": "(i32.div_u ?a -1)",
-      "rhs": "(i32.eq ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-71",
-      "lhs": "(i32.div_u ?a -1)",
-      "rhs": "(i32.eq -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-72",
-      "lhs": "(i32.div_u ?a -1)",
-      "rhs": "(i32.le_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-73",
-      "lhs": "(i32.lt_s 0 ?a)",
-      "rhs": "(i32.ne ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-74",
-      "lhs": "(i32.lt_s 0 ?a)",
-      "rhs": "(i32.ne 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-75",
-      "lhs": "(i32.le_s 1 ?a)",
-      "rhs": "(i32.lt_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-76",
-      "lhs": "(i32.le_s 1 ?a)",
-      "rhs": "(i32.ne ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-77",
-      "lhs": "(i32.le_s 1 ?a)",
-      "rhs": "(i32.ne 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-78",
-      "lhs": "(i32.eqz (i32.eqz ?a))",
-      "rhs": "(i32.lt_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-79",
-      "lhs": "(i32.eqz (i32.eqz ?a))",
-      "rhs": "(i32.le_s 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-80",
-      "lhs": "(i32.eqz (i32.eqz ?a))",
-      "rhs": "(i32.ne ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-81",
-      "lhs": "(i32.eqz (i32.eqz ?a))",
-      "rhs": "(i32.ne 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-82",
-      "lhs": "(i32.eqz (i32.eqz ?a))",
-      "rhs": "(i32.gt_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-83",
-      "lhs": "(i32.gt_s ?a 0)",
-      "rhs": "(i32.lt_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-84",
-      "lhs": "(i32.gt_s ?a 0)",
-      "rhs": "(i32.le_s 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-85",
-      "lhs": "(i32.gt_s ?a 0)",
-      "rhs": "(i32.ne ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-86",
-      "lhs": "(i32.gt_s ?a 0)",
-      "rhs": "(i32.ne 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-87",
-      "lhs": "(i32.shr_s 1 ?a)",
-      "rhs": "(i32.shr_u 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-88",
-      "lhs": "(i32.rotr ?a 0)",
+      "lhs": "(i32.and -1 ?a)",
       "rhs": "(i32.shr_s ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-89",
+      "name": "syn-7",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-8",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.mul ?a 1)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-9",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-10",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.mul 1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-11",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-12",
+      "lhs": "(i32.and -1 ?a)",
+      "rhs": "(i32.or ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-13",
+      "lhs": "(i32.rotl ?a 0)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-14",
+      "lhs": "(i32.rotl ?a 0)",
+      "rhs": "(i32.shl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-15",
+      "lhs": "(i32.rotl ?a 0)",
+      "rhs": "(i32.rotr ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-16",
+      "lhs": "(i32.rotl ?a 0)",
+      "rhs": "(i32.shr_s ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-17",
+      "lhs": "(i32.rotl ?a 0)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-18",
+      "lhs": "(i32.rotl ?a 0)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-19",
+      "lhs": "(i32.rotl ?a 0)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-20",
+      "lhs": "(i32.shl ?a 0)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-21",
+      "lhs": "(i32.shl ?a 0)",
+      "rhs": "(i32.shr_s ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-22",
+      "lhs": "(i32.shl ?a 0)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-23",
+      "lhs": "(i32.shl ?a 0)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-24",
+      "lhs": "(i32.shl ?a 0)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-25",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-26",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "(i32.rotl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-27",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "(i32.shl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-28",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "(i32.rotr ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-29",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "(i32.shr_s ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-30",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-31",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-32",
+      "lhs": "(i32.or 0 ?a)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-33",
+      "lhs": "(i32.rotr ?a 0)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-34",
       "lhs": "(i32.rotr ?a 0)",
       "rhs": "(i32.shl ?a 0)",
       "input": [
@@ -724,23 +284,15 @@
       ]
     },
     {
-      "name": "syn-90",
+      "name": "syn-35",
       "lhs": "(i32.rotr ?a 0)",
-      "rhs": "(i32.sub ?a 0)",
+      "rhs": "(i32.shr_s ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-91",
-      "lhs": "(i32.rotr ?a 0)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-92",
+      "name": "syn-36",
       "lhs": "(i32.rotr ?a 0)",
       "rhs": "(i32.xor 0 ?a)",
       "input": [
@@ -748,8 +300,456 @@
       ]
     },
     {
-      "name": "syn-93",
+      "name": "syn-37",
       "lhs": "(i32.rotr ?a 0)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-38",
+      "lhs": "(i32.rotr ?a 0)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-39",
+      "lhs": "(i32.shr_s ?a 0)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-40",
+      "lhs": "(i32.shr_s ?a 0)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-41",
+      "lhs": "(i32.shr_s ?a 0)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-42",
+      "lhs": "(i32.shr_s ?a 0)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-43",
+      "lhs": "(i32.xor 0 ?a)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-44",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-45",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.and -1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-46",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.rotl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-47",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.shl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-48",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.or 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-49",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.rotr ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-50",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.shr_s ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-51",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-52",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.mul ?a 1)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-53",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.and ?a -1)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-54",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-55",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.mul 1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-56",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-57",
+      "lhs": "(i32.add 0 ?a)",
+      "rhs": "(i32.or ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-58",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-59",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.rotl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-60",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.shl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-61",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.or 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-62",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.rotr ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-63",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.shr_s ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-64",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-65",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-66",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-67",
+      "lhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.or ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-68",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-69",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.rotl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-70",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.shl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-71",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.or 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-72",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.rotr ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-73",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.shr_s ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-74",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-75",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.mul ?a 1)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-76",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-77",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.mul 1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-78",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-79",
+      "lhs": "(i32.and ?a -1)",
+      "rhs": "(i32.or ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-80",
+      "lhs": "(i32.shr_u ?a 0)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-81",
+      "lhs": "(i32.shr_u ?a 0)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-82",
+      "lhs": "(i32.shr_u ?a 0)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-83",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.xor ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-84",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.rotl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-85",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.shl ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-86",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.or 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-87",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.rotr ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-88",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.shr_s ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-89",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.xor 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-90",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.shr_u ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-91",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "?a",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-92",
+      "lhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.or ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-93",
+      "lhs": "(i32.add ?a 0)",
       "rhs": "(i32.xor ?a 0)",
       "input": [
         "I32"
@@ -757,32 +757,32 @@
     },
     {
       "name": "syn-94",
-      "lhs": "(i32.shr_s ?a 0)",
-      "rhs": "(i32.sub ?a 0)",
+      "lhs": "(i32.add ?a 0)",
+      "rhs": "(i32.and -1 ?a)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-95",
-      "lhs": "(i32.shr_s ?a 0)",
-      "rhs": "(i32.shr_u ?a 0)",
+      "lhs": "(i32.add ?a 0)",
+      "rhs": "(i32.rotl ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-96",
-      "lhs": "(i32.shr_s ?a 0)",
-      "rhs": "(i32.xor 0 ?a)",
+      "lhs": "(i32.add ?a 0)",
+      "rhs": "(i32.shl ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-97",
-      "lhs": "(i32.shr_s ?a 0)",
-      "rhs": "(i32.xor ?a 0)",
+      "lhs": "(i32.add ?a 0)",
+      "rhs": "(i32.or 0 ?a)",
       "input": [
         "I32"
       ]
@@ -806,7 +806,7 @@
     {
       "name": "syn-100",
       "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.mul ?a 1)",
+      "rhs": "(i32.xor 0 ?a)",
       "input": [
         "I32"
       ]
@@ -814,7 +814,7 @@
     {
       "name": "syn-101",
       "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.shl ?a 0)",
+      "rhs": "(i32.mul ?a 1)",
       "input": [
         "I32"
       ]
@@ -830,7 +830,7 @@
     {
       "name": "syn-103",
       "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.mul 1 ?a)",
+      "rhs": "(i32.shr_u ?a 0)",
       "input": [
         "I32"
       ]
@@ -838,7 +838,7 @@
     {
       "name": "syn-104",
       "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.sub ?a 0)",
+      "rhs": "(i32.mul 1 ?a)",
       "input": [
         "I32"
       ]
@@ -846,7 +846,7 @@
     {
       "name": "syn-105",
       "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.or 0 ?a)",
+      "rhs": "?a",
       "input": [
         "I32"
       ]
@@ -861,1886 +861,70 @@
     },
     {
       "name": "syn-107",
-      "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.shr_u ?a 0)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "(i32.xor ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-108",
-      "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.div_u ?a 1)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "(i32.rotl ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-109",
-      "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.rotl ?a 0)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "(i32.shl ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-110",
-      "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.and -1 ?a)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "(i32.rotr ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-111",
-      "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.xor 0 ?a)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "(i32.shr_s ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-112",
-      "lhs": "(i32.add ?a 0)",
-      "rhs": "(i32.xor ?a 0)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "(i32.xor 0 ?a)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-113",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.rotr ?a 0)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "(i32.shr_u ?a 0)",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-114",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.shr_s ?a 0)",
+      "lhs": "(i32.or ?a 0)",
+      "rhs": "?a",
       "input": [
         "I32"
       ]
     },
     {
       "name": "syn-115",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-116",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-117",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.or 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-118",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.or ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-119",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-120",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-121",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-122",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-123",
-      "lhs": "(i32.shl ?a 0)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-124",
-      "lhs": "(i32.shl ?a 0)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-125",
-      "lhs": "(i32.shl ?a 0)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-126",
-      "lhs": "(i32.shl ?a 0)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-127",
-      "lhs": "(i32.shl ?a 0)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-128",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-129",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-130",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.mul ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-131",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-132",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.mul 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-133",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-134",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.or 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-135",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.or ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-136",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-137",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.div_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-138",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-139",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-140",
-      "lhs": "(i32.and ?a -1)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-141",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-142",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-143",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-144",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-145",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.or 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-146",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.or ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-147",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-148",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-149",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-150",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-151",
-      "lhs": "(i32.sub ?a 0)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-152",
-      "lhs": "(i32.sub ?a 0)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-153",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-154",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-155",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.mul ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-156",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-157",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.and ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-158",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.mul 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-159",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-160",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.or 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-161",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.or ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-162",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-163",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.div_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-164",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-165",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.and -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-166",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-167",
-      "lhs": "(i32.add 0 ?a)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-168",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-169",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-170",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-171",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-172",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-173",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-174",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-175",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-176",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-177",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-178",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-179",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-180",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-181",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-182",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-183",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-184",
-      "lhs": "(i32.shr_u ?a 0)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-185",
-      "lhs": "(i32.shr_u ?a 0)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-186",
-      "lhs": "(i32.shr_u ?a 0)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-187",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-188",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-189",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.mul ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-190",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-191",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.mul 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-192",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-193",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.or 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-194",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.or ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-195",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-196",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-197",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-198",
-      "lhs": "(i32.div_u ?a 1)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-199",
-      "lhs": "(i32.rotl ?a 0)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-200",
-      "lhs": "(i32.rotl ?a 0)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-201",
-      "lhs": "(i32.rotl ?a 0)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-202",
-      "lhs": "(i32.rotl ?a 0)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-203",
-      "lhs": "(i32.rotl ?a 0)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-204",
-      "lhs": "(i32.rotl ?a 0)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-205",
-      "lhs": "(i32.rotl ?a 0)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-206",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.rotr ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-207",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.shr_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-208",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.mul ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-209",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.shl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-210",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.mul 1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-211",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.sub ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-212",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.or 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-213",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.or ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-214",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.shr_u ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-215",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.div_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-216",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.rotl ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-217",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.xor 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-218",
-      "lhs": "(i32.and -1 ?a)",
-      "rhs": "(i32.xor ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-219",
-      "lhs": "(i32.le_s 0 ?a)",
-      "rhs": "(i32.le_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-220",
-      "lhs": "(i32.mul ?a -1)",
-      "rhs": "(i32.sub 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-221",
-      "lhs": "(i32.mul -1 ?a)",
-      "rhs": "(i32.sub 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-222",
-      "lhs": "(i32.rem_u ?a 1)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-223",
-      "lhs": "(i32.rem_u ?a 1)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-224",
-      "lhs": "(i32.rem_u ?a 1)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-225",
-      "lhs": "(i32.rem_u ?a 1)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-226",
-      "lhs": "(i32.rem_u ?a 1)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-227",
-      "lhs": "(i32.rem_s ?a 1)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-228",
-      "lhs": "(i32.rem_s ?a 1)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-229",
-      "lhs": "(i32.rem_s ?a 1)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-230",
-      "lhs": "(i32.rem_s ?a 1)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-231",
-      "lhs": "(i32.rem_s ?a 1)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-232",
-      "lhs": "(i32.rem_s ?a 1)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-233",
-      "lhs": "(i32.rotr 0 ?a)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-234",
-      "lhs": "(i32.rotr 0 ?a)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-235",
-      "lhs": "(i32.rotr 0 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-236",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-237",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-238",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-239",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-240",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-241",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.lt_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-242",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-243",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-244",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.mul 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-245",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-246",
-      "lhs": "(i32.lt_s -1 ?a)",
-      "rhs": "(i32.mul ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-247",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-248",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-249",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-250",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.lt_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-251",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-252",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-253",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.lt_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-254",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-255",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-256",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.mul 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-257",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-258",
-      "lhs": "(i32.gt_s ?a -1)",
-      "rhs": "(i32.mul ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-259",
-      "lhs": "(i32.rem_s ?a -1)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-260",
-      "lhs": "(i32.rem_s ?a -1)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-261",
-      "lhs": "(i32.rem_s ?a -1)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-262",
-      "lhs": "(i32.rem_s ?a -1)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-263",
-      "lhs": "(i32.rem_s ?a -1)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-264",
-      "lhs": "(i32.rem_s ?a -1)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-265",
-      "lhs": "(i32.rem_s ?a -1)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-266",
-      "lhs": "(i32.shr_s 0 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-267",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-268",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-269",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-270",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-271",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-272",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-273",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-274",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.mul 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-275",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-276",
-      "lhs": "(i32.lt_s ?a 0)",
-      "rhs": "(i32.mul ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-277",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-278",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-279",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-280",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.lt_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-281",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.gt_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-282",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-283",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-284",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.lt_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-285",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-286",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-287",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.mul 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-288",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-289",
-      "lhs": "(i32.gt_s 0 ?a)",
-      "rhs": "(i32.mul ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-290",
-      "lhs": "(i32.rotl 0 ?a)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-291",
-      "lhs": "(i32.rotl 0 ?a)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-292",
-      "lhs": "(i32.rotl 0 ?a)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-293",
-      "lhs": "(i32.rotl 0 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-294",
-      "lhs": "(i32.shl 0 ?a)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-295",
-      "lhs": "(i32.shl 0 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-296",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-297",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-298",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-299",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.lt_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-300",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.gt_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-301",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-302",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-303",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.lt_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-304",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.gt_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-305",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-306",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-307",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.mul 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-308",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-309",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "(i32.mul ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-310",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-311",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-312",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-313",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.lt_s -1 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-314",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.gt_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-315",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-316",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-317",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.lt_s ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-318",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.gt_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-319",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-320",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-321",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.mul 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-322",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-323",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "(i32.mul ?a 0)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-324",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-325",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-326",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-327",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-328",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-329",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-330",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-331",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-332",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.rem_u ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-333",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.rem_s ?a 1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-334",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.rotr 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-335",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.rem_s ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-336",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.shr_s 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-337",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.rotl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-338",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.shl 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-339",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "(i32.shr_u 0 ?a)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-340",
-      "lhs": "(i32.add ?a 1)",
-      "rhs": "(i32.sub ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-341",
-      "lhs": "(i32.add 1 ?a)",
-      "rhs": "(i32.sub ?a -1)",
-      "input": [
-        "I32"
-      ]
-    },
-    {
-      "name": "syn-342",
       "lhs": "(i32.mul 2 ?a)",
       "rhs": "(i32.shl ?a 1)",
       "input": [
@@ -2748,7 +932,7 @@
       ]
     },
     {
-      "name": "syn-343",
+      "name": "syn-116",
       "lhs": "(i32.mul ?a 2)",
       "rhs": "(i32.shl ?a 1)",
       "input": [
@@ -2756,76 +940,386 @@
       ]
     },
     {
-      "name": "syn-344",
-      "lhs": "(i32.div_u ?a 2)",
-      "rhs": "(i32.shr_u ?a 1)",
+      "name": "syn-117",
+      "lhs": "(i32.rotl ?a -1)",
+      "rhs": "(i32.rotr ?a 1)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-345",
-      "lhs": "(i32.le_s ?a 1)",
-      "rhs": "(i32.lt_s ?a 2)",
+      "name": "syn-118",
+      "lhs": "(i32.shr_s 2 ?a)",
+      "rhs": "(i32.shr_u 2 ?a)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-346",
-      "lhs": "(i32.gt_s 2 ?a)",
-      "rhs": "(i32.le_s ?a 1)",
+      "name": "syn-119",
+      "lhs": "(i32.shr_s 1 ?a)",
+      "rhs": "(i32.shr_u 1 ?a)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-347",
-      "lhs": "(i32.gt_s 2 ?a)",
-      "rhs": "(i32.lt_s ?a 2)",
+      "name": "syn-120",
+      "lhs": "(i32.rotr -1 ?a)",
+      "rhs": "(i32.shr_s -1 ?a)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-348",
-      "lhs": "(i32.gt_s ?a 1)",
-      "rhs": "(i32.lt_s 1 ?a)",
+      "name": "syn-121",
+      "lhs": "(i32.or ?a -1)",
+      "rhs": "(i32.rotr -1 ?a)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-349",
-      "lhs": "(i32.gt_s ?a 1)",
-      "rhs": "(i32.le_s 2 ?a)",
+      "name": "syn-122",
+      "lhs": "(i32.or ?a -1)",
+      "rhs": "(i32.rotl -1 ?a)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-350",
-      "lhs": "(i32.le_s 2 ?a)",
-      "rhs": "(i32.lt_s 1 ?a)",
+      "name": "syn-123",
+      "lhs": "(i32.or ?a -1)",
+      "rhs": "(i32.shr_s -1 ?a)",
       "input": [
         "I32"
       ]
     },
     {
-      "name": "syn-351",
-      "lhs": "(i32.gt_s ?b ?a)",
-      "rhs": "(i32.lt_s ?a ?b)",
+      "name": "syn-124",
+      "lhs": "(i32.rotl -1 ?a)",
+      "rhs": "(i32.rotr -1 ?a)",
       "input": [
-        "I32",
         "I32"
       ]
     },
     {
-      "name": "syn-352",
-      "lhs": "(i32.gt_s ?a ?b)",
-      "rhs": "(i32.lt_s ?b ?a)",
+      "name": "syn-125",
+      "lhs": "(i32.rotl -1 ?a)",
+      "rhs": "(i32.shr_s -1 ?a)",
       "input": [
-        "I32",
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-126",
+      "lhs": "(i32.or -1 ?a)",
+      "rhs": "(i32.rotr -1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-127",
+      "lhs": "(i32.or -1 ?a)",
+      "rhs": "(i32.rotl -1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-128",
+      "lhs": "(i32.or -1 ?a)",
+      "rhs": "(i32.shr_s -1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-129",
+      "lhs": "(i32.rotl ?a 1)",
+      "rhs": "(i32.rotr ?a -1)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-130",
+      "lhs": "(i32.rotl 1 ?a)",
+      "rhs": "(i32.shl 1 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-131",
+      "lhs": "(i32.mul ?a 0)",
+      "rhs": "(i32.shl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-132",
+      "lhs": "(i32.mul ?a 0)",
+      "rhs": "(i32.shr_s 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-133",
+      "lhs": "(i32.mul ?a 0)",
+      "rhs": "(i32.rotr 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-134",
+      "lhs": "(i32.mul ?a 0)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-135",
+      "lhs": "(i32.mul ?a 0)",
+      "rhs": "(i32.rotl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-136",
+      "lhs": "(i32.and 0 ?a)",
+      "rhs": "(i32.mul ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-137",
+      "lhs": "(i32.and 0 ?a)",
+      "rhs": "(i32.shl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-138",
+      "lhs": "(i32.and 0 ?a)",
+      "rhs": "(i32.shr_s 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-139",
+      "lhs": "(i32.and 0 ?a)",
+      "rhs": "(i32.mul 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-140",
+      "lhs": "(i32.and 0 ?a)",
+      "rhs": "(i32.rotr 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-141",
+      "lhs": "(i32.and 0 ?a)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-142",
+      "lhs": "(i32.and 0 ?a)",
+      "rhs": "(i32.rotl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-143",
+      "lhs": "(i32.and ?a 0)",
+      "rhs": "(i32.mul ?a 0)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-144",
+      "lhs": "(i32.and ?a 0)",
+      "rhs": "(i32.shl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-145",
+      "lhs": "(i32.and ?a 0)",
+      "rhs": "(i32.shr_s 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-146",
+      "lhs": "(i32.and ?a 0)",
+      "rhs": "(i32.mul 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-147",
+      "lhs": "(i32.and ?a 0)",
+      "rhs": "(i32.rotr 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-148",
+      "lhs": "(i32.and ?a 0)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-149",
+      "lhs": "(i32.and ?a 0)",
+      "rhs": "(i32.rotl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-150",
+      "lhs": "(i32.shl 0 ?a)",
+      "rhs": "(i32.shr_s 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-151",
+      "lhs": "(i32.shl 0 ?a)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-152",
+      "lhs": "(i32.shr_s 0 ?a)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-153",
+      "lhs": "(i32.mul 0 ?a)",
+      "rhs": "(i32.shl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-154",
+      "lhs": "(i32.mul 0 ?a)",
+      "rhs": "(i32.shr_s 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-155",
+      "lhs": "(i32.mul 0 ?a)",
+      "rhs": "(i32.rotr 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-156",
+      "lhs": "(i32.mul 0 ?a)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-157",
+      "lhs": "(i32.mul 0 ?a)",
+      "rhs": "(i32.rotl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-158",
+      "lhs": "(i32.rotr 0 ?a)",
+      "rhs": "(i32.shl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-159",
+      "lhs": "(i32.rotr 0 ?a)",
+      "rhs": "(i32.shr_s 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-160",
+      "lhs": "(i32.rotr 0 ?a)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-161",
+      "lhs": "(i32.rotl 0 ?a)",
+      "rhs": "(i32.shl 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-162",
+      "lhs": "(i32.rotl 0 ?a)",
+      "rhs": "(i32.shr_s 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-163",
+      "lhs": "(i32.rotl 0 ?a)",
+      "rhs": "(i32.rotr 0 ?a)",
+      "input": [
+        "I32"
+      ]
+    },
+    {
+      "name": "syn-164",
+      "lhs": "(i32.rotl 0 ?a)",
+      "rhs": "(i32.shr_u 0 ?a)",
+      "input": [
         "I32"
       ]
     }

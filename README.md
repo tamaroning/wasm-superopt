@@ -15,7 +15,7 @@
 - Local slot `⋆` (don't-care) encodes register liveness
 - Arithmetic alternatives branch via e-graph binop decompositions (Phase 1 rules)
 - Normalized goals `⌈G⌉` are memoization keys
-- Solvers: BFS, Greedy, A* (default)
+- A* with admissible heuristic (default)
 
 ## Usage
 

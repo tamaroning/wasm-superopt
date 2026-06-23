@@ -75,6 +75,13 @@ impl SearchTrace {
     }
 
     pub fn add_edge(&mut self, from: u32, to: u32, op: &SemOp, pruned: bool) {
+        if self
+            .edges
+            .iter()
+            .any(|e| e.from == from && e.to == to && e.pruned == pruned)
+        {
+            return;
+        }
         self.edges.push(TraceEdge {
             from,
             to,
@@ -105,7 +112,7 @@ impl SearchTrace {
 
     pub fn to_dot(&self) -> String {
         let mut out = String::from(
-            "digraph search {\n  rankdir=BT;\n  graph [fontsize=10];\n  node [shape=box, fontname=\"Courier\", fontsize=9];\n  edge [fontname=\"Courier\", fontsize=8];\n",
+            "digraph search {\n  rankdir=BT;\n  graph [dpi=300];\n  node [shape=box, fontname=\"Courier\", fontsize=9];\n  edge [fontname=\"Courier\", fontsize=8];\n",
         );
         for node in &self.nodes {
             let (fill, style) = match node.kind {
