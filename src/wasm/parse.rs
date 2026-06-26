@@ -6,7 +6,10 @@ use crate::sym::{ForwardError, LocalReq, SymMachine};
 use crate::wasm::deps::compute_dependencies;
 use crate::wasm::segment::OpaqueMeta;
 use crate::wasm::{SegmentBounds, StraightSegment};
-use crate::wasm::stack_analysis::{operator_is_storage, stack_bounds_ops, stack_bounds_operators, operator_stack_effect};
+use crate::wasm::stack_analysis::{
+    operator_is_storage, operator_stack_effect_with_types, stack_bounds_ops, stack_bounds_operators,
+    ModuleStackTypes,
+};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
@@ -95,7 +98,10 @@ pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
                     code_func_index,
                     num_params,
                     total_locals,
-                    &module_func_types,
+                    ModuleStackTypes {
+                        module_func_types: &module_func_types,
+                        type_section: &types,
+                    },
                     &body,
                     &mut segments,
                     &mut warnings,
@@ -190,7 +196,7 @@ fn extract_from_body(
     func_index: u32,
     num_params: u32,
     total_locals: u32,
-    module_func_types: &[FuncType],
+    stack_types: ModuleStackTypes<'_>,
     body: &wasmparser::FunctionBody<'_>,
     out: &mut Vec<StraightSegment>,
     warnings: &mut Vec<String>,
@@ -203,7 +209,7 @@ fn extract_from_body(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("func {func_index} operator: {e}"))?;
 
-    let (_, func_max_stack) = stack_bounds_operators(&operators);
+    let (_, func_max_stack) = stack_bounds_operators(&operators, stack_types);
     let bounds_template = SegmentBounds::new(total_locals, func_max_stack);
 
     let mut segment_index = 0usize;
@@ -217,7 +223,7 @@ fn extract_from_body(
             num_params,
             total_locals,
             bounds_template,
-            module_func_types,
+            stack_types,
             &optimizable,
             &mut segment_index,
             out,
@@ -229,7 +235,7 @@ fn extract_from_body(
 }
 
 struct OpClassCtx<'a> {
-    module_func_types: &'a [FuncType],
+    stack_types: ModuleStackTypes<'a>,
     next_access_id: u32,
 }
 
@@ -246,13 +252,13 @@ fn extract_from_ops(
     num_params: u32,
     total_locals: u32,
     bounds_template: SegmentBounds,
-    module_func_types: &[FuncType],
+    stack_types: ModuleStackTypes<'_>,
     ops: &[Operator<'_>],
     segment_index: &mut usize,
     out: &mut Vec<StraightSegment>,
     warnings: &mut Vec<String>,
 ) {
-    let (init_stack, block_max_stack) = stack_bounds_operators(ops);
+    let (init_stack, block_max_stack) = stack_bounds_operators(ops, stack_types);
     let bounds = SegmentBounds::new(total_locals, block_max_stack.max(bounds_template.max_stack));
     let mut machine = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
     machine.seed_implicit_stack_inputs(init_stack);
@@ -262,7 +268,7 @@ fn extract_from_ops(
     let mut opaque_meta: Vec<OpaqueMeta> = Vec::new();
     let mut collecting = true;
     let mut ctx = OpClassCtx {
-        module_func_types,
+        stack_types,
         next_access_id: 0,
     };
 
@@ -282,8 +288,7 @@ fn extract_from_ops(
                         let msg = format!(
                             "func {func_index} segment {segment_index} forward exec {sem:?}: {e:?}"
                         );
-                        warnings.push(msg.clone());
-                        eprintln!("warning: {msg}");
+                        warnings.push(msg);
                         flush_segment(
                             func_index,
                             num_params,
@@ -358,9 +363,9 @@ fn warn_exec(
     err: ForwardError,
     warnings: &mut Vec<String>,
 ) {
-    let msg = format!("func {func_index} segment {segment_index} {op}: {err:?}");
-    warnings.push(msg.clone());
-    eprintln!("warning: {msg}");
+    warnings.push(format!(
+        "func {func_index} segment {segment_index} {op}: {err:?}"
+    ));
 }
 
 fn segment_init_state(total_locals: u32, ops: &[SemOp]) -> crate::sym::SymState {
@@ -528,7 +533,11 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         }
         Operator::Call { function_index } => {
             let id = ctx.fresh_id();
-            let ft = match ctx.module_func_types.get(*function_index as usize) {
+            let ft = match ctx
+                .stack_types
+                .module_func_types
+                .get(*function_index as usize)
+            {
                 Some(ft) => ft,
                 None => return OpClass::Unsupported,
             };
@@ -554,7 +563,8 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         | Operator::Select
         | Operator::CallIndirect { .. } => OpClass::Unsupported,
         _ => {
-            if let Some((pops, pushes)) = operator_stack_effect(op) {
+            if let Some((pops, pushes)) = operator_stack_effect_with_types(op, ctx.stack_types)
+            {
                 opaque_sem(ctx, pops, pushes, operator_is_storage(op))
             } else {
                 OpClass::Unsupported

@@ -1,7 +1,16 @@
 //! Static stack-depth analysis for Wasm operators and SemOps.
 
 use crate::semantics::SemOp;
-use wasmparser::Operator;
+use wasmparser::{FuncType, Operator};
+
+/// Module-level type context for resolving `call` / `call_indirect` stack effects.
+#[derive(Clone, Copy, Debug)]
+pub struct ModuleStackTypes<'a> {
+    /// Function index → type (imports + defined functions).
+    pub module_func_types: &'a [FuncType],
+    /// Type section entries (used by `call_indirect`'s type index).
+    pub type_section: &'a [FuncType],
+}
 
 /// `(init_stack_depth, max_stack_depth)` for a straight-line sequence.
 pub fn stack_bounds_ops(ops: &[SemOp]) -> (usize, usize) {
@@ -23,12 +32,15 @@ pub fn stack_bounds_ops(ops: &[SemOp]) -> (usize, usize) {
     (init, max)
 }
 
-pub fn stack_bounds_operators(ops: &[Operator<'_>]) -> (usize, usize) {
+pub fn stack_bounds_operators(
+    ops: &[Operator<'_>],
+    types: ModuleStackTypes<'_>,
+) -> (usize, usize) {
     let mut current = 0usize;
     let mut init = 0usize;
     let mut max = 0usize;
     for op in ops {
-        if let Some((pop, push)) = operator_stack_effect(op) {
+        if let Some((pop, push)) = operator_stack_effect_with_types(op, types) {
             if pop > current {
                 let diff = pop - current;
                 init += diff;
@@ -97,6 +109,21 @@ pub fn operator_is_storage(op: &Operator<'_>) -> bool {
     )
 }
 
+pub fn operator_stack_effect_with_types(
+    op: &Operator<'_>,
+    types: ModuleStackTypes<'_>,
+) -> Option<(usize, usize)> {
+    if let Operator::Call { function_index } = op {
+        let ft = types.module_func_types.get(*function_index as usize)?;
+        return Some((ft.params().len(), ft.results().len()));
+    }
+    if let Operator::CallIndirect { type_index, .. } = op {
+        let ft = types.type_section.get(*type_index as usize)?;
+        return Some((1 + ft.params().len(), ft.results().len()));
+    }
+    operator_stack_effect(op)
+}
+
 pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
     Some(match op {
         Operator::I32Const { .. }
@@ -120,9 +147,12 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         | Operator::I32Rotr
         | Operator::I32Eq
         | Operator::I32Ne
-        | Operator::I32LtS
+        |         Operator::I32LtS
+        | Operator::I32LtU
         | Operator::I32LeS
+        | Operator::I32LeU
         | Operator::I32GtS
+        | Operator::I32GtU
         | Operator::I32GeS
         | Operator::I32GeU
         | Operator::I64Add
@@ -143,8 +173,11 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         | Operator::I64Eq
         | Operator::I64Ne
         | Operator::I64LtS
+        | Operator::I64LtU
         | Operator::I64LeS
+        | Operator::I64LeU
         | Operator::I64GtS
+        | Operator::I64GtU
         | Operator::I64GeS
         | Operator::I64GeU
         | Operator::F32Add
@@ -202,6 +235,7 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         | Operator::I32Extend16S
         | Operator::I64Extend8S
         | Operator::I64Extend16S
+        | Operator::I64Extend32S
         | Operator::F32ConvertI32S
         | Operator::F32ConvertI32U
         | Operator::F32ConvertI64S
@@ -228,6 +262,9 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         Operator::LocalSet { .. } => (1, 0),
         Operator::LocalTee { .. } => (1, 1),
         Operator::Drop => (1, 0),
+        Operator::Select => (3, 1),
+        Operator::MemorySize { .. } => (0, 1),
+        Operator::MemoryGrow { .. } => (1, 1),
         Operator::I32Load { .. }
         | Operator::I32Load8S { .. }
         | Operator::I32Load8U { .. }
@@ -253,8 +290,64 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         | Operator::F64Store { .. } => (2, 0),
         Operator::GlobalGet { .. } => (0, 1),
         Operator::GlobalSet { .. } => (1, 0),
-        Operator::Call { .. } => (0, 0), // resolved dynamically in parse.rs
         Operator::Return => (0, 0),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasmparser::ValType;
+
+    fn func_type(params: &[ValType], results: &[ValType]) -> FuncType {
+        FuncType::new(params.iter().copied(), results.iter().copied())
+    }
+
+    #[test]
+    fn call_stack_effect_uses_function_type() {
+        let module_func_types = vec![func_type(&[ValType::I32; 5], &[])];
+        let types = ModuleStackTypes {
+            module_func_types: &module_func_types,
+            type_section: &module_func_types,
+        };
+        let op = Operator::Call { function_index: 0 };
+        assert_eq!(
+            operator_stack_effect_with_types(&op, types),
+            Some((5, 0))
+        );
+    }
+
+    #[test]
+    fn call_indirect_includes_table_index_on_stack() {
+        let type_section = vec![func_type(&[ValType::I32, ValType::I64], &[ValType::F32])];
+        let types = ModuleStackTypes {
+            module_func_types: &[],
+            type_section: &type_section,
+        };
+        let op = Operator::CallIndirect {
+            type_index: 0,
+            table_index: 0,
+        };
+        assert_eq!(
+            operator_stack_effect_with_types(&op, types),
+            Some((3, 1))
+        );
+    }
+
+    #[test]
+    fn unsigned_comparisons_count_toward_stack_bounds() {
+        let types = ModuleStackTypes {
+            module_func_types: &[],
+            type_section: &[],
+        };
+        let ops = [
+            Operator::I32Const { value: 0 },
+            Operator::I32Const { value: 1 },
+            Operator::I32LtU,
+        ];
+        let (init, max) = stack_bounds_operators(&ops, types);
+        assert_eq!(init, 0);
+        assert_eq!(max, 2);
+    }
 }
