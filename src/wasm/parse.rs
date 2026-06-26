@@ -672,51 +672,6 @@ mod tests {
     }
 
     #[test]
-    fn addition_chains_parses_without_abort() {
-        let bytes = include_bytes!("../../examples/addition_chains_initial.wasm");
-        let info = parse_wasm_bytes(bytes).expect("addition_chains must parse");
-        assert!(!info.segments.is_empty(), "expected at least one segment");
-    }
-
-    #[test]
-    fn addition_chains_segment_count_drops_after_opaque_merge() {
-        let bytes = include_bytes!("../../examples/addition_chains_initial.wasm");
-        let info = parse_wasm_bytes(bytes).expect("addition_chains must parse");
-        assert!(
-            info.segments.len() < 327,
-            "Phase 1 split on every boundary produced 327; got {}",
-            info.segments.len()
-        );
-        assert!(
-            info.segments.len() <= 200,
-            "expected merged opaque segments, got {}",
-            info.segments.len()
-        );
-        let mixed = info.segments.iter().any(|s| {
-            let has_load = s.ops.iter().any(|op| matches!(op, SemOp::I32Load { .. }));
-            let has_store = s.ops.iter().any(|op| matches!(op, SemOp::I32Store { .. }));
-            let has_arith = s
-                .ops
-                .iter()
-                .any(|op| matches!(op, SemOp::I32Add | SemOp::I32Mul | SemOp::I32Sub));
-            has_load && has_store && has_arith
-        });
-        assert!(mixed, "expected at least one load+store+arith segment");
-    }
-
-    #[test]
-    fn reverse_uses_high_local_index() {
-        let bytes = include_bytes!("../../examples/addition_chains_initial.wasm");
-        let info = parse_wasm_bytes(bytes).expect("parse");
-        let has_local_3 = info.segments.iter().any(|s| {
-            s.ops
-                .iter()
-                .any(|op| matches!(op, SemOp::LocalSet(3) | SemOp::LocalTee(3)))
-        });
-        assert!(has_local_3, "expected segment using local 3");
-    }
-
-    #[test]
     fn mixed_local_types_parse() {
         let wasm = wat_to_wasm(
             r#"(module

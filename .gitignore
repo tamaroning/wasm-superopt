@@ -3,3 +3,6 @@
 paper/
 statistics.csv
 bench-results/
+.venv
+__pycache__/
+
