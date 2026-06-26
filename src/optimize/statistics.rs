@@ -1,0 +1,234 @@
+//! SuperStack-compatible `statistics.csv` rows for benchmark analysis.
+
+use super::search::{format_ops_csv, validate_solution_ops};
+use super::SegmentOptResult;
+use crate::wasm::StraightSegment;
+use serde::Serialize;
+use std::io;
+use std::path::Path;
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct StatisticsRow {
+    pub block_id: String,
+    pub previous_solution: String,
+    pub timeout: u64,
+    pub solver_time_in_sec: f64,
+    pub outcome: String,
+    pub initial_n_instrs: usize,
+    pub model_found: bool,
+    pub shown_optimal: bool,
+    pub initial_length: usize,
+    pub used_bound: usize,
+    pub saved_length: usize,
+    pub checker: bool,
+    pub final_solution_tag: String,
+    pub solution_found: String,
+    pub optimized_n_instrs: usize,
+    pub optimized_length: usize,
+    pub rules: String,
+}
+
+#[derive(Serialize)]
+struct StatisticsCsvRecord {
+    #[serde(rename = "")]
+    index: usize,
+    block_id: String,
+    previous_solution: String,
+    timeout: u64,
+    solver_time_in_sec: f64,
+    outcome: String,
+    initial_n_instrs: usize,
+    model_found: bool,
+    shown_optimal: bool,
+    initial_length: usize,
+    used_bound: usize,
+    saved_length: usize,
+    checker: bool,
+    final_solution_tag: String,
+    solution_found: String,
+    optimized_n_instrs: usize,
+    optimized_length: usize,
+    rules: String,
+}
+
+impl StatisticsCsvRecord {
+    fn new(index: usize, row: &StatisticsRow) -> Self {
+        Self {
+            index,
+            block_id: row.block_id.clone(),
+            previous_solution: row.previous_solution.clone(),
+            timeout: row.timeout,
+            solver_time_in_sec: row.solver_time_in_sec,
+            outcome: row.outcome.clone(),
+            initial_n_instrs: row.initial_n_instrs,
+            model_found: row.model_found,
+            shown_optimal: row.shown_optimal,
+            initial_length: row.initial_length,
+            used_bound: row.used_bound,
+            saved_length: row.saved_length,
+            checker: row.checker,
+            final_solution_tag: row.final_solution_tag.clone(),
+            solution_found: row.solution_found.clone(),
+            optimized_n_instrs: row.optimized_n_instrs,
+            optimized_length: row.optimized_length,
+            rules: row.rules.clone(),
+        }
+    }
+}
+
+pub fn block_id(segment: &StraightSegment) -> String {
+    let mut id = format!("function_{}_block_{}", segment.func_index, segment.segment_index);
+    if let Some((part, total)) = segment.split_part {
+        if total > 1 {
+            id.push('_');
+            id.push_str(&part.to_string());
+        }
+    }
+    id
+}
+
+fn classify_outcome(result: &SegmentOptResult, initial_len: usize) -> (String, bool, bool, String) {
+    let Some(ops) = &result.optimized else {
+        return (
+            if result.timed_out {
+                "timeout".to_string()
+            } else {
+                "no_solution".to_string()
+            },
+            false,
+            false,
+            "original".to_string(),
+        );
+    };
+
+    let opt_len = ops.len();
+    let checker = validate_solution_ops(ops, &result.segment);
+    let improved = opt_len < initial_len;
+
+    if result.timed_out {
+        return (
+            "non_optimal".to_string(),
+            true,
+            false,
+            if improved { "astar".to_string() } else { "original".to_string() },
+        );
+    }
+
+    if improved {
+        return ("optimal".to_string(), true, true, "astar".to_string());
+    }
+
+    (
+        "optimal".to_string(),
+        true,
+        true,
+        if checker {
+            "original".to_string()
+        } else {
+            "astar".to_string()
+        },
+    )
+}
+
+pub fn statistics_row(result: &SegmentOptResult) -> StatisticsRow {
+    let segment = &result.segment;
+    let initial_len = segment.original_len();
+    let timeout = result.timeout_secs;
+    let (outcome, model_found, shown_optimal, final_solution_tag) =
+        classify_outcome(result, initial_len);
+
+    let (solution_found, optimized_n_instrs, optimized_length, used_bound, saved_length, checker) =
+        if let Some(ops) = &result.optimized {
+            let opt_len = ops.len();
+            (
+                format_ops_csv(ops),
+                opt_len,
+                opt_len,
+                opt_len,
+                initial_len.saturating_sub(opt_len),
+                validate_solution_ops(ops, segment),
+            )
+        } else {
+            (String::new(), 0, 0, initial_len, 0, false)
+        };
+
+    StatisticsRow {
+        block_id: block_id(segment),
+        previous_solution: format_ops_csv(&segment.ops),
+        timeout,
+        solver_time_in_sec: (result.solver_time_secs * 1000.0).round() / 1000.0,
+        outcome,
+        initial_n_instrs: initial_len,
+        model_found,
+        shown_optimal,
+        initial_length: initial_len,
+        used_bound,
+        saved_length,
+        checker,
+        final_solution_tag,
+        solution_found,
+        optimized_n_instrs,
+        optimized_length,
+        rules: String::new(),
+    }
+}
+
+pub fn statistics_rows(results: &[SegmentOptResult]) -> Vec<StatisticsRow> {
+    results.iter().map(statistics_row).collect()
+}
+
+pub fn write_statistics_csv(path: &Path, rows: &[StatisticsRow]) -> io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut writer = csv::Writer::from_writer(file);
+    for (index, row) in rows.iter().enumerate() {
+        writer.serialize(StatisticsCsvRecord::new(index, row))?;
+    }
+    writer.flush()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::optimize::fixtures::{fin, init};
+    use crate::semantics::SemOp;
+    use crate::wasm::{SegmentBounds, StraightSegment};
+
+    fn empty_segment(ops: Vec<SemOp>) -> StraightSegment {
+        StraightSegment {
+            func_index: 0,
+            segment_index: 0,
+            split_part: None,
+            ops,
+            init: init(),
+            fin: fin(),
+            bounds: SegmentBounds::new(1, 4),
+            opaque_meta: vec![],
+            dependencies: vec![],
+        }
+    }
+
+    #[test]
+    fn block_id_matches_superstack_naming() {
+        let seg = empty_segment(vec![]);
+        assert_eq!(block_id(&seg), "function_0_block_0");
+    }
+
+    #[test]
+    fn csv_header_matches_superstack() {
+        let rows = vec![statistics_row(&SegmentOptResult {
+            segment: empty_segment(vec![SemOp::I32Add, SemOp::I32Mul]),
+            optimized: Some(vec![SemOp::I32Add]),
+            timed_out: false,
+            solver_time_secs: 0.059,
+            timeout_secs: 10,
+        })];
+        let path = std::env::temp_dir().join("ewasm-statistics-test.csv");
+        write_statistics_csv(&path, &rows).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let header = contents.lines().next().unwrap();
+        assert!(header.starts_with(",block_id,previous_solution,timeout"));
+        assert!(contents.contains("function_0_block_0"));
+        let _ = std::fs::remove_file(path);
+    }
+}

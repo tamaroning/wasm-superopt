@@ -17,10 +17,11 @@ pub const DEFAULT_TIMEOUT_BASE_SECS: u64 = 10;
 /// Per-segment timeout when `--direct-timeout` is set (SuperStack `-w` / `DIRECT_TIMEOUT`).
 pub const DIRECT_TIMEOUT_SECS: u64 = 300;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SearchResult {
     pub ops: Option<Vec<SemOp>>,
     pub timed_out: bool,
+    pub solver_time_secs: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -238,6 +239,7 @@ pub fn solve_astar_traced(
 
     let init = &segment.init;
     let bounds = &segment.bounds;
+    let started = std::time::Instant::now();
     let deadline = cfg.timeout_secs.map(SearchDeadline::new);
     let mut timed_out = false;
     let mut canon = Canonizer::new(rules.to_vec());
@@ -336,6 +338,7 @@ pub fn solve_astar_traced(
     SearchResult {
         ops: best_path,
         timed_out,
+        solver_time_secs: started.elapsed().as_secs_f64(),
     }
 }
 
@@ -344,6 +347,14 @@ pub fn format_ops(ops: &[SemOp]) -> String {
         .map(|op| op.to_string())
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// Space-separated instruction list (SuperStack `statistics.csv` style).
+pub fn format_ops_csv(ops: &[SemOp]) -> String {
+    ops.iter()
+        .map(|op| op.to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]

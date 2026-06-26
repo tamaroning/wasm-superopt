@@ -63,6 +63,10 @@ struct Cli {
     #[arg(long, value_name = "PATH")]
     dump_search: Option<std::path::PathBuf>,
 
+    /// Write SuperStack-compatible statistics CSV to this path.
+    #[arg(long, short = 'c', value_name = "PATH")]
+    csv: Option<std::path::PathBuf>,
+
     /// Number of parallel jobs for rule synthesis and segment optimization.
     #[arg(short = 'j', long = "jobs", default_value_t = 1)]
     jobs: usize,
@@ -135,5 +139,13 @@ fn main() {
         results.len(),
         improved
     );
+    if let Some(csv_path) = &cli.csv {
+        let rows = optimize::statistics_rows(&results);
+        optimize::write_statistics_csv(csv_path, &rows).unwrap_or_else(|e| {
+            eprintln!("error writing {}: {e}", csv_path.display());
+            std::process::exit(1);
+        });
+        eprintln!("wrote statistics to {}", csv_path.display());
+    }
     let _ = io::stdout().flush();
 }

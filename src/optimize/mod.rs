@@ -7,12 +7,14 @@ mod heuristic;
 mod inverse;
 mod search;
 mod search_graph;
+mod statistics;
 
 pub use search::{
     DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
     format_ops,
 };
-pub use search_graph::{SearchTrace, format_sym_state};
+pub use search_graph::SearchTrace;
+pub use statistics::{statistics_rows, write_statistics_csv};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::wasm::StraightSegment;
@@ -26,6 +28,8 @@ pub struct SegmentOptResult {
     pub segment: StraightSegment,
     pub optimized: Option<Vec<SemOp>>,
     pub timed_out: bool,
+    pub solver_time_secs: f64,
+    pub timeout_secs: u64,
 }
 
 impl SegmentOptResult {
@@ -58,6 +62,8 @@ pub fn optimize_segment_with_trace(
             segment: segment.clone(),
             optimized: None,
             timed_out: false,
+            solver_time_secs: 0.0,
+            timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
         };
     }
     if !segment.init.validate_bounds(&segment.bounds) || !segment.fin.validate_bounds(&segment.bounds) {
@@ -65,6 +71,8 @@ pub fn optimize_segment_with_trace(
             segment: segment.clone(),
             optimized: None,
             timed_out: false,
+            solver_time_secs: 0.0,
+            timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
         };
     }
     let mut trace = dump_search.map(|_| SearchTrace::default());
@@ -97,6 +105,8 @@ pub fn optimize_segment_with_trace(
         segment: segment.clone(),
         optimized: result.ops,
         timed_out: result.timed_out,
+        solver_time_secs: result.solver_time_secs,
+        timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
     }
 }
 
