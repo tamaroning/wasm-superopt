@@ -130,8 +130,18 @@ pub fn synthesis_constants() -> &'static [i32] {
     &SYNTHESIS_CONSTS
 }
 
+pub fn synthesis_signatures(max_arity: usize) -> Vec<crate::value::RuleSignature> {
+    crate::value::enumerate_signatures(max_arity)
+        .into_iter()
+        .filter(|sig| crate::value::is_reachable(sig))
+        .collect()
+}
+
 pub fn synthesis_inputs() -> Vec<Vec<StackTy>> {
-    (1..=3).map(|h| vec![StackTy::I32; h]).collect()
+    synthesis_signatures(3)
+        .into_iter()
+        .map(|sig| sig.inputs)
+        .collect()
 }
 
 pub fn print_semantics_table() {

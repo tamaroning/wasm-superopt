@@ -9,10 +9,6 @@ use crate::wasm::stack_analysis::stack_bounds_ops;
 /// Default maximum instructions per optimization chunk (SuperStack smoke eval uses 10).
 pub const DEFAULT_MAX_SEGMENT_INSTR: usize = 10;
 
-fn num_params_from_init(init: &crate::sym::SymState) -> u32 {
-    init.locals.keys().max().map(|m| m + 1).unwrap_or(0)
-}
-
 fn chunk_opaque_meta(segment: &StraightSegment, ops: &[SemOp]) -> Vec<OpaqueMeta> {
     segment
         .opaque_meta
@@ -36,11 +32,13 @@ pub fn split_segment(segment: &StraightSegment, max_instr: usize) -> Vec<Straigh
         return vec![segment.clone()];
     }
 
-    let num_params = num_params_from_init(&segment.init);
     let total_locals = segment.bounds.max_local.saturating_add(1);
-    let mut machine =
-        SymMachine::function_entry(num_params, total_locals, segment.bounds.max_stack);
-    machine.begin_segment();
+    let mut machine = SymMachine::from_segment_entry(
+        segment.num_params,
+        &segment.bounds,
+        &segment.init,
+        segment.bounds.max_stack,
+    );
 
     let part_count = segment.ops.len().div_ceil(max_instr);
     let mut out = Vec::with_capacity(part_count);
@@ -77,6 +75,7 @@ pub fn split_segment(segment: &StraightSegment, max_instr: usize) -> Vec<Straigh
 
         out.push(StraightSegment {
             func_index: segment.func_index,
+            num_params: segment.num_params,
             segment_index: segment.segment_index,
             split_part: Some((part, part_count)),
             ops,

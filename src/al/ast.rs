@@ -206,6 +206,8 @@ pub enum Pred {
     TypeIsInn(Expr),
     /// `type(expr) == Fnn`.
     TypeIsFnn(Expr),
+    /// `expr` is a specific [`NumType`] literal.
+    NumTypeEq(Expr, NumType),
     /// Binop parameter equals a case (`param = ADD`).
     BinOpEq(Expr, WasmBinOp),
     /// Binop parameter is a signed div/rem/shr case.

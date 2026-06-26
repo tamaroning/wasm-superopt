@@ -254,9 +254,7 @@ mod tests {
     use super::*;
     use crate::optimize::fixtures::{fin, init};
     use crate::optimize::search::{solve_astar_traced, SearchConfig};
-    use crate::synthesis::{
-        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
-    };
+    use crate::synthesis::test_synthesis_rewrites;
     use crate::wasm::{SegmentBounds, StraightSegment};
 
     fn example_segment() -> StraightSegment {
@@ -264,6 +262,7 @@ mod tests {
         let fin = fin();
         StraightSegment {
             func_index: 0,
+            num_params: 1,
             segment_index: 0,
             split_part: None,
             ops: vec![],
@@ -278,11 +277,7 @@ mod tests {
     #[test]
     fn example_search_dot_has_nodes_and_solution() {
         let segment = example_segment();
-        let rules = synthesized_to_rewrites(&load_or_synthesize_rules(
-            TEST_SYNTHESIS_AST_SIZE,
-            10,
-            1,
-        ));
+        let rules = test_synthesis_rewrites();
         let mut trace = SearchTrace::default();
         let result = solve_astar_traced(
             &segment,

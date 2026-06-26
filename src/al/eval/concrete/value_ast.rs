@@ -2,33 +2,36 @@
 
 use super::call_func;
 use super::super::error::EvalError;
-use super::super::value::{i32_to_nat, nat_to_i32, AlValue, ValueAstResult};
+use super::super::value::{nat_to_value, value_to_nat, AlValue, ValueAstResult};
 use crate::al::ast::{NumType, Sign, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp};
-use crate::value::ValueAst;
+use crate::value::{RuleSignature, StackTy, ValueAst, ValueOp};
 
 fn eval_partial_list(
     left: &ValueAst,
     right: &ValueAst,
-    inputs: &[i32],
+    sig: &RuleSignature,
+    inputs: &[i64],
+    nt: NumType,
     binop: WasmBinOp,
 ) -> ValueAstResult {
-    let l = eval_value_ast_concrete(left, inputs);
+    let l = eval_value_ast_concrete_sig(sig, left, inputs);
     if l.trap {
         return l;
     }
-    let r = eval_value_ast_concrete(right, inputs);
+    let r = eval_value_ast_concrete_sig(sig, right, inputs);
     if r.trap {
         return r;
     }
-    eval_binop_list(l.value, r.value, binop)
+    eval_binop_list(l.value, r.value, nt, binop)
 }
 
-fn eval_binop_list(a: i32, b: i32, binop: WasmBinOp) -> ValueAstResult {
+fn eval_binop_list(a: i64, b: i64, nt: NumType, binop: WasmBinOp) -> ValueAstResult {
+    let bits = nt.bit_width();
     let args = vec![
-        AlValue::NumType(NumType::I32),
+        AlValue::NumType(nt),
         AlValue::BinOp(binop),
-        AlValue::Nat(i32_to_nat(a)),
-        AlValue::Nat(i32_to_nat(b)),
+        AlValue::Nat(value_to_nat(a, bits)),
+        AlValue::Nat(value_to_nat(b, bits)),
     ];
     match call_func("binop_", args) {
         Ok(list) if list.is_empty_list_or_opt() => ValueAstResult {
@@ -37,7 +40,7 @@ fn eval_binop_list(a: i32, b: i32, binop: WasmBinOp) -> ValueAstResult {
         },
         Ok(list) => match list.choose_singleton() {
             Some(v) => ValueAstResult {
-                value: nat_to_i32(v.as_nat().unwrap_or(0)),
+                value: nat_to_value(v.as_nat().unwrap_or(0), bits),
                 trap: false,
             },
             None => ValueAstResult {
@@ -52,11 +55,12 @@ fn eval_binop_list(a: i32, b: i32, binop: WasmBinOp) -> ValueAstResult {
     }
 }
 
-fn eval_unop_list(a: i32, unop: WasmUnOp) -> ValueAstResult {
+fn eval_unop_list(a: i64, nt: NumType, unop: WasmUnOp) -> ValueAstResult {
+    let bits = nt.bit_width();
     let args = vec![
-        AlValue::NumType(NumType::I32),
+        AlValue::NumType(nt),
         AlValue::UnOp(unop),
-        AlValue::Nat(i32_to_nat(a)),
+        AlValue::Nat(value_to_nat(a, bits)),
     ];
     match call_func("unop_", args) {
         Ok(list) if list.is_empty_list_or_opt() => ValueAstResult {
@@ -65,7 +69,7 @@ fn eval_unop_list(a: i32, unop: WasmUnOp) -> ValueAstResult {
         },
         Ok(list) => match list.choose_singleton() {
             Some(v) => ValueAstResult {
-                value: nat_to_i32(v.as_nat().unwrap_or(0)),
+                value: nat_to_value(v.as_nat().unwrap_or(0), bits),
                 trap: false,
             },
             None => ValueAstResult {
@@ -80,16 +84,17 @@ fn eval_unop_list(a: i32, unop: WasmUnOp) -> ValueAstResult {
     }
 }
 
-fn eval_relop(a: i32, b: i32, relop: WasmRelOp) -> ValueAstResult {
+fn eval_relop(a: i64, b: i64, nt: NumType, relop: WasmRelOp) -> ValueAstResult {
+    let bits = nt.bit_width();
     let args = vec![
-        AlValue::NumType(NumType::I32),
+        AlValue::NumType(nt),
         AlValue::RelOp(relop),
-        AlValue::Nat(i32_to_nat(a)),
-        AlValue::Nat(i32_to_nat(b)),
+        AlValue::Nat(value_to_nat(a, bits)),
+        AlValue::Nat(value_to_nat(b, bits)),
     ];
     match call_func("relop_", args) {
         Ok(v) => ValueAstResult {
-            value: nat_to_i32(v.as_nat().unwrap_or(0)),
+            value: nat_to_value(v.as_nat().unwrap_or(0), 32),
             trap: false,
         },
         Err(_) => ValueAstResult {
@@ -99,15 +104,16 @@ fn eval_relop(a: i32, b: i32, relop: WasmRelOp) -> ValueAstResult {
     }
 }
 
-fn eval_testop(a: i32, testop: WasmTestOp) -> ValueAstResult {
+fn eval_testop(a: i64, nt: NumType, testop: WasmTestOp) -> ValueAstResult {
+    let bits = nt.bit_width();
     let args = vec![
-        AlValue::NumType(NumType::I32),
+        AlValue::NumType(nt),
         AlValue::TestOp(testop),
-        AlValue::Nat(i32_to_nat(a)),
+        AlValue::Nat(value_to_nat(a, bits)),
     ];
     match call_func("testop_", args) {
         Ok(v) => ValueAstResult {
-            value: nat_to_i32(v.as_nat().unwrap_or(0)),
+            value: nat_to_value(v.as_nat().unwrap_or(0), 32),
             trap: false,
         },
         Err(_) => ValueAstResult {
@@ -117,121 +123,285 @@ fn eval_testop(a: i32, testop: WasmTestOp) -> ValueAstResult {
     }
 }
 
-/// Concrete evaluation of a [`ValueAst`] via AL semantics.
-pub fn eval_value_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> ValueAstResult {
+fn extend_i32_to_i64(v: i64, signed: bool) -> i64 {
+    if signed {
+        v as i32 as i64
+    } else {
+        (v as u32) as u64 as i64
+    }
+}
+
+fn wrap_i64_to_i32(v: i64) -> i64 {
+    v as i32 as i64
+}
+
+fn eval_op(sig: &RuleSignature, op: ValueOp, args: &[&ValueAst], inputs: &[i64]) -> ValueAstResult {
+    use ValueOp::*;
+    match op {
+        I32Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Add),
+        I32Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Sub),
+        I32Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Mul),
+        I32DivU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Div(Sign::U)),
+        I32DivS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Div(Sign::S)),
+        I32RemU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rem(Sign::U)),
+        I32RemS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rem(Sign::S)),
+        I32Shl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Shl),
+        I32And => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::And),
+        I32Or => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Or),
+        I32Xor => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Xor),
+        I32ShrU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Shr(Sign::U)),
+        I32ShrS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Shr(Sign::S)),
+        I32Rotl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rotl),
+        I32Rotr => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rotr),
+        I64Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Add),
+        I64Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Sub),
+        I64Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Mul),
+        I64DivU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Div(Sign::U)),
+        I64DivS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Div(Sign::S)),
+        I64RemU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rem(Sign::U)),
+        I64RemS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rem(Sign::S)),
+        I64Shl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Shl),
+        I64And => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::And),
+        I64Or => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Or),
+        I64Xor => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Xor),
+        I64ShrU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Shr(Sign::U)),
+        I64ShrS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Shr(Sign::S)),
+        I64Rotl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rotl),
+        I64Rotr => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rotr),
+        I32Eq => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I32, WasmRelOp::Eq)
+        }
+        I32Ne => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I32, WasmRelOp::Ne)
+        }
+        I32LtS => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I32, WasmRelOp::Lt(Sign::S))
+        }
+        I32LeS => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I32, WasmRelOp::Le(Sign::S))
+        }
+        I32GtS => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I32, WasmRelOp::Gt(Sign::S))
+        }
+        I64Eq => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I64, WasmRelOp::Eq)
+        }
+        I64Ne => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I64, WasmRelOp::Ne)
+        }
+        I64LtS => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I64, WasmRelOp::Lt(Sign::S))
+        }
+        I64LeS => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I64, WasmRelOp::Le(Sign::S))
+        }
+        I64GtS => {
+            let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if l.trap {
+                return l;
+            }
+            let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+            if r.trap {
+                return r;
+            }
+            eval_relop(l.value, r.value, NumType::I64, WasmRelOp::Gt(Sign::S))
+        }
+        I32Eqz => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_testop(c.value, NumType::I32, WasmTestOp::Eqz)
+        }
+        I64Eqz => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_testop(c.value, NumType::I64, WasmTestOp::Eqz)
+        }
+        I32Clz => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_unop_list(c.value, NumType::I32, WasmUnOp::Clz)
+        }
+        I32Ctz => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_unop_list(c.value, NumType::I32, WasmUnOp::Ctz)
+        }
+        I32Popcnt => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_unop_list(c.value, NumType::I32, WasmUnOp::Popcnt)
+        }
+        I64Clz => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_unop_list(c.value, NumType::I64, WasmUnOp::Clz)
+        }
+        I64Ctz => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_unop_list(c.value, NumType::I64, WasmUnOp::Ctz)
+        }
+        I64Popcnt => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            eval_unop_list(c.value, NumType::I64, WasmUnOp::Popcnt)
+        }
+        I64ExtendI32S => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            ValueAstResult {
+                value: extend_i32_to_i64(c.value, true),
+                trap: false,
+            }
+        }
+        I64ExtendI32U => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            ValueAstResult {
+                value: extend_i32_to_i64(c.value, false),
+                trap: false,
+            }
+        }
+        I32WrapI64 => {
+            let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+            if c.trap {
+                return c;
+            }
+            ValueAstResult {
+                value: wrap_i64_to_i32(c.value),
+                trap: false,
+            }
+        }
+    }
+}
+
+/// Concrete evaluation of a [`ValueAst`] under a rule signature.
+pub fn eval_value_ast_concrete_sig(
+    sig: &RuleSignature,
+    ast: &ValueAst,
+    inputs: &[i64],
+) -> ValueAstResult {
     match ast {
         ValueAst::Symbol(i) => ValueAstResult {
             value: inputs[*i],
             trap: false,
         },
-        ValueAst::Const(n) => ValueAstResult {
-            value: *n,
+        ValueAst::Const { value, .. } => ValueAstResult {
+            value: *value,
             trap: false,
         },
-        ValueAst::Add(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Add),
-        ValueAst::Sub(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Sub),
-        ValueAst::Mul(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Mul),
-        ValueAst::DivU(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Div(Sign::U)),
-        ValueAst::DivS(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Div(Sign::S)),
-        ValueAst::RemU(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Rem(Sign::U)),
-        ValueAst::RemS(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Rem(Sign::S)),
-        ValueAst::Shl(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Shl),
-        ValueAst::And(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::And),
-        ValueAst::Or(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Or),
-        ValueAst::Xor(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Xor),
-        ValueAst::ShrU(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Shr(Sign::U)),
-        ValueAst::ShrS(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Shr(Sign::S)),
-        ValueAst::Rotl(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Rotl),
-        ValueAst::Rotr(l, r) => eval_partial_list(l, r, inputs, WasmBinOp::Rotr),
-        ValueAst::Eq(l, r) => {
-            let l = eval_value_ast_concrete(l, inputs);
-            if l.trap {
-                return l;
-            }
-            let r = eval_value_ast_concrete(r, inputs);
-            if r.trap {
-                return r;
-            }
-            eval_relop(l.value, r.value, WasmRelOp::Eq)
-        }
-        ValueAst::Ne(l, r) => {
-            let l = eval_value_ast_concrete(l, inputs);
-            if l.trap {
-                return l;
-            }
-            let r = eval_value_ast_concrete(r, inputs);
-            if r.trap {
-                return r;
-            }
-            eval_relop(l.value, r.value, WasmRelOp::Ne)
-        }
-        ValueAst::LtS(l, r) => {
-            let l = eval_value_ast_concrete(l, inputs);
-            if l.trap {
-                return l;
-            }
-            let r = eval_value_ast_concrete(r, inputs);
-            if r.trap {
-                return r;
-            }
-            eval_relop(l.value, r.value, WasmRelOp::Lt(Sign::S))
-        }
-        ValueAst::LeS(l, r) => {
-            let l = eval_value_ast_concrete(l, inputs);
-            if l.trap {
-                return l;
-            }
-            let r = eval_value_ast_concrete(r, inputs);
-            if r.trap {
-                return r;
-            }
-            eval_relop(l.value, r.value, WasmRelOp::Le(Sign::S))
-        }
-        ValueAst::GtS(l, r) => {
-            let l = eval_value_ast_concrete(l, inputs);
-            if l.trap {
-                return l;
-            }
-            let r = eval_value_ast_concrete(r, inputs);
-            if r.trap {
-                return r;
-            }
-            eval_relop(l.value, r.value, WasmRelOp::Gt(Sign::S))
-        }
-        ValueAst::Eqz(c) => {
-            let c = eval_value_ast_concrete(c, inputs);
-            if c.trap {
-                return c;
-            }
-            eval_testop(c.value, WasmTestOp::Eqz)
-        }
-        ValueAst::Clz(c) => {
-            let c = eval_value_ast_concrete(c, inputs);
-            if c.trap {
-                return c;
-            }
-            eval_unop_list(c.value, WasmUnOp::Clz)
-        }
-        ValueAst::Ctz(c) => {
-            let c = eval_value_ast_concrete(c, inputs);
-            if c.trap {
-                return c;
-            }
-            eval_unop_list(c.value, WasmUnOp::Ctz)
-        }
-        ValueAst::Popcnt(c) => {
-            let c = eval_value_ast_concrete(c, inputs);
-            if c.trap {
-                return c;
-            }
-            eval_unop_list(c.value, WasmUnOp::Popcnt)
+        ValueAst::App { op, args } => {
+            let refs: Vec<&ValueAst> = args.iter().collect();
+            eval_op(sig, *op, &refs, inputs)
         }
     }
 }
 
-pub fn concrete_valid_rewrite(lhs: &ValueAst, rhs: &ValueAst, inputs: &[i32]) -> bool {
-    let l = eval_value_ast_concrete(lhs, inputs);
-    let r = eval_value_ast_concrete(rhs, inputs);
+/// Concrete evaluation of a [`ValueAst`] as homogeneous i32 (legacy).
+pub fn eval_value_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> ValueAstResult {
+    let inputs64: Vec<i64> = inputs.iter().map(|&v| v as i64).collect();
+    let sig = RuleSignature {
+        inputs: vec![StackTy::I32; inputs64.len()],
+        output: StackTy::I32,
+    };
+    eval_value_ast_concrete_sig(&sig, ast, &inputs64)
+}
+
+pub fn concrete_valid_rewrite(sig: &RuleSignature, lhs: &ValueAst, rhs: &ValueAst, inputs: &[i64]) -> bool {
+    let l = eval_value_ast_concrete_sig(sig, lhs, inputs);
+    let r = eval_value_ast_concrete_sig(sig, rhs, inputs);
     if l.trap != r.trap {
         return false;
     }

@@ -1,11 +1,12 @@
 //! Wasm binary parsing via wasmparser.
 
 use crate::semantics::SemOp;
-use crate::sym::{ForwardError, SymMachine, SymState};
+use std::collections::BTreeMap;
+use crate::sym::{ForwardError, LocalReq, SymMachine};
 use crate::wasm::deps::compute_dependencies;
 use crate::wasm::segment::OpaqueMeta;
 use crate::wasm::{SegmentBounds, StraightSegment};
-use crate::wasm::stack_analysis::{stack_bounds_ops, stack_bounds_operators};
+use crate::wasm::stack_analysis::{operator_is_storage, stack_bounds_ops, stack_bounds_operators, operator_stack_effect};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
@@ -31,36 +32,6 @@ fn read_wasm_bytes(path: &Path) -> Result<Vec<u8>, String> {
     } else {
         fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))
     }
-}
-
-fn i32_param_count(ft: &FuncType) -> Result<u8, String> {
-    let n = ft
-        .params()
-        .iter()
-        .filter(|&&t| t == ValType::I32)
-        .count();
-    if n != ft.params().len() {
-        return Err(format!(
-            "only i32 params supported in calls, got {:?}",
-            ft.params()
-        ));
-    }
-    Ok(n as u8)
-}
-
-fn i32_result_count(ft: &FuncType) -> Result<u8, String> {
-    let n = ft
-        .results()
-        .iter()
-        .filter(|&&t| t == ValType::I32)
-        .count();
-    if n != ft.results().len() {
-        return Err(format!(
-            "only i32 results supported in calls, got {:?}",
-            ft.results()
-        ));
-    }
-    Ok(n as u8)
 }
 
 pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
@@ -159,8 +130,9 @@ fn count_declared_locals(body: &wasmparser::FunctionBody<'_>) -> Result<u32, Str
         .map_err(|e| format!("locals reader: {e}"))?
     {
         let (count, ty) = entry.map_err(|e| format!("locals entry: {e}"))?;
-        if ty != ValType::I32 {
-            return Err(format!("only i32 locals supported, got {ty:?}"));
+        match ty {
+            ValType::I32 | ValType::I64 | ValType::F32 | ValType::F64 => {}
+            other => return Err(format!("unsupported local type {other:?}")),
         }
         extra = extra.saturating_add(count);
     }
@@ -280,14 +252,14 @@ fn extract_from_ops(
     out: &mut Vec<StraightSegment>,
     warnings: &mut Vec<String>,
 ) {
-    let (_, block_max_stack) = stack_bounds_operators(ops);
+    let (init_stack, block_max_stack) = stack_bounds_operators(ops);
     let bounds = SegmentBounds::new(total_locals, block_max_stack.max(bounds_template.max_stack));
     let mut machine = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
+    machine.seed_implicit_stack_inputs(init_stack);
     machine.begin_segment();
 
     let mut collected: Vec<SemOp> = Vec::new();
     let mut opaque_meta: Vec<OpaqueMeta> = Vec::new();
-    let segment_init: SymState = machine.to_init_state();
     let mut collecting = true;
     let mut ctx = OpClassCtx {
         module_func_types,
@@ -314,10 +286,11 @@ fn extract_from_ops(
                         eprintln!("warning: {msg}");
                         flush_segment(
                             func_index,
+                            num_params,
+                            total_locals,
                             segment_index,
                             &mut collected,
                             &mut opaque_meta,
-                            &segment_init,
                             &machine,
                             bounds,
                             out,
@@ -337,7 +310,6 @@ fn extract_from_ops(
                         segment_index,
                         &mut collected,
                         &mut opaque_meta,
-                        &segment_init,
                         &mut machine,
                         bounds,
                         out,
@@ -350,10 +322,11 @@ fn extract_from_ops(
             OpClass::Unsupported => {
                 flush_segment(
                     func_index,
+                    num_params,
+                    total_locals,
                     segment_index,
                     &mut collected,
                     &mut opaque_meta,
-                    &segment_init,
                     &machine,
                     bounds,
                     out,
@@ -366,10 +339,11 @@ fn extract_from_ops(
     if collecting {
         flush_segment(
             func_index,
+            num_params,
+            total_locals,
             segment_index,
             &mut collected,
             &mut opaque_meta,
-            &segment_init,
             &machine,
             bounds,
             out,
@@ -389,12 +363,23 @@ fn warn_exec(
     eprintln!("warning: {msg}");
 }
 
+fn segment_init_state(total_locals: u32, ops: &[SemOp]) -> crate::sym::SymState {
+    let (init_stack, _) = stack_bounds_ops(ops);
+    let mut locals = BTreeMap::new();
+    for slot in 0..total_locals {
+        locals.insert(slot, LocalReq::Need(SymMachine::local_symbol(slot)));
+    }
+    crate::sym::SymState {
+        stack: SymMachine::implicit_stack_inputs(init_stack),
+        locals,
+    }
+}
+
 fn flush_and_stop(
     func_index: u32,
     segment_index: &mut usize,
     ops: &mut Vec<SemOp>,
     opaque_meta: &mut Vec<OpaqueMeta>,
-    init: &SymState,
     machine: &mut SymMachine,
     bounds: SegmentBounds,
     out: &mut Vec<StraightSegment>,
@@ -403,10 +388,11 @@ fn flush_and_stop(
 ) {
     flush_segment(
         func_index,
+        num_params,
+        total_locals,
         segment_index,
         ops,
         opaque_meta,
-        init,
         machine,
         bounds,
         out,
@@ -417,10 +403,11 @@ fn flush_and_stop(
 
 fn flush_segment(
     func_index: u32,
+    num_params: u32,
+    total_locals: u32,
     segment_index: &mut usize,
     ops: &mut Vec<SemOp>,
     opaque_meta: &mut Vec<OpaqueMeta>,
-    init: &SymState,
     machine: &SymMachine,
     mut bounds: SegmentBounds,
     out: &mut Vec<StraightSegment>,
@@ -431,6 +418,7 @@ fn flush_segment(
     }
     let (_, max_stack) = stack_bounds_ops(ops);
     bounds.max_stack = bounds.max_stack.max(max_stack + 5);
+    let init = segment_init_state(total_locals, ops);
     let fin = machine.to_fin_state();
     if !init.validate_bounds(&bounds) || !fin.validate_bounds(&bounds) {
         ops.clear();
@@ -440,6 +428,7 @@ fn flush_segment(
     let dependencies = compute_dependencies(ops, opaque_meta);
     out.push(StraightSegment {
         func_index,
+        num_params,
         segment_index: *segment_index,
         split_part: None,
         ops: ops.clone(),
@@ -466,6 +455,16 @@ fn load_sem(id: u32, mem: u32, offset: u32) -> SemOp {
 
 fn store_sem(id: u32, mem: u32, offset: u32) -> SemOp {
     SemOp::I32Store { id, mem, offset }
+}
+
+fn opaque_sem(ctx: &mut OpClassCtx<'_>, pops: usize, pushes: usize, storage: bool) -> OpClass {
+    let id = ctx.fresh_id();
+    OpClass::Supported(SemOp::Opaque {
+        id,
+        pops: pops as u8,
+        pushes: pushes as u8,
+        storage,
+    })
 }
 
 fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
@@ -533,14 +532,8 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
                 Some(ft) => ft,
                 None => return OpClass::Unsupported,
             };
-            let pops = match i32_param_count(ft) {
-                Ok(n) => n,
-                Err(_) => return OpClass::Unsupported,
-            };
-            let pushes = match i32_result_count(ft) {
-                Ok(n) => n,
-                Err(_) => return OpClass::Unsupported,
-            };
+            let pops = ft.params().len() as u8;
+            let pushes = ft.results().len() as u8;
             OpClass::Supported(SemOp::Call {
                 id,
                 func_index: *function_index,
@@ -560,7 +553,13 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         | Operator::Unreachable
         | Operator::Select
         | Operator::CallIndirect { .. } => OpClass::Unsupported,
-        _ => OpClass::Unsupported,
+        _ => {
+            if let Some((pops, pushes)) = operator_stack_effect(op) {
+                opaque_sem(ctx, pops, pushes, operator_is_storage(op))
+            } else {
+                OpClass::Unsupported
+            }
+        }
     }
 }
 
@@ -705,5 +704,57 @@ mod tests {
                 .any(|op| matches!(op, SemOp::LocalSet(3) | SemOp::LocalTee(3)))
         });
         assert!(has_local_3, "expected segment using local 3");
+    }
+
+    #[test]
+    fn mixed_local_types_parse() {
+        let wasm = wat_to_wasm(
+            r#"(module
+                (func (param i64 f32) (result i32)
+                  (local i64 f64)
+                  local.get 0
+                  i64.eqz
+                  drop
+                  local.get 1
+                  f32.neg
+                  drop
+                  i32.const 0
+                )
+            )"#,
+        );
+        let info = parse_wasm_bytes(&wasm).expect("mixed locals must parse");
+        assert!(!info.segments.is_empty());
+    }
+
+    #[test]
+    fn block_result_local_tee_parses_without_stack_underflow() {
+        let wasm = wat_to_wasm(
+            r#"(module
+                (memory 1)
+                (func (param i32) (result i32) (local i32)
+                  (block (result i32)
+                    i32.const 1024
+                    i32.load
+                  )
+                  local.tee 0
+                  i32.const 0
+                  i32.gt_s
+                )
+            )"#,
+        );
+        let info = parse_wasm_bytes(&wasm).expect("parse");
+        assert!(
+            info.warnings.is_empty(),
+            "unexpected warnings: {:?}",
+            info.warnings
+        );
+        let seg = info
+            .segments
+            .iter()
+            .find(|s| s.ops.iter().any(|op| matches!(op, SemOp::LocalTee(0))))
+            .expect("segment with local.tee");
+        assert_eq!(seg.init.stack.len(), 1);
+        assert_eq!(seg.init.stack[0].to_string(), "?in_0");
+        assert_eq!(seg.ops.len(), 3);
     }
 }

@@ -5,6 +5,7 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StackTy {
     I32,
+    I64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -61,6 +62,13 @@ pub enum SemOp {
         id: u32,
         global_index: u32,
     },
+    /// Non-i32 wasm instruction tracked symbolically (SuperStack-style), not optimized.
+    Opaque {
+        id: u32,
+        pops: u8,
+        pushes: u8,
+        storage: bool,
+    },
 }
 
 impl SemOp {
@@ -99,6 +107,7 @@ impl SemOp {
             SemOp::Call { .. } => "call",
             SemOp::GlobalGet { .. } => "global.get",
             SemOp::GlobalSet { .. } => "global.set",
+            SemOp::Opaque { .. } => "opaque",
         }
     }
 
@@ -108,7 +117,8 @@ impl SemOp {
             | SemOp::I32Store { id, .. }
             | SemOp::Call { id, .. }
             | SemOp::GlobalGet { id, .. }
-            | SemOp::GlobalSet { id, .. } => Some(*id),
+            | SemOp::GlobalSet { id, .. }
+            | SemOp::Opaque { id, .. } => Some(*id),
             _ => None,
         }
     }
@@ -117,7 +127,13 @@ impl SemOp {
     pub fn is_storage_boundary(&self) -> bool {
         matches!(
             self,
-            SemOp::I32Store { .. } | SemOp::Call { .. } | SemOp::GlobalSet { .. }
+            SemOp::I32Store { .. }
+                | SemOp::Call { .. }
+                | SemOp::GlobalSet { .. }
+                | SemOp::Opaque {
+                    storage: true,
+                    ..
+                }
         )
     }
 
@@ -133,6 +149,7 @@ impl SemOp {
                 | SemOp::Call { .. }
                 | SemOp::GlobalGet { .. }
                 | SemOp::GlobalSet { .. }
+                | SemOp::Opaque { storage: true, .. }
         )
     }
 
@@ -193,6 +210,12 @@ impl fmt::Display for SemOp {
                 id,
                 global_index,
             } => write!(f, "global.set {id} g={global_index}"),
+            SemOp::Opaque {
+                id,
+                pops,
+                pushes,
+                storage,
+            } => write!(f, "opaque {id} pops={pops} pushes={pushes} storage={storage}"),
         }
     }
 }

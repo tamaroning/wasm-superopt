@@ -276,14 +276,12 @@ mod tests {
     use super::*;
     use crate::optimize::search::{segment_timeout_secs, validate_solution_ops, SearchConfig};
     use crate::semantics::SemOp;
-    use crate::synthesis::{
-        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
-    };
+    use crate::synthesis::test_synthesis_rewrites;
     use crate::wasm::ops_respect_dependencies;
     use crate::wasm::parse_wasm_bytes;
 
     fn rules() -> Vec<Rewrite<ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10, 1))
+        test_synthesis_rewrites()
     }
 
     #[test]

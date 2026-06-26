@@ -14,12 +14,12 @@ mod wasm;
 use al::DEFAULT_RANDOM_TESTS;
 use clap::Parser;
 use std::io::{self, Write};
-use synthesis::{load_or_synthesize_rules, print_synthesized_json, synthesized_to_rewrites};
+use synthesis::{load_or_synthesize_rules, synthesized_to_rewrites};
 use wasm::{parse_wasm_file, print_input_summary};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "egraph",
+    name = "ewasm",
     about = "Optimize loop/jump-free Wasm segments via backward goal search"
 )]
 struct Cli {
@@ -27,7 +27,7 @@ struct Cli {
     #[arg(value_name = "WASM", required_unless_present_any = ["synthesize_only", "print_semantics"])]
     input: Option<std::path::PathBuf>,
 
-    /// Only run synthesis (print verified rules as JSON).
+    /// Only run synthesis (writes rules-ast{N}.cache).
     #[arg(long)]
     synthesize_only: bool,
 
@@ -38,6 +38,10 @@ struct Cli {
     /// Maximum AST node count for synthesis (1–8; 3 ≈ old 2-instruction sequences).
     #[arg(long, default_value_t = 3)]
     max_ast_size: usize,
+
+    /// Maximum input arity for rule signatures (1–3).
+    #[arg(long, default_value_t = 3)]
+    max_arity: usize,
 
     /// Randomized concrete tests per candidate before Z3 (0 skips the fast filter).
     #[arg(long, default_value_t = DEFAULT_RANDOM_TESTS)]
@@ -84,8 +88,8 @@ fn main() {
 
     if cli.synthesize_only {
         let max_ast = cli.max_ast_size.clamp(1, 8);
-        let syn = load_or_synthesize_rules(max_ast, cli.random_tests, cli.jobs);
-        print_synthesized_json(&syn, cli.random_tests);
+        let max_arity = cli.max_arity.clamp(1, 3);
+        load_or_synthesize_rules(max_ast, max_arity, cli.random_tests, cli.jobs);
         return;
     }
 
@@ -102,7 +106,8 @@ fn main() {
     let _ = io::stdout().flush();
 
     let max_ast = cli.max_ast_size.clamp(1, 8);
-    let syn = load_or_synthesize_rules(max_ast, cli.random_tests, cli.jobs);
+    let max_arity = cli.max_arity.clamp(1, 3);
+    let syn = load_or_synthesize_rules(max_ast, max_arity, cli.random_tests, cli.jobs);
     let rules = synthesized_to_rewrites(&syn);
 
     if cli.segments_only {

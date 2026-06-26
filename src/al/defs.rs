@@ -18,14 +18,26 @@ pub mod types {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub enum NumType {
         I32,
+        I64,
+        F32,
+        F64,
     }
 
     impl NumType {
-        /// `size` / `sizenn` from binop.al (L44–65).
+        /// `size` / `sizenn` from wasm-2.0.al (L1121–1137, L1168–1169).
         pub const fn bit_width(self) -> u32 {
             match self {
-                NumType::I32 => 32,
+                NumType::I32 | NumType::F32 => 32,
+                NumType::I64 | NumType::F64 => 64,
             }
+        }
+
+        pub const fn is_inn(self) -> bool {
+            matches!(self, NumType::I32 | NumType::I64)
+        }
+
+        pub const fn is_fnn(self) -> bool {
+            matches!(self, NumType::F32 | NumType::F64)
         }
     }
 
@@ -61,6 +73,12 @@ pub mod types {
         Shr(Sign),
         Rotl,
         Rotr,
+        /// Float-only (`Fnn` branch in wasm-2.0.al L1541–1548).
+        Min,
+        Max,
+        Copysign,
+        /// Float division (`DIV` without signedness in wasm-2.0.al L1538–1539).
+        FloatDiv,
     }
 
     impl WasmBinOp {
@@ -81,6 +99,9 @@ pub mod types {
                 WasmBinOp::Shr(Sign::S) => Some(BinOpKind::ShrS),
                 WasmBinOp::Rotl => Some(BinOpKind::Rotl),
                 WasmBinOp::Rotr => Some(BinOpKind::Rotr),
+                WasmBinOp::Min | WasmBinOp::Max | WasmBinOp::Copysign | WasmBinOp::FloatDiv => {
+                    None
+                }
             }
         }
 
@@ -747,14 +768,26 @@ pub fn size_def() -> FuncA {
 // =============================================================================
 
 pub fn sizenn_def() -> FuncA {
+    fn ret_bits(nt: NumType) -> Instr {
+        Instr::ReturnI(nat(nt.bit_width()))
+    }
+    fn if_nt(nt: NumType) -> Instr {
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::NumTypeEq(p("nt"), nt)),
+            then_steps: vec![ret_bits(nt)],
+            else_steps: vec![],
+        }
+    }
     FuncA {
         id: "sizenn",
         params: &SIZENN_PARAMS,
-        body: vec![Instr::IfI {
-            cond: InstrCond::Pred(Pred::TypeIsInn(p("nt"))),
-            then_steps: vec![Instr::ReturnI(nat(NumType::I32.bit_width()))],
-            else_steps: vec![Instr::FailI],
-        }],
+        body: vec![
+            if_nt(NumType::I32),
+            if_nt(NumType::I64),
+            if_nt(NumType::F32),
+            if_nt(NumType::F64),
+            Instr::FailI,
+        ],
     }
 }
 
@@ -1160,16 +1193,66 @@ pub fn binop_def() -> FuncA {
             else_steps: vec![],
         },
     ];
+    let fnn_return = |name: &'static str| {
+        Instr::ReturnI(call(
+            name,
+            vec![
+                Arg::ExpA(Box::new(sizenn_nt.clone())),
+                Arg::ExpA(Box::new(i_1.clone())),
+                Arg::ExpA(Box::new(i_2.clone())),
+            ],
+        ))
+    };
+    let fnn_branch = vec![
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Add)),
+            then_steps: vec![fnn_return("fadd_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Sub)),
+            then_steps: vec![fnn_return("fsub_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Mul)),
+            then_steps: vec![fnn_return("fmul_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::FloatDiv)),
+            then_steps: vec![fnn_return("fdiv_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Min)),
+            then_steps: vec![fnn_return("fmin_")],
+            else_steps: vec![],
+        },
+        Instr::IfI {
+            cond: InstrCond::Pred(Pred::BinOpEq(p("binop_"), WasmBinOp::Max)),
+            then_steps: vec![fnn_return("fmax_")],
+            else_steps: vec![],
+        },
+        Instr::AssertI(InstrCond::Pred(Pred::BinOpEq(
+            p("binop_"),
+            WasmBinOp::Copysign,
+        ))),
+        fnn_return("fcopysign_"),
+    ];
     FuncA {
         id: "binop_",
         params: BINOP_PARAMS,
-        body: vec![Instr::IfI {
-            cond: InstrCond::Pred(Pred::TypeIsInn(p("numtype"))),
-            then_steps: inn_branch,
-            else_steps: vec![Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p(
-                "numtype",
-            ))))],
-        }],
+        body: {
+            let mut body = vec![Instr::IfI {
+                cond: InstrCond::Pred(Pred::TypeIsInn(p("numtype"))),
+                then_steps: inn_branch,
+                else_steps: vec![],
+            }];
+            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype")))));
+            body.extend(fnn_branch);
+            body
+        },
     }
 }
 

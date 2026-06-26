@@ -122,7 +122,7 @@ impl AlValue {
 /// Result of evaluating a partial AL op for ValueAst.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValueAstResult {
-    pub value: i32,
+    pub value: i64,
     pub trap: bool,
 }
 
@@ -132,4 +132,28 @@ pub fn i32_to_nat(v: i32) -> u64 {
 
 pub fn nat_to_i32(n: u64) -> i32 {
     n as u32 as i32
+}
+
+pub fn i64_to_nat(v: i64) -> u64 {
+    v as u64
+}
+
+pub fn nat_to_i64(n: u64) -> i64 {
+    n as i64
+}
+
+pub fn value_to_nat(v: i64, bits: u32) -> u64 {
+    match bits {
+        32 => v as u32 as u64,
+        64 => v as u64,
+        _ => v as u64,
+    }
+}
+
+pub fn nat_to_value(n: u64, bits: u32) -> i64 {
+    match bits {
+        32 => n as u32 as i32 as i64,
+        64 => n as i64,
+        _ => n as i64,
+    }
 }

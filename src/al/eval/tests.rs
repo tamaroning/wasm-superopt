@@ -3,8 +3,16 @@
 use crate::al::ast::{NumType, Sign, WasmBinOp};
 use crate::al::eval::concrete::call_func;
 use crate::al::eval::value::{i32_to_nat, AlValue};
-use crate::al::eval::concrete::eval_value_ast_concrete;
-use crate::value::{ValueAst, asts_valid_rewrite_z3};
+use crate::al::eval_value_ast_concrete;
+use crate::semantics::StackTy;
+use crate::value::{asts_valid_rewrite_z3, RuleSignature, ValueAst, ValueOp};
+
+fn i32_sig(arity: usize) -> RuleSignature {
+    RuleSignature {
+        inputs: vec![StackTy::I32; arity],
+        output: StackTy::I32,
+    }
+}
 
 #[test]
 fn div_s_min_over_neg_one_traps_via_al() {
@@ -20,9 +28,12 @@ fn div_s_min_over_neg_one_traps_via_al() {
 
 #[test]
 fn value_ast_div_s_min_over_neg_one_traps() {
-    let ast = ValueAst::DivS(
-        Box::new(ValueAst::Const(i32::MIN)),
-        Box::new(ValueAst::Const(-1)),
+    let ast = ValueAst::app(
+        ValueOp::I32DivS,
+        vec![
+            ValueAst::const_ty(StackTy::I32, i32::MIN as i64),
+            ValueAst::const_ty(StackTy::I32, -1),
+        ],
     );
     let r = eval_value_ast_concrete(&ast, &[]);
     assert!(r.trap);
@@ -31,15 +42,28 @@ fn value_ast_div_s_min_over_neg_one_traps() {
 #[test]
 fn mul_by_two_equals_shl_one_z3() {
     let ctx = crate::al::z3_context();
-    let lhs = ValueAst::Mul(
-        Box::new(ValueAst::Symbol(0)),
-        Box::new(ValueAst::Const(2)),
+    let sig = i32_sig(1);
+    let lhs = ValueAst::app(
+        ValueOp::I32Mul,
+        vec![
+            ValueAst::symbol(0),
+            ValueAst::const_ty(StackTy::I32, 2),
+        ],
     );
-    let rhs = ValueAst::Shl(
-        Box::new(ValueAst::Symbol(0)),
-        Box::new(ValueAst::Const(1)),
+    let rhs = ValueAst::app(
+        ValueOp::I32Shl,
+        vec![
+            ValueAst::symbol(0),
+            ValueAst::const_ty(StackTy::I32, 1),
+        ],
     );
-    assert!(asts_valid_rewrite_z3(&ctx, 1, &lhs, &rhs));
+    assert!(asts_valid_rewrite_z3(&ctx, &sig, &lhs, &rhs));
+}
+
+#[test]
+fn sizenn_i64_works() {
+    let r = call_func("sizenn", vec![AlValue::NumType(NumType::I64)]).unwrap();
+    assert_eq!(r.as_nat(), Some(64));
 }
 
 #[test]
@@ -78,31 +102,35 @@ fn binop_shr_s_and_xor_concrete() {
 
 #[test]
 fn suspicious_shr_xor_rule_is_invalid() {
-    use crate::value::{asts_valid_rewrite_random, asts_valid_rewrite_z3, parse_value_expr};
+    use crate::value::{asts_valid_rewrite_random, parse_value_expr};
 
+    let sig = i32_sig(2);
     let lhs = parse_value_expr("(i32.shr_s ?b ?a)");
     let rhs = parse_value_expr("(i32.xor ?a ?b)");
     let lhs_ast = crate::value::value_ast_from_expr(&lhs).unwrap();
     let rhs_ast = crate::value::value_ast_from_expr(&rhs).unwrap();
 
     assert!(
-        !asts_valid_rewrite_random(2, &lhs_ast, &rhs_ast, 100),
+        !asts_valid_rewrite_random(&sig, &lhs_ast, &rhs_ast, 100),
         "concrete random should reject shr_s/xor"
     );
     let ctx = crate::al::z3_context();
     assert!(
-        !asts_valid_rewrite_z3(&ctx, 2, &lhs_ast, &rhs_ast),
+        !asts_valid_rewrite_z3(&ctx, &sig, &lhs_ast, &rhs_ast),
         "Z3 should reject shr_s/xor"
     );
 }
 
 #[test]
 fn add_wraps_at_max() {
-    let ast = ValueAst::Add(
-        Box::new(ValueAst::Const(i32::MAX)),
-        Box::new(ValueAst::Const(1)),
+    let ast = ValueAst::app(
+        ValueOp::I32Add,
+        vec![
+            ValueAst::const_ty(StackTy::I32, i32::MAX as i64),
+            ValueAst::const_ty(StackTy::I32, 1),
+        ],
     );
     let r = eval_value_ast_concrete(&ast, &[]);
     assert!(!r.trap);
-    assert_eq!(r.value, i32::MIN);
+    assert_eq!(r.value, i32::MIN as i64);
 }

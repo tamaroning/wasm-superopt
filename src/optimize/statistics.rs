@@ -7,24 +7,42 @@ use serde::Serialize;
 use std::io;
 use std::path::Path;
 
+/// One row of SuperStack-compatible benchmark statistics (`statistics.csv`).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StatisticsRow {
+    /// Block identifier (`function_{i}_block_{j}` or `function_{i}_block_{j}_{part}` when split).
     pub block_id: String,
+    /// Original instruction sequence before optimization (space-separated).
     pub previous_solution: String,
+    /// Per-segment solver timeout in seconds (`10 * (1 + storage)` or 300 with `--direct-timeout`).
     pub timeout: u64,
+    /// Wall-clock time spent in A* search for this block, in seconds.
     pub solver_time_in_sec: f64,
+    /// Search result label: `optimal`, `non_optimal`, `timeout`, or `no_solution`.
     pub outcome: String,
+    /// Instruction count of the input block (same as `initial_length` in SuperStack).
     pub initial_n_instrs: usize,
+    /// Whether the search produced a candidate optimized sequence.
     pub model_found: bool,
+    /// Whether the result is treated as proven optimal (no timeout, solution found).
     pub shown_optimal: bool,
+    /// Length of the original block in instructions.
     pub initial_length: usize,
+    /// Best bound used during search (optimized length if found, else original length).
     pub used_bound: usize,
+    /// Instructions saved: `initial_length - optimized_length`.
     pub saved_length: usize,
+    /// Whether the optimized sequence passes semantic validation (`validate_solution_ops`).
     pub checker: bool,
+    /// Which solution was kept: `astar`, `original`, or SuperStack-style tags when applicable.
     pub final_solution_tag: String,
+    /// Optimized instruction sequence (space-separated); empty if no model was found.
     pub solution_found: String,
+    /// Instruction count of the optimized sequence.
     pub optimized_n_instrs: usize,
+    /// Length of the optimized block in instructions (same as `optimized_n_instrs`).
     pub optimized_length: usize,
+    /// Rewrites/rules applied during optimization (empty in egraph; reserved for SuperStack parity).
     pub rules: String,
 }
 
@@ -197,6 +215,7 @@ mod tests {
     fn empty_segment(ops: Vec<SemOp>) -> StraightSegment {
         StraightSegment {
             func_index: 0,
+            num_params: 1,
             segment_index: 0,
             split_part: None,
             ops,

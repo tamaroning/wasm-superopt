@@ -167,13 +167,11 @@ impl Canonizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::synthesis::{
-        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
-    };
+    use crate::synthesis::test_synthesis_rewrites;
     use crate::value::parse_value_expr;
 
     fn rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10, 1))
+        test_synthesis_rewrites()
     }
 
     #[test]

@@ -171,10 +171,12 @@ fn solution_forward_valid(
     bounds: &SegmentBounds,
     canon: &mut Canonizer,
 ) -> bool {
-    let total_locals = bounds.max_local + 1;
-    let num_params = segment.init.locals.len() as u32;
-    let mut m = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
-    m.begin_segment();
+    let mut m = SymMachine::from_segment_entry(
+        segment.num_params,
+        bounds,
+        &segment.init,
+        bounds.max_stack,
+    );
     for op in ops {
         if m.exec(op).is_err() {
             return false;
@@ -361,15 +363,13 @@ pub fn format_ops_csv(ops: &[SemOp]) -> String {
 mod tests {
     use super::*;
     use crate::optimize::fixtures::{fin, init};
-    use crate::synthesis::{
-        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
-    };
+    use crate::synthesis::test_synthesis_rewrites;
     use crate::sym::SymMachine;
     use crate::value::parse_value_expr;
     use crate::wasm::SegmentBounds;
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
-        synthesized_to_rewrites(&load_or_synthesize_rules(TEST_SYNTHESIS_AST_SIZE, 10, 1))
+        test_synthesis_rewrites()
     }
 
     fn example_segment() -> StraightSegment {
@@ -377,6 +377,7 @@ mod tests {
         let fin = fin();
         StraightSegment {
             func_index: 0,
+            num_params: 1,
             segment_index: 0,
             split_part: None,
             ops: vec![],
@@ -409,8 +410,7 @@ mod tests {
             .expect("solution");
         assert_eq!(ops.len(), 4, "ops: {}", format_ops(&ops));
 
-        let mut m = SymMachine::function_entry(1, 1, bounds.max_stack);
-        m.begin_segment();
+        let mut m = SymMachine::from_segment_entry(segment.num_params, &bounds, &segment.init, bounds.max_stack);
         for op in &ops {
             m.exec(op).unwrap();
         }
@@ -486,11 +486,13 @@ mod tests {
         let rules = test_rules();
         let mut canon = Canonizer::new(rules.clone());
         let bounds = segment.bounds;
-        let num_params = segment.init.locals.len() as u32;
-        let total_locals = bounds.max_local + 1;
         for (name, ops) in [("wrong", &wrong[..]), ("right", &right[..])] {
-            let mut m = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
-            m.begin_segment();
+            let mut m = SymMachine::from_segment_entry(
+                segment.num_params,
+                &bounds,
+                &segment.init,
+                bounds.max_stack,
+            );
             for op in ops {
                 m.exec(op).unwrap();
             }
@@ -522,17 +524,18 @@ mod tests {
         let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
         let segment = &info.segments[0];
         let rules = test_rules();
+        let mut canon = Canonizer::new(rules.clone());
         let ops = solve_astar(segment, &rules, &SearchConfig::default())
             .ops
             .expect("solution");
         assert!(
-            ops.iter().any(|op| matches!(op, SemOp::I32Mul)),
-            "expected i32.mul in {:?}",
+            ops.len() < segment.ops.len(),
+            "expected shorter solution, got: {}",
             format_ops(&ops)
         );
         assert!(
-            !ops.iter().any(|op| matches!(op, SemOp::I32Shl)),
-            "i32.shl is unsound here: {:?}",
+            solution_forward_valid(&ops, segment, &segment.bounds, &mut canon),
+            "optimized sequence must preserve fin: {}",
             format_ops(&ops)
         );
     }

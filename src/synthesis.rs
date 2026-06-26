@@ -4,9 +4,8 @@
 
 use crate::al::z3_context;
 use crate::lang::ValueLang;
-use crate::ruler::discover_rules_for_input;
-use crate::semantics::{StackTy, synthesis_inputs};
-use crate::value::ValueAst;
+use crate::ruler::discover_rules_for_signature;
+use crate::value::{enumerate_signatures, is_reachable, RuleSignature, ValueAst};
 use egg::{Pattern, Rewrite};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -19,18 +18,7 @@ pub struct SynthesizedRule {
     pub name: String,
     pub lhs: String,
     pub rhs: String,
-    pub input: Vec<StackTy>,
-}
-
-fn format_input_stack(input: &[StackTy]) -> String {
-    if input.is_empty() {
-        "[]".to_string()
-    } else {
-        format!(
-            "[{}]",
-            input.iter().map(|_| "I32").collect::<Vec<_>>().join(", ")
-        )
-    }
+    pub signature: RuleSignature,
 }
 
 fn report_progress(msg: &str) {
@@ -42,25 +30,60 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 12;
+const RULES_CACHE_FORMAT_VERSION: u32 = 14;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
 pub const TEST_SYNTHESIS_AST_SIZE: usize = 3;
 
+#[cfg(test)]
+pub const TEST_SYNTHESIS_MAX_ARITY: usize = 3;
+
+#[cfg(test)]
+use std::sync::OnceLock;
+
+#[cfg(test)]
+static TEST_RULES_CACHE: OnceLock<Vec<SynthesizedRule>> = OnceLock::new();
+
+/// Load rules for integration tests from `rules-ast{N}.cache` (never synthesizes).
+#[cfg(test)]
+pub fn test_synthesized_rules() -> &'static [SynthesizedRule] {
+    TEST_RULES_CACHE.get_or_init(|| {
+        load_cached_rules(TEST_SYNTHESIS_AST_SIZE, TEST_SYNTHESIS_MAX_ARITY).unwrap_or_else(
+            || {
+                panic!(
+                    "missing {} — generate with: cargo run -- --synthesize-only --max-ast-size {} --max-arity {}",
+                    rules_cache_path(TEST_SYNTHESIS_AST_SIZE).display(),
+                    TEST_SYNTHESIS_AST_SIZE,
+                    TEST_SYNTHESIS_MAX_ARITY,
+                )
+            },
+        )
+    })
+}
+
+#[cfg(test)]
+pub fn test_synthesis_rewrites() -> Vec<Rewrite<ValueLang, ()>> {
+    synthesized_to_rewrites(test_synthesized_rules())
+}
+
 #[derive(Serialize, Deserialize)]
 struct CachedRules {
     format_version: u32,
     max_ast_size: usize,
+    max_arity: usize,
     random_tests: usize,
     rules: Vec<SynthesizedRule>,
 }
 
-pub fn load_cached_rules(max_ast_size: usize) -> Option<Vec<SynthesizedRule>> {
+pub fn load_cached_rules(max_ast_size: usize, max_arity: usize) -> Option<Vec<SynthesizedRule>> {
     let path = rules_cache_path(max_ast_size);
     let data = fs::read_to_string(&path).ok()?;
     let cached: CachedRules = serde_json::from_str(&data).ok()?;
-    if cached.format_version != RULES_CACHE_FORMAT_VERSION || cached.max_ast_size != max_ast_size {
+    if cached.format_version != RULES_CACHE_FORMAT_VERSION
+        || cached.max_ast_size != max_ast_size
+        || cached.max_arity != max_arity
+    {
         return None;
     }
     report_progress(&format!(
@@ -71,11 +94,17 @@ pub fn load_cached_rules(max_ast_size: usize) -> Option<Vec<SynthesizedRule>> {
     Some(cached.rules)
 }
 
-fn save_cached_rules(max_ast_size: usize, random_tests: usize, rules: &[SynthesizedRule]) {
+fn save_cached_rules(
+    max_ast_size: usize,
+    max_arity: usize,
+    random_tests: usize,
+    rules: &[SynthesizedRule],
+) {
     let path = rules_cache_path(max_ast_size);
     let cached = CachedRules {
         format_version: RULES_CACHE_FORMAT_VERSION,
         max_ast_size,
+        max_arity,
         random_tests,
         rules: rules.to_vec(),
     };
@@ -90,43 +119,50 @@ fn save_cached_rules(max_ast_size: usize, random_tests: usize, rules: &[Synthesi
 
 pub fn load_or_synthesize_rules(
     max_ast_size: usize,
+    max_arity: usize,
     random_tests: usize,
     jobs: usize,
 ) -> Vec<SynthesizedRule> {
-    if let Some(rules) = load_cached_rules(max_ast_size) {
+    if let Some(rules) = load_cached_rules(max_ast_size, max_arity) {
         return rules;
     }
-    let rules = synthesize_rules(max_ast_size, random_tests, jobs);
-    save_cached_rules(max_ast_size, random_tests, &rules);
+    let rules = synthesize_rules(max_ast_size, max_arity, random_tests, jobs);
+    save_cached_rules(max_ast_size, max_arity, random_tests, &rules);
     rules
 }
 
-pub fn synthesize_rules(max_ast_size: usize, random_tests: usize, jobs: usize) -> Vec<SynthesizedRule> {
-    let inputs = synthesis_inputs();
+pub fn synthesize_rules(
+    max_ast_size: usize,
+    max_arity: usize,
+    random_tests: usize,
+    jobs: usize,
+) -> Vec<SynthesizedRule> {
+    let signatures: Vec<RuleSignature> = enumerate_signatures(max_arity)
+        .into_iter()
+        .filter(|sig| is_reachable(sig))
+        .collect();
     let mut proven = Vec::new();
     let mut seen = HashSet::new();
     let mut pairs_checked = 0usize;
     let mut z3_queries = 0usize;
 
     report_progress(&format!(
-        "synthesis (Ruler): max_ast_size={max_ast_size}, random_tests={random_tests}, jobs={jobs}, {} input stacks",
-        inputs.len()
+        "synthesis (Ruler): max_ast_size={max_ast_size}, max_arity={max_arity}, random_tests={random_tests}, jobs={jobs}, {} signatures",
+        signatures.len()
     ));
 
     crate::parallel::run_with_threads(jobs, || {
         let ctx = z3_context();
-        for (input_idx, input) in inputs.iter().enumerate() {
-            let num_inputs = input.len();
-            let stack_desc = format_input_stack(input);
+        for (sig_idx, sig) in signatures.iter().enumerate() {
             report_progress(&format!(
-                "[{}/{}] input stack {stack_desc}",
-                input_idx + 1,
-                inputs.len()
+                "[{}/{}] signature {sig}",
+                sig_idx + 1,
+                signatures.len()
             ));
 
             let mut local_rules = Vec::new();
-            let (checked, z3) = discover_rules_for_input(
-                num_inputs,
+            let (checked, z3) = discover_rules_for_signature(
+                sig,
                 max_ast_size,
                 random_tests,
                 jobs,
@@ -144,12 +180,12 @@ pub fn synthesize_rules(max_ast_size: usize, random_tests: usize, jobs: usize) -
                     name,
                     lhs,
                     rhs,
-                    input: input.clone(),
+                    signature: sig.clone(),
                 });
             }
 
             report_progress(&format!(
-                "  done {stack_desc}: +{added_here} rules ({total} total)",
+                "  done {sig}: +{added_here} rules ({total} total)",
                 total = proven.len()
             ));
         }
@@ -163,7 +199,7 @@ pub fn synthesize_rules(max_ast_size: usize, random_tests: usize, jobs: usize) -
     proven
 }
 
-fn collect_candidate_indices(num_inputs: usize, asts: &[ValueAst]) -> Vec<(usize, usize)> {
+fn collect_candidate_indices(sig: &RuleSignature, asts: &[ValueAst]) -> Vec<(usize, usize)> {
     let mut indices = Vec::new();
     for i in 0..asts.len() {
         for j in 0..asts.len() {
@@ -173,7 +209,7 @@ fn collect_candidate_indices(num_inputs: usize, asts: &[ValueAst]) -> Vec<(usize
             let lhs = &asts[i];
             let rhs = &asts[j];
             if crate::value::is_directed_ast_pair(lhs, rhs)
-                && crate::value::is_ast_rewrite_pair(num_inputs, lhs, rhs)
+                && crate::value::is_ast_rewrite_pair(sig, lhs, rhs)
             {
                 indices.push((i, j));
             }
@@ -195,77 +231,97 @@ fn parse_rewrite(name: &str, lhs: &str, rhs: &str) -> Result<Rewrite<ValueLang, 
     Rewrite::new(name.to_string(), lhs_pat, rhs_pat).map_err(|e| e.to_string())
 }
 
-#[derive(Serialize)]
-struct SynthesizedRulesOutput<'a> {
-    random_tests_per_candidate: usize,
-    count: usize,
-    rules: &'a [SynthesizedRule],
-}
-
-pub fn print_synthesized_json(rules: &[SynthesizedRule], random_tests: usize) {
-    let output = SynthesizedRulesOutput {
-        random_tests_per_candidate: random_tests,
-        count: rules.len(),
-        rules,
-    };
-    let json = serde_json::to_string_pretty(&output).expect("serialize synthesized rules");
-    println!("{json}");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::synthesis_inputs;
-    use crate::value::{ValueAst, enumerate_value_asts, is_directed_ast_pair};
+    use crate::semantics::StackTy;
+    use crate::value::{enumerate_value_asts, is_directed_ast_pair, ValueAst, ValueOp};
 
     #[test]
-    fn synthesis_inputs_excludes_empty() {
-        let inputs = synthesis_inputs();
-        assert_eq!(inputs.len(), 3);
-        assert!(inputs.iter().all(|input| !input.is_empty()));
+    fn reachable_signatures_exclude_unreachable_output() {
+        let sigs: Vec<_> = enumerate_signatures(2)
+            .into_iter()
+            .filter(|sig| is_reachable(sig))
+            .collect();
+        assert!(sigs.iter().all(|sig| !sig.inputs.is_empty()));
+        assert!(sigs.iter().any(|sig| {
+            sig.inputs == vec![StackTy::I32] && sig.output == StackTy::I64
+        }));
     }
 
     #[test]
     fn ast_pattern_for_mul_const2() {
-        let mul = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
+        let mul = ValueAst::app(
+            ValueOp::I32Mul,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::I32, 2),
+            ],
+        );
         assert_eq!(mul.to_pattern(), "(i32.mul ?a 2)");
         assert!(!mul.to_pattern().contains("stack"));
     }
 
     #[test]
     fn ast_pattern_for_unary_ops() {
-        let eqz = ValueAst::Eqz(Box::new(ValueAst::Symbol(0)));
+        let eqz = ValueAst::app(ValueOp::I32Eqz, vec![ValueAst::symbol(0)]);
         assert_eq!(eqz.to_pattern(), "(i32.eqz ?a)");
-        let clz = ValueAst::Clz(Box::new(ValueAst::Symbol(0)));
+        let clz = ValueAst::app(ValueOp::I32Clz, vec![ValueAst::symbol(0)]);
         assert_eq!(clz.to_pattern(), "(i32.clz ?a)");
     }
 
     #[test]
     fn ast_pattern_for_relop() {
-        let eq = ValueAst::Eq(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Symbol(1)),
+        let eq = ValueAst::app(
+            ValueOp::I32Eq,
+            vec![ValueAst::symbol(0), ValueAst::symbol(1)],
         );
         assert_eq!(eq.to_pattern(), "(i32.eq ?a ?b)");
     }
 
     #[test]
     fn ast_pattern_for_sub() {
-        let sub = ValueAst::Sub(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(1)),
+        let sub = ValueAst::app(
+            ValueOp::I32Sub,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::I32, 1),
+            ],
         );
         assert_eq!(sub.to_pattern(), "(i32.sub ?a 1)");
     }
 
     #[test]
+    fn i64_ast_pattern_for_mul_const2() {
+        let mul = ValueAst::app(
+            ValueOp::I64Mul,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::I64, 2),
+            ],
+        );
+        assert_eq!(mul.to_pattern(), "(i64.mul ?a 2)");
+    }
+
+    #[test]
+    fn rules_cache_path_is_unified() {
+        assert_eq!(rules_cache_path(3), PathBuf::from("rules-ast3.cache"));
+    }
+
+    #[test]
     fn value_ast_expr_roundtrip() {
-        let ast = ValueAst::Mul(
-            Box::new(ValueAst::Add(
-                Box::new(ValueAst::Symbol(0)),
-                Box::new(ValueAst::Const(1)),
-            )),
-            Box::new(ValueAst::Const(2)),
+        let ast = ValueAst::app(
+            ValueOp::I32Mul,
+            vec![
+                ValueAst::app(
+                    ValueOp::I32Add,
+                    vec![
+                        ValueAst::symbol(0),
+                        ValueAst::const_ty(StackTy::I32, 1),
+                    ],
+                ),
+                ValueAst::const_ty(StackTy::I32, 2),
+            ],
         );
         let expr = crate::value::value_ast_to_expr(&ast);
         let back = crate::value::value_ast_from_expr(&expr).expect("roundtrip");
@@ -274,21 +330,37 @@ mod tests {
 
     #[test]
     fn directed_ast_pair_skips_larger_rhs() {
-        let short = ValueAst::Mul(Box::new(ValueAst::Symbol(0)), Box::new(ValueAst::Const(2)));
-        let long = ValueAst::Add(Box::new(ValueAst::Const(1)), Box::new(short.clone()));
+        let short = ValueAst::app(
+            ValueOp::I32Mul,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::I32, 2),
+            ],
+        );
+        let long = ValueAst::app(
+            ValueOp::I32Add,
+            vec![
+                ValueAst::const_ty(StackTy::I32, 1),
+                short.clone(),
+            ],
+        );
         assert!(!is_directed_ast_pair(&short, &long));
         assert!(is_directed_ast_pair(&long, &short));
     }
 
     #[test]
     fn count_enumeration_scale_after_pruning() {
+        let sigs: Vec<_> = enumerate_signatures(3)
+            .into_iter()
+            .filter(|sig| is_reachable(sig))
+            .collect();
         let mut total_pairs = 0usize;
-        for input in synthesis_inputs() {
-            let asts: Vec<ValueAst> = enumerate_value_asts(4, input.len())
+        for sig in &sigs {
+            let asts: Vec<ValueAst> = enumerate_value_asts(sig, 4)
                 .into_iter()
-                .filter(|ast| ast.uses_each_symbol_once(input.len()))
+                .filter(|ast| ast.uses_each_symbol_once(sig))
                 .collect();
-            total_pairs += collect_candidate_indices(input.len(), &asts).len();
+            total_pairs += collect_candidate_indices(sig, &asts).len();
         }
         assert!(
             total_pairs < 6_000_000,

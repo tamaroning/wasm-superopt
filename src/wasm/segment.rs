@@ -41,6 +41,7 @@ impl OpaqueMeta {
 #[derive(Clone, Debug)]
 pub struct StraightSegment {
     pub func_index: u32,
+    pub num_params: u32,
     pub segment_index: usize,
     /// When set, this segment is part `0..part_total` of a split parent segment.
     pub split_part: Option<(usize, usize)>,

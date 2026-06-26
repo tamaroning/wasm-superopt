@@ -30,7 +30,7 @@ pub use policy::STRAIGHT_LINE_EMBED;
 pub use specs::al_spec_for;
 pub use eval::{
     asts_valid_rewrite_z3, call_func, concrete_valid_rewrite, eval_value_ast_concrete,
-    eval_value_ast_z3, EvalError, z3_context,
+    eval_value_ast_concrete_sig, eval_value_ast_z3, EvalError, ValueAstResult, z3_context,
 };
 
 /// Default number of randomized concrete tests before invoking Z3.

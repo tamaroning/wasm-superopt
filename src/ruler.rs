@@ -4,12 +4,11 @@
 //! saturate with proven rules, then match characteristic vectors across e-classes.
 
 use crate::lang::ValueLang;
-use crate::semantics::synthesis_constants;
+use crate::semantics::{synthesis_constants, StackTy};
 use crate::value::{
-    AstEvalSignature, ValueAst, ValueBinOp, ValueUnOp, asts_valid_rewrite_random,
-    asts_valid_rewrite_z3, binop_enode, cvec_test_inputs, is_ast_rewrite_pair,
-    is_directed_ast_pair, unop_enode, value_ast_from_expr,
-    value_ast_to_expr,
+    asts_valid_rewrite_random, asts_valid_rewrite_z3, is_ast_rewrite_pair, is_directed_ast_pair,
+    value_ast_from_expr, value_ast_to_expr, AstEvalSignature, RuleSignature, ValueAst, ValueOp,
+    cvec_test_inputs,
 };
 use egg::{AstSize, EGraph, Extractor, Id, Pattern, RecExpr, Rewrite, Runner};
 use std::collections::{HashMap, HashSet};
@@ -25,20 +24,22 @@ fn report(msg: &str) {
 
 /// Term set `T` backed by an e-graph, with Ruler-style incremental enumeration.
 pub struct RulerTermSet {
+    sig: RuleSignature,
     egraph: EGraph<ValueLang, ()>,
-    /// Canonical e-class ids that have a valid representative of each AST size.
-    classes_by_size: Vec<HashSet<usize>>,
+    /// Per-sort buckets of canonical e-class ids by AST size.
+    classes_by_size: HashMap<StackTy, Vec<HashSet<usize>>>,
     class_cvec: HashMap<usize, AstEvalSignature>,
-    test_inputs: Vec<Vec<i32>>,
+    test_inputs: Vec<Vec<i64>>,
 }
 
 impl RulerTermSet {
-    pub fn new(num_inputs: usize) -> Self {
+    pub fn new(sig: RuleSignature) -> Self {
         Self {
+            test_inputs: cvec_test_inputs(&sig),
+            sig,
             egraph: EGraph::default(),
-            classes_by_size: Vec::new(),
+            classes_by_size: HashMap::new(),
             class_cvec: HashMap::new(),
-            test_inputs: cvec_test_inputs(num_inputs),
         }
     }
 
@@ -50,59 +51,71 @@ impl RulerTermSet {
         self.egraph.total_size()
     }
 
-    /// Add all terms with AST node count `size` (enumeration modulo equivalence).
-    pub fn add_terms_of_size(&mut self, size: usize, num_inputs: usize) {
+    /// Add all well-typed terms of sort `sort` with AST node count `size`.
+    pub fn add_terms_of_size(&mut self, sort: StackTy, size: usize) {
         if size == 0 {
             return;
         }
-        self.ensure_size_buckets(size);
+        self.ensure_size_buckets(sort, size);
 
         if size == 1 {
-            for i in 0..num_inputs {
-                self.add_ast(&ValueAst::Symbol(i), num_inputs);
+            let inputs: Vec<(usize, StackTy)> = self
+                .sig
+                .inputs
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, ty)| *ty == sort)
+                .collect();
+            for (i, _) in inputs {
+                self.add_ast(&ValueAst::symbol(i));
             }
             for &c in synthesis_constants() {
-                self.add_ast(&ValueAst::Const(c), num_inputs);
+                self.add_ast(&ValueAst::const_ty(StackTy::I32, c as i64));
+                self.add_ast(&ValueAst::const_ty(StackTy::I64, c as i64));
             }
             return;
         }
 
-        let child_size = size - 1;
-        let child_classes = self.classes_by_size[child_size - 1].clone();
-
-        for &class in &child_classes {
-            let child = Id::from(class);
-            for op in ValueUnOp::all() {
-                let id = self.egraph.add(unop_enode(op, child));
-                self.register_id(id, num_inputs);
-            }
-        }
-
-        for left_sz in 1..size {
-            let right_sz = size - 1 - left_sz;
-            if right_sz == 0 {
-                continue;
-            }
-            let left_classes = self.classes_by_size[left_sz - 1].clone();
-            let right_classes = self.classes_by_size[right_sz - 1].clone();
-            for &left in &left_classes {
-                for &right in &right_classes {
-                    let l = Id::from(left);
-                    let r = Id::from(right);
-                    for op in ValueBinOp::all() {
-                        let id = self.egraph.add(binop_enode(op, l, r));
-                        self.register_id(id, num_inputs);
+        for op in ValueOp::ops_with_result(sort) {
+            let pops = op.pops();
+            match pops.len() {
+                1 => {
+                    let child_sort = pops[0];
+                    let child_classes = self.classes_for_sort(child_sort, size - 1);
+                    for &class in &child_classes {
+                        let child = Id::from(class);
+                        let id = self.egraph.add(op.to_enode(&[child]));
+                        self.register_id(id);
                     }
                 }
+                2 => {
+                    let left_sort = pops[0];
+                    let right_sort = pops[1];
+                    for left_sz in 1..size {
+                        let right_sz = size - 1 - left_sz;
+                        if right_sz == 0 {
+                            continue;
+                        }
+                        let left_classes = self.classes_for_sort(left_sort, left_sz);
+                        let right_classes = self.classes_for_sort(right_sort, right_sz);
+                        for &left in &left_classes {
+                            for &right in &right_classes {
+                                let l = Id::from(left);
+                                let r = Id::from(right);
+                                let id = self.egraph.add(op.to_enode(&[l, r]));
+                                self.register_id(id);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
 
     /// Equality-saturate a copy of `T` with `rules`, then merge learned equivalences back.
-    ///
-    /// Saturation may add new e-nodes on the copy; only equivalences among *original*
-    /// node ids are merged into `self` (Ruler §3.2 — avoid polluting `T`).
-    pub fn compact_with_rules(&mut self, rules: &[Rewrite<ValueLang, ()>], num_inputs: usize) {
+    pub fn compact_with_rules(&mut self, rules: &[Rewrite<ValueLang, ()>]) {
         if rules.is_empty() {
             return;
         }
@@ -122,7 +135,7 @@ impl RulerTermSet {
             .run(rules);
 
         apply_saturation_merges(&mut self.egraph, &saturated.egraph, original_size);
-        self.rebuild_class_index(num_inputs);
+        self.rebuild_class_index();
         report(&format!(
             "  compacted to {} e-classes",
             self.egraph.number_of_classes()
@@ -130,7 +143,7 @@ impl RulerTermSet {
     }
 
     /// Pairs of ASTs from distinct e-classes with matching characteristic vectors.
-    pub fn cvec_match_pairs(&self, num_inputs: usize) -> Vec<(ValueAst, ValueAst)> {
+    pub fn cvec_match_pairs(&self) -> Vec<(ValueAst, ValueAst)> {
         if self.class_cvec.is_empty() {
             return Vec::new();
         }
@@ -168,7 +181,7 @@ impl RulerTermSet {
                     let (Some(lhs), Some(rhs)) = (lhs, rhs) else {
                         continue;
                     };
-                    if !is_ast_rewrite_pair(num_inputs, lhs, rhs) {
+                    if !is_ast_rewrite_pair(&self.sig, lhs, rhs) {
                         continue;
                     }
                     if !is_directed_ast_pair(lhs, rhs) {
@@ -187,33 +200,49 @@ impl RulerTermSet {
         pairs
     }
 
-    fn ensure_size_buckets(&mut self, size: usize) {
-        while self.classes_by_size.len() < size {
-            self.classes_by_size.push(HashSet::new());
+    fn classes_for_sort(&self, sort: StackTy, size: usize) -> HashSet<usize> {
+        self.classes_by_size
+            .get(&sort)
+            .and_then(|buckets| buckets.get(size.saturating_sub(1)))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn ensure_size_buckets(&mut self, sort: StackTy, size: usize) {
+        let buckets = self.classes_by_size.entry(sort).or_default();
+        while buckets.len() < size {
+            buckets.push(HashSet::new());
         }
     }
 
-    fn add_ast(&mut self, ast: &ValueAst, num_inputs: usize) {
+    fn add_ast(&mut self, ast: &ValueAst) {
         let expr = value_ast_to_expr(ast);
         let id = self.egraph.add_expr(&expr);
-        self.register_id(id, num_inputs);
+        self.register_id(id);
     }
 
-    fn register_id(&mut self, id: Id, num_inputs: usize) {
+    fn register_id(&mut self, id: Id) {
         let class = usize::from(self.egraph.find(id));
         let Some(ast) = self.class_rep(class) else {
             return;
         };
-        let sz = ast.size();
-        self.ensure_size_buckets(sz);
-        self.classes_by_size[sz - 1].insert(class);
-        if ast.uses_each_symbol_once(num_inputs) {
-            let sig = AstEvalSignature::of(&ast, &self.test_inputs);
+        if let Some(sort) = ast.type_of(&self.sig) {
+            let sz = ast.size();
+            self.ensure_size_buckets(sort, sz);
+            self.classes_by_size
+                .get_mut(&sort)
+                .unwrap()
+                .get_mut(sz - 1)
+                .unwrap()
+                .insert(class);
+        }
+        if ast.uses_each_symbol_once(&self.sig) {
+            let sig = AstEvalSignature::of(&ast, &self.sig, &self.test_inputs);
             self.class_cvec.insert(class, sig);
         }
     }
 
-    fn rebuild_class_index(&mut self, num_inputs: usize) {
+    fn rebuild_class_index(&mut self) {
         self.classes_by_size.clear();
         self.class_cvec.clear();
         let class_ids: Vec<Id> = self.egraph.classes().map(|c| c.id).collect();
@@ -222,7 +251,7 @@ impl RulerTermSet {
             report(&format!("  reindexing {total} e-classes…"));
         }
         for (n, id) in class_ids.iter().enumerate() {
-            self.register_id(*id, num_inputs);
+            self.register_id(*id);
             if total > 1_000 && (n + 1).is_multiple_of(2_000) {
                 report(&format!("  reindexing {}/{} e-classes…", n + 1, total));
             }
@@ -240,8 +269,6 @@ impl RulerTermSet {
     }
 }
 
-/// Copy e-class merges learned on `saturated` (which may contain extra nodes) back onto
-/// `egraph`, touching only node ids `0..original_size`.
 fn apply_saturation_merges(
     egraph: &mut EGraph<ValueLang, ()>,
     saturated: &EGraph<ValueLang, ()>,
@@ -273,9 +300,9 @@ fn report_verify_progress(done: usize, total: usize) {
     }
 }
 
-/// Ruler core loop for one input arity: enumerate by size, compact, cvec-match, verify.
-pub fn discover_rules_for_input(
-    num_inputs: usize,
+/// Ruler core loop for one rule signature: enumerate by size, compact, cvec-match, verify.
+pub fn discover_rules_for_signature(
+    sig: &RuleSignature,
     max_ast_size: usize,
     random_tests: usize,
     jobs: usize,
@@ -284,12 +311,14 @@ pub fn discover_rules_for_input(
     rules_out: &mut Vec<(String, String)>,
 ) -> (usize, usize) {
     let mut rewrites: Vec<Rewrite<ValueLang, ()>> = Vec::new();
-    let mut term_set = RulerTermSet::new(num_inputs);
+    let mut term_set = RulerTermSet::new(sig.clone());
     let mut pairs_checked = 0usize;
     let mut z3_queries = 0usize;
 
     for size in 1..=max_ast_size {
-        term_set.add_terms_of_size(size, num_inputs);
+        for &sort in &[StackTy::I32, StackTy::I64] {
+            term_set.add_terms_of_size(sort, size);
+        }
         report(&format!(
             "  size {size}: {} e-classes, {} e-nodes",
             term_set.num_classes(),
@@ -297,8 +326,8 @@ pub fn discover_rules_for_input(
         ));
 
         loop {
-            term_set.compact_with_rules(&rewrites, num_inputs);
-            let candidates = term_set.cvec_match_pairs(num_inputs);
+            term_set.compact_with_rules(&rewrites);
+            let candidates = term_set.cvec_match_pairs();
             if candidates.is_empty() {
                 break;
             }
@@ -310,7 +339,7 @@ pub fn discover_rules_for_input(
 
             let new_rules = if jobs <= 1 {
                 verify_candidates(
-                    num_inputs,
+                    sig,
                     &candidates,
                     random_tests,
                     ctx,
@@ -320,7 +349,7 @@ pub fn discover_rules_for_input(
                 )
             } else {
                 verify_candidates_parallel(
-                    num_inputs,
+                    sig,
                     &candidates,
                     random_tests,
                     jobs,
@@ -364,7 +393,7 @@ pub fn discover_rules_for_input(
 }
 
 fn verify_candidates(
-    num_inputs: usize,
+    sig: &RuleSignature,
     candidates: &[(ValueAst, ValueAst)],
     random_tests: usize,
     ctx: &z3::Context,
@@ -377,11 +406,11 @@ fn verify_candidates(
     for (n, (lhs, rhs)) in candidates.iter().enumerate() {
         *pairs_checked += 1;
         report_verify_progress(n + 1, total);
-        if !asts_valid_rewrite_random(num_inputs, lhs, rhs, random_tests) {
+        if !asts_valid_rewrite_random(sig, lhs, rhs, random_tests) {
             continue;
         }
         *z3_queries += 1;
-        if !asts_valid_rewrite_z3(ctx, num_inputs, lhs, rhs) {
+        if !asts_valid_rewrite_z3(ctx, sig, lhs, rhs) {
             continue;
         }
         let lhs_pat = lhs.to_pattern();
@@ -395,7 +424,7 @@ fn verify_candidates(
 }
 
 fn verify_candidates_parallel(
-    num_inputs: usize,
+    sig: &RuleSignature,
     candidates: &[(ValueAst, ValueAst)],
     random_tests: usize,
     _jobs: usize,
@@ -414,11 +443,11 @@ fn verify_candidates_parallel(
         .filter_map(|(lhs, rhs)| {
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             report_verify_progress(n, total);
-            if !asts_valid_rewrite_random(num_inputs, lhs, rhs, random_tests) {
+            if !asts_valid_rewrite_random(sig, lhs, rhs, random_tests) {
                 return None;
             }
             let ctx = crate::al::z3_context();
-            if !asts_valid_rewrite_z3(&ctx, num_inputs, lhs, rhs) {
+            if !asts_valid_rewrite_z3(&ctx, sig, lhs, rhs) {
                 return None;
             }
             z3_done.fetch_add(1, Ordering::Relaxed);
@@ -452,23 +481,33 @@ fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::ValueAst;
+    use crate::value::{RuleSignature, StackTy, ValueAst, ValueOp};
 
     #[test]
     fn compact_with_rules_does_not_union_saturation_only_nodes() {
-        let mut term_set = RulerTermSet::new(1);
-        term_set.add_terms_of_size(1, 1);
-        term_set.add_terms_of_size(2, 1);
-        term_set.add_terms_of_size(3, 1);
+        let sig = RuleSignature {
+            inputs: vec![StackTy::I32],
+            output: StackTy::I32,
+        };
+        let mut term_set = RulerTermSet::new(sig);
+        term_set.add_terms_of_size(StackTy::I32, 1);
+        term_set.add_terms_of_size(StackTy::I32, 2);
+        term_set.add_terms_of_size(StackTy::I32, 3);
         let before = term_set.num_nodes();
 
-        let mul = ValueAst::Mul(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(2)),
+        let mul = ValueAst::app(
+            ValueOp::I32Mul,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::I32, 2),
+            ],
         );
-        let shl = ValueAst::Shl(
-            Box::new(ValueAst::Symbol(0)),
-            Box::new(ValueAst::Const(1)),
+        let shl = ValueAst::app(
+            ValueOp::I32Shl,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::I32, 1),
+            ],
         );
         let rw = Rewrite::<ValueLang, ()>::new(
             "mul-shl",
@@ -477,7 +516,7 @@ mod tests {
         )
         .unwrap();
 
-        term_set.compact_with_rules(&[rw], 1);
+        term_set.compact_with_rules(&[rw]);
         assert_eq!(term_set.num_nodes(), before);
         assert!(
             term_set.num_classes() < term_set.num_nodes(),

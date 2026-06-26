@@ -410,9 +410,7 @@ fn inst_kind_to_sem(kind: InstKind) -> SemOp {
 mod tests {
     use super::*;
     use crate::optimize::fixtures::{fin, init};
-    use crate::synthesis::{
-        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
-    };
+    use crate::synthesis::test_synthesis_rewrites;
     use crate::value::parse_value_expr;
     use crate::wasm::SegmentBounds;
 
@@ -428,6 +426,7 @@ mod tests {
         };
         let empty = StraightSegment {
             func_index: 0,
+            num_params: 1,
             segment_index: 0,
             split_part: None,
             ops: vec![],
@@ -444,11 +443,7 @@ mod tests {
     }
 
     fn canonizer() -> Canonizer {
-        Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
-            TEST_SYNTHESIS_AST_SIZE,
-            10,
-            1,
-        )))
+        Canonizer::new(test_synthesis_rewrites())
     }
 
     #[test]
@@ -480,6 +475,7 @@ mod tests {
         };
         let empty = StraightSegment {
             func_index: 0,
+            num_params: 1,
             segment_index: 0,
             split_part: None,
             ops: vec![],
@@ -591,9 +587,6 @@ mod tests {
             SemOp::LocalTee(0),
             SemOp::I32Shl,
             SemOp::I32Const(1),
-            SemOp::LocalGet(0),
-            SemOp::I32Shl,
-            SemOp::I32Const(3),
             SemOp::LocalGet(0),
         ];
         for op in manual {

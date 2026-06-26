@@ -104,7 +104,7 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         return 0;
     }
     match &expr[expr.root()] {
-        ValueLang::I32Const(_) | ValueLang::Symbol(_) => 1,
+        ValueLang::I32Const(_) | ValueLang::I64Const(_) | ValueLang::Symbol(_) => 1,
         ValueLang::I32Add([a, b])
         | ValueLang::I32Sub([a, b])
         | ValueLang::I32Mul([a, b])
@@ -124,7 +124,27 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         | ValueLang::I32Ne([a, b])
         | ValueLang::I32LtS([a, b])
         | ValueLang::I32LeS([a, b])
-        | ValueLang::I32GtS([a, b]) => {
+        | ValueLang::I32GtS([a, b])
+        | ValueLang::I64Add([a, b])
+        | ValueLang::I64Sub([a, b])
+        | ValueLang::I64Mul([a, b])
+        | ValueLang::I64Shl([a, b])
+        | ValueLang::I64DivU([a, b])
+        | ValueLang::I64DivS([a, b])
+        | ValueLang::I64RemU([a, b])
+        | ValueLang::I64RemS([a, b])
+        | ValueLang::I64And([a, b])
+        | ValueLang::I64Or([a, b])
+        | ValueLang::I64Xor([a, b])
+        | ValueLang::I64ShrU([a, b])
+        | ValueLang::I64ShrS([a, b])
+        | ValueLang::I64Rotl([a, b])
+        | ValueLang::I64Rotr([a, b])
+        | ValueLang::I64Eq([a, b])
+        | ValueLang::I64Ne([a, b])
+        | ValueLang::I64LtS([a, b])
+        | ValueLang::I64LeS([a, b])
+        | ValueLang::I64GtS([a, b]) => {
             let da = residual_depth(&subtree_expr(expr, *a), avail, canon);
             let db = residual_depth(&subtree_expr(expr, *b), avail, canon);
             1 + da.max(db)
@@ -132,7 +152,14 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         ValueLang::I32Eqz([a])
         | ValueLang::I32Clz([a])
         | ValueLang::I32Ctz([a])
-        | ValueLang::I32Popcnt([a]) => {
+        | ValueLang::I32Popcnt([a])
+        | ValueLang::I64Eqz([a])
+        | ValueLang::I64Clz([a])
+        | ValueLang::I64Ctz([a])
+        | ValueLang::I64Popcnt([a])
+        | ValueLang::I64ExtendI32S([a])
+        | ValueLang::I64ExtendI32U([a])
+        | ValueLang::I32WrapI64([a]) => {
             1 + residual_depth(&subtree_expr(expr, *a), avail, canon)
         }
     }
@@ -149,17 +176,11 @@ pub fn h_goal(g: &SymState, init: &SymState, bounds: &SegmentBounds, canon: &mut
 mod tests {
     use super::*;
     use crate::optimize::fixtures::{fin, init};
-    use crate::synthesis::{
-        TEST_SYNTHESIS_AST_SIZE, load_or_synthesize_rules, synthesized_to_rewrites,
-    };
+    use crate::synthesis::test_synthesis_rewrites;
     use crate::value::parse_value_expr;
 
     fn canonizer() -> Canonizer {
-        Canonizer::new(synthesized_to_rewrites(&load_or_synthesize_rules(
-            TEST_SYNTHESIS_AST_SIZE,
-            10,
-            1,
-        )))
+        Canonizer::new(test_synthesis_rewrites())
     }
 
     #[test]

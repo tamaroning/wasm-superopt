@@ -1,8 +1,10 @@
 //! Z3 AL interpreter — same AL AST as [`super::concrete`].
 
 mod context;
+mod value_ast;
 
 pub use context::z3_context;
+pub use value_ast::{asts_valid_rewrite_z3, eval_value_ast_z3};
 
 use super::env::Env;
 use super::error::EvalError;
@@ -13,11 +15,18 @@ use crate::al::ast::{
 };
 use crate::al::defs::lookup_func;
 use crate::al::I32_BITS;
-use crate::value::ValueAst;
+use crate::value::{RuleSignature, StackTy};
 use z3::ast::{Ast, BV, Bool, Int};
 use z3::Context;
 
 const I32_WIDTH: u32 = I32_BITS;
+
+fn nat_width<'ctx>(v: &SymValue<'ctx>) -> Option<u32> {
+    match v {
+        SymValue::Meta(AlValue::Nat(n)) => Some(*n as u32),
+        _ => None,
+    }
+}
 
 /// Symbolic AL value during Z3 evaluation.
 #[derive(Clone)]
@@ -55,11 +64,20 @@ impl<'ctx> SymValue<'ctx> {
 
 pub struct SymEval<'ctx> {
     ctx: &'ctx Context,
+    sig: RuleSignature,
 }
 
 impl<'ctx> SymEval<'ctx> {
-    pub fn new(ctx: &'ctx Context) -> Self {
-        Self { ctx }
+    pub fn new(ctx: &'ctx Context, sig: RuleSignature) -> Self {
+        Self { ctx, sig }
+    }
+
+    fn bitwidth_of(&self, ty: StackTy) -> u32 {
+        ty.bit_width()
+    }
+
+    fn al_num_type(&self, ty: StackTy) -> NumType {
+        ty.al_num_type()
     }
 
     pub fn call_func(
@@ -89,61 +107,90 @@ impl<'ctx> SymEval<'ctx> {
                 Some(SymValue::Int(i.clone()))
             }
             "iclz_" => {
+                let n = nat_width(args.get(0)?)?;
                 let v = match args.get(1)? {
                     SymValue::Bv(b) => b.clone(),
                     _ => return None,
                 };
-                Some(SymValue::Bv(self.i32_clz(&v)))
+                Some(SymValue::Bv(self.inn_clz(n, &v)))
             }
             "ictz_" => {
+                let n = nat_width(args.get(0)?)?;
                 let v = match args.get(1)? {
                     SymValue::Bv(b) => b.clone(),
                     _ => return None,
                 };
-                Some(SymValue::Bv(self.i32_ctz(&v)))
+                Some(SymValue::Bv(self.inn_ctz(n, &v)))
             }
             "ipopcnt_" => {
+                let n = nat_width(args.get(0)?)?;
                 let v = match args.get(1)? {
                     SymValue::Bv(b) => b.clone(),
                     _ => return None,
                 };
-                Some(SymValue::Bv(self.i32_popcnt(&v)))
+                Some(SymValue::Bv(self.inn_popcnt(n, &v)))
             }
             _ => None,
         }
     }
 
-    fn i32_clz(&self, v: &BV<'ctx>) -> BV<'ctx> {
-        let mut out = BV::from_u64(self.ctx, 32, I32_WIDTH);
-        for i in (0..32).rev() {
+    fn default_width(&self) -> u32 {
+        let mut w = self.sig.output.bit_width();
+        for &ty in &self.sig.inputs {
+            w = w.max(ty.bit_width());
+        }
+        w
+    }
+
+    fn inn_clz(&self, width: u32, v: &BV<'ctx>) -> BV<'ctx> {
+        let bw = width;
+        let mut out = BV::from_u64(self.ctx, width as u64, bw);
+        for i in (0..width).rev() {
             let bit = v.extract(i, i)._eq(&BV::from_u64(self.ctx, 1, 1));
-            let val = BV::from_u64(self.ctx, (31 - i) as u64, I32_WIDTH);
+            let val = BV::from_u64(self.ctx, (width - 1 - i) as u64, bw);
             out = bit.ite(&val, &out);
         }
         out
     }
 
-    fn i32_ctz(&self, v: &BV<'ctx>) -> BV<'ctx> {
-        let mut out = BV::from_u64(self.ctx, 32, I32_WIDTH);
-        for i in 0..32 {
+    fn inn_ctz(&self, width: u32, v: &BV<'ctx>) -> BV<'ctx> {
+        let bw = width;
+        let mut out = BV::from_u64(self.ctx, width as u64, bw);
+        for i in 0..width {
             let bit = v.extract(i, i)._eq(&BV::from_u64(self.ctx, 1, 1));
-            let val = BV::from_u64(self.ctx, i as u64, I32_WIDTH);
+            let val = BV::from_u64(self.ctx, i as u64, bw);
             out = bit.ite(&val, &out);
         }
         out
     }
 
-    fn i32_popcnt(&self, v: &BV<'ctx>) -> BV<'ctx> {
-        let mut sum = BV::from_u64(self.ctx, 0, I32_WIDTH);
-        for i in 0..32 {
+    fn inn_popcnt(&self, width: u32, v: &BV<'ctx>) -> BV<'ctx> {
+        let bw = self.default_width();
+        let mut sum = BV::from_u64(self.ctx, 0, bw);
+        for i in 0..width {
             let bit = v.extract(i, i)._eq(&BV::from_u64(self.ctx, 1, 1));
             let one = bit.ite(
-                &BV::from_u64(self.ctx, 1, I32_WIDTH),
-                &BV::from_u64(self.ctx, 0, I32_WIDTH),
+                &BV::from_u64(self.ctx, 1, bw),
+                &BV::from_u64(self.ctx, 0, bw),
             );
             sum = sum.bvadd(&one);
         }
         sum
+    }
+
+    #[allow(dead_code)]
+    fn i32_clz(&self, v: &BV<'ctx>) -> BV<'ctx> {
+        self.inn_clz(32, v)
+    }
+
+    #[allow(dead_code)]
+    fn i32_ctz(&self, v: &BV<'ctx>) -> BV<'ctx> {
+        self.inn_ctz(32, v)
+    }
+
+    #[allow(dead_code)]
+    fn i32_popcnt(&self, v: &BV<'ctx>) -> BV<'ctx> {
+        self.inn_popcnt(32, v)
     }
 
     fn eval_func_body(
@@ -295,9 +342,16 @@ impl<'ctx> SymEval<'ctx> {
             Pred::OptIsNone(expr) => Ok(self.eval_expr(expr, env)?.is_empty_list_or_opt()),
             Pred::TypeIsInn(expr) => Ok(matches!(
                 self.eval_expr(expr, env)?,
-                SymValue::Meta(AlValue::NumType(NumType::I32))
+                SymValue::Meta(AlValue::NumType(nt)) if nt.is_inn()
             )),
-            Pred::TypeIsFnn(_) => Ok(false),
+            Pred::TypeIsFnn(expr) => Ok(matches!(
+                self.eval_expr(expr, env)?,
+                SymValue::Meta(AlValue::NumType(nt)) if nt.is_fnn()
+            )),
+            Pred::NumTypeEq(expr, expected) => Ok(matches!(
+                self.eval_expr(expr, env)?,
+                SymValue::Meta(AlValue::NumType(nt)) if nt == *expected
+            )),
             Pred::BinOpEq(expr, expected) => Ok(matches!(
                 self.eval_expr(expr, env)?,
                 SymValue::Meta(AlValue::BinOp(b)) if b == *expected
@@ -374,7 +428,7 @@ impl<'ctx> SymEval<'ctx> {
             Expr::NatLit(n) => Ok(SymValue::Bv(BV::from_u64(
                 self.ctx,
                 *n as u64,
-                I32_WIDTH,
+                self.default_width(),
             ))),
             Expr::IntLit(n) => Ok(SymValue::Int(Int::from_i64(self.ctx, *n as i64))),
             Expr::BoolLit(b) => Ok(SymValue::Bool(Bool::from_bool(self.ctx, *b))),
@@ -390,7 +444,7 @@ impl<'ctx> SymEval<'ctx> {
             Expr::SingletonList(v) => Ok(SymValue::List(vec![self.eval_expr(v, env)?])),
             Expr::OptionalLen(v) => {
                 let len = self.eval_expr(v, env)?.list_len();
-                Ok(SymValue::Bv(BV::from_u64(self.ctx, len as u64, I32_WIDTH)))
+                Ok(SymValue::Bv(BV::from_u64(self.ctx, len as u64, self.default_width())))
             }
             Expr::Choose(v) => self
                 .eval_expr(v, env)?
@@ -442,7 +496,7 @@ impl<'ctx> SymEval<'ctx> {
                 Ok(SymValue::Bv(BV::from_u64(
                     self.ctx,
                     base.saturating_pow(exp as u32),
-                    I32_WIDTH,
+                    self.default_width(),
                 )))
             }
             Expr::Shl(a, b) => self.bv_binop(a, b, env, |x, y| x.bvshl(&y)),
@@ -451,12 +505,18 @@ impl<'ctx> SymEval<'ctx> {
             Expr::BitXor(a, b) => self.bv_binop(a, b, env, |x, y| x.bvxor(&y)),
             Expr::LShr(a, b) => self.bv_binop(a, b, env, |x, y| x.bvlshr(&y)),
             Expr::AShr(a, b) => self.bv_binop(a, b, env, |x, y| x.bvashr(&y)),
-            Expr::Rotl(a, b) => self.bv_binop(a, b, env, |x, y| {
-                x.bvrotl(&y.bvand(&BV::from_u64(self.ctx, 31, I32_WIDTH)))
-            }),
-            Expr::Rotr(a, b) => self.bv_binop(a, b, env, |x, y| {
-                x.bvrotr(&y.bvand(&BV::from_u64(self.ctx, 31, I32_WIDTH)))
-            }),
+            Expr::Rotl(a, b) => {
+                let mask = self.default_width() - 1;
+                self.bv_binop(a, b, env, |x, y| {
+                    x.bvrotl(&y.bvand(&BV::from_u64(self.ctx, mask as u64, self.default_width())))
+                })
+            }
+            Expr::Rotr(a, b) => {
+                let mask = self.default_width() - 1;
+                self.bv_binop(a, b, env, |x, y| {
+                    x.bvrotr(&y.bvand(&BV::from_u64(self.ctx, mask as u64, self.default_width())))
+                })
+            }
             Expr::Neg(_) => Err(EvalError::Unimplemented("Neg")),
             Expr::BinOpSignOf(_)
             | Expr::TopValue(_)
@@ -478,7 +538,7 @@ impl<'ctx> SymEval<'ctx> {
                 .get(name)
                 .cloned()
                 .ok_or(EvalError::UnknownVar(name)),
-            Arg::Nat(n) => Ok(SymValue::Bv(BV::from_u64(self.ctx, *n as u64, I32_WIDTH))),
+            Arg::Nat(n) => Ok(SymValue::Bv(BV::from_u64(self.ctx, *n as u64, self.default_width()))),
             Arg::Sign(s) => Ok(SymValue::Meta(AlValue::Sign(*s))),
             Arg::ExpA(expr) => self.eval_expr(expr, env),
         }
@@ -487,7 +547,7 @@ impl<'ctx> SymEval<'ctx> {
     fn bv_of(&self, v: &SymValue<'ctx>) -> Result<BV<'ctx>, EvalError> {
         match v {
             SymValue::Bv(b) => Ok(b.clone()),
-            SymValue::Meta(AlValue::Nat(n)) => Ok(BV::from_u64(self.ctx, *n, I32_WIDTH)),
+            SymValue::Meta(AlValue::Nat(n)) => Ok(BV::from_u64(self.ctx, *n, self.default_width())),
             _ => Err(EvalError::TypeMismatch("expected bv")),
         }
     }
@@ -514,6 +574,25 @@ impl<'ctx> SymEval<'ctx> {
         }
     }
 
+    fn align_bv_pair(&self, a: BV<'ctx>, b: BV<'ctx>) -> (BV<'ctx>, BV<'ctx>) {
+        let w = a.get_size().max(b.get_size());
+        (
+            self.coerce_bv_width(a, w),
+            self.coerce_bv_width(b, w),
+        )
+    }
+
+    fn coerce_bv_width(&self, v: BV<'ctx>, w: u32) -> BV<'ctx> {
+        let cur = v.get_size();
+        if cur > w {
+            v.extract(w - 1, 0)
+        } else if cur < w {
+            v.zero_ext(w - cur)
+        } else {
+            v
+        }
+    }
+
     fn bv_binop<F>(
         &self,
         a: &Expr,
@@ -526,6 +605,7 @@ impl<'ctx> SymEval<'ctx> {
     {
         let av = self.bv_of(&self.eval_expr(a, env)?)?;
         let bv = self.bv_of(&self.eval_expr(b, env)?)?;
+        let (av, bv) = self.align_bv_pair(av, bv);
         Ok(SymValue::Bv(f(av, bv)))
     }
 
@@ -541,175 +621,8 @@ impl<'ctx> SymEval<'ctx> {
     {
         let av = self.bv_of(&self.eval_expr(a, env)?)?;
         let bv = self.bv_of(&self.eval_expr(b, env)?)?;
+        let (av, bv) = self.align_bv_pair(av, bv);
         Ok(SymValue::Bool(f(av, bv)))
-    }
-
-    pub fn eval_value_ast(
-        &self,
-        ast: &ValueAst,
-        vars: &[BV<'ctx>],
-    ) -> Result<(BV<'ctx>, Bool<'ctx>), EvalError> {
-        match ast {
-            ValueAst::Symbol(i) => Ok((vars[*i].clone(), Bool::from_bool(self.ctx, false))),
-            ValueAst::Const(n) => Ok((
-                BV::from_i64(self.ctx, *n as i64, I32_WIDTH),
-                Bool::from_bool(self.ctx, false),
-            )),
-            ValueAst::Add(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Add),
-            ValueAst::Sub(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Sub),
-            ValueAst::Mul(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Mul),
-            ValueAst::DivU(l, r) => {
-                self.eval_binop_partial(l, r, vars, WasmBinOp::Div(Sign::U))
-            }
-            ValueAst::DivS(l, r) => {
-                self.eval_binop_partial(l, r, vars, WasmBinOp::Div(Sign::S))
-            }
-            ValueAst::RemU(l, r) => {
-                self.eval_binop_partial(l, r, vars, WasmBinOp::Rem(Sign::U))
-            }
-            ValueAst::RemS(l, r) => {
-                self.eval_binop_partial(l, r, vars, WasmBinOp::Rem(Sign::S))
-            }
-            ValueAst::Shl(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Shl),
-            ValueAst::And(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::And),
-            ValueAst::Or(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Or),
-            ValueAst::Xor(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Xor),
-            ValueAst::ShrU(l, r) => {
-                self.eval_binop_partial(l, r, vars, WasmBinOp::Shr(Sign::U))
-            }
-            ValueAst::ShrS(l, r) => {
-                self.eval_binop_partial(l, r, vars, WasmBinOp::Shr(Sign::S))
-            }
-            ValueAst::Rotl(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Rotl),
-            ValueAst::Rotr(l, r) => self.eval_binop_partial(l, r, vars, WasmBinOp::Rotr),
-            ValueAst::Eq(l, r) => self.eval_relop(l, r, vars, WasmRelOp::Eq),
-            ValueAst::Ne(l, r) => self.eval_relop(l, r, vars, WasmRelOp::Ne),
-            ValueAst::LtS(l, r) => self.eval_relop(l, r, vars, WasmRelOp::Lt(Sign::S)),
-            ValueAst::LeS(l, r) => self.eval_relop(l, r, vars, WasmRelOp::Le(Sign::S)),
-            ValueAst::GtS(l, r) => self.eval_relop(l, r, vars, WasmRelOp::Gt(Sign::S)),
-            ValueAst::Eqz(c) => self.eval_testop(c, vars, WasmTestOp::Eqz),
-            ValueAst::Clz(c) => self.eval_unop(c, vars, WasmUnOp::Clz),
-            ValueAst::Ctz(c) => self.eval_unop(c, vars, WasmUnOp::Ctz),
-            ValueAst::Popcnt(c) => self.eval_unop(c, vars, WasmUnOp::Popcnt),
-        }
-    }
-
-    fn eval_binop_partial(
-        &self,
-        l: &ValueAst,
-        r: &ValueAst,
-        vars: &[BV<'ctx>],
-        binop: WasmBinOp,
-    ) -> Result<(BV<'ctx>, Bool<'ctx>), EvalError> {
-        let (l_val, l_trap) = self.eval_value_ast(l, vars)?;
-        if l_trap.as_bool().unwrap_or(false) {
-            return Ok((l_val, l_trap));
-        }
-        let (r_val, r_trap) = self.eval_value_ast(r, vars)?;
-        let trap = Bool::or(self.ctx, &[&l_trap, &r_trap]);
-        let args = vec![
-            SymValue::Meta(AlValue::NumType(NumType::I32)),
-            SymValue::Meta(AlValue::BinOp(binop)),
-            SymValue::Bv(l_val),
-            SymValue::Bv(r_val),
-        ];
-        let list = self.call_func("binop_", args)?;
-        if list.is_empty_list_or_opt() {
-            Ok((
-                BV::from_u64(self.ctx, 0, I32_WIDTH),
-                Bool::from_bool(self.ctx, true),
-            ))
-        } else if let Some(SymValue::Bv(v)) = list.choose_singleton() {
-            Ok((v, trap))
-        } else {
-            Ok((
-                BV::from_u64(self.ctx, 0, I32_WIDTH),
-                Bool::from_bool(self.ctx, true),
-            ))
-        }
-    }
-
-    fn eval_relop(
-        &self,
-        l: &ValueAst,
-        r: &ValueAst,
-        vars: &[BV<'ctx>],
-        relop: WasmRelOp,
-    ) -> Result<(BV<'ctx>, Bool<'ctx>), EvalError> {
-        let (l_val, l_trap) = self.eval_value_ast(l, vars)?;
-        if l_trap.as_bool().unwrap_or(false) {
-            return Ok((l_val, l_trap));
-        }
-        let (r_val, r_trap) = self.eval_value_ast(r, vars)?;
-        let trap = Bool::or(self.ctx, &[&l_trap, &r_trap]);
-        let args = vec![
-            SymValue::Meta(AlValue::NumType(NumType::I32)),
-            SymValue::Meta(AlValue::RelOp(relop)),
-            SymValue::Bv(l_val),
-            SymValue::Bv(r_val),
-        ];
-        let v = self.call_func("relop_", args)?;
-        let bv = match v {
-            SymValue::Bv(b) => b,
-            SymValue::Meta(AlValue::Nat(n)) => BV::from_u64(self.ctx, n, I32_WIDTH),
-            _ => BV::from_u64(self.ctx, 0, I32_WIDTH),
-        };
-        Ok((bv, trap))
-    }
-
-    fn eval_testop(
-        &self,
-        c: &ValueAst,
-        vars: &[BV<'ctx>],
-        testop: WasmTestOp,
-    ) -> Result<(BV<'ctx>, Bool<'ctx>), EvalError> {
-        let (c_val, c_trap) = self.eval_value_ast(c, vars)?;
-        if c_trap.as_bool().unwrap_or(false) {
-            return Ok((c_val, c_trap));
-        }
-        let args = vec![
-            SymValue::Meta(AlValue::NumType(NumType::I32)),
-            SymValue::Meta(AlValue::TestOp(testop)),
-            SymValue::Bv(c_val),
-        ];
-        let v = self.call_func("testop_", args)?;
-        let bv = match v {
-            SymValue::Bv(b) => b,
-            SymValue::Meta(AlValue::Nat(n)) => BV::from_u64(self.ctx, n, I32_WIDTH),
-            _ => BV::from_u64(self.ctx, 0, I32_WIDTH),
-        };
-        Ok((bv, c_trap))
-    }
-
-    fn eval_unop(
-        &self,
-        c: &ValueAst,
-        vars: &[BV<'ctx>],
-        unop: WasmUnOp,
-    ) -> Result<(BV<'ctx>, Bool<'ctx>), EvalError> {
-        let (c_val, c_trap) = self.eval_value_ast(c, vars)?;
-        if c_trap.as_bool().unwrap_or(false) {
-            return Ok((c_val, c_trap));
-        }
-        let args = vec![
-            SymValue::Meta(AlValue::NumType(NumType::I32)),
-            SymValue::Meta(AlValue::UnOp(unop)),
-            SymValue::Bv(c_val),
-        ];
-        let list = self.call_func("unop_", args)?;
-        if list.is_empty_list_or_opt() {
-            Ok((
-                BV::from_u64(self.ctx, 0, I32_WIDTH),
-                Bool::from_bool(self.ctx, true),
-            ))
-        } else if let Some(SymValue::Bv(v)) = list.choose_singleton() {
-            Ok((v, c_trap))
-        } else {
-            Ok((
-                BV::from_u64(self.ctx, 0, I32_WIDTH),
-                Bool::from_bool(self.ctx, true),
-            ))
-        }
     }
 }
 
@@ -737,40 +650,4 @@ impl<'ctx> SymEnv<'ctx> {
     fn get(&self, name: &str) -> Option<&SymValue<'ctx>> {
         self.bindings.get(name)
     }
-}
-
-pub fn eval_value_ast_z3<'ctx>(
-    ctx: &'ctx Context,
-    ast: &ValueAst,
-    vars: &[BV<'ctx>],
-) -> Option<(BV<'ctx>, Bool<'ctx>)> {
-    let eval = SymEval::new(ctx);
-    eval.eval_value_ast(ast, vars).ok()
-}
-
-pub fn asts_valid_rewrite_z3<'ctx>(
-    ctx: &'ctx Context,
-    num_inputs: usize,
-    lhs: &ValueAst,
-    rhs: &ValueAst,
-) -> bool {
-    use z3::SatResult;
-    let vars: Vec<BV<'_>> = (0..num_inputs)
-        .map(|i| BV::new_const(ctx, format!("in_{i}"), I32_WIDTH))
-        .collect();
-    let eval = SymEval::new(ctx);
-    let (lv, lt) = match eval.eval_value_ast(lhs, &vars) {
-        Ok(pair) => pair,
-        Err(_) => return false,
-    };
-    let (rv, rt) = match eval.eval_value_ast(rhs, &vars) {
-        Ok(pair) => pair,
-        Err(_) => return false,
-    };
-    let solver = z3::Solver::new(ctx);
-    let trap_violation = lt.xor(&rt);
-    let defined_both = Bool::and(ctx, &[&lt.not(), &rt.not()]);
-    let value_violation = Bool::and(ctx, &[&defined_both, &lv._eq(&rv).not()]);
-    solver.assert(&Bool::or(ctx, &[&trap_violation, &value_violation]));
-    matches!(solver.check(), SatResult::Unsat)
 }

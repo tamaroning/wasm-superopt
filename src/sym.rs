@@ -175,6 +175,135 @@ fn go_subtree(
             let a = go_subtree(src, *a, dst, memo);
             dst.add(ValueLang::I32Popcnt([a]))
         }
+        ValueLang::I64Const(n) => dst.add(ValueLang::I64Const(*n)),
+        ValueLang::I64Add([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Add([a, b]))
+        }
+        ValueLang::I64Sub([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Sub([a, b]))
+        }
+        ValueLang::I64Mul([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Mul([a, b]))
+        }
+        ValueLang::I64Shl([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Shl([a, b]))
+        }
+        ValueLang::I64DivU([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64DivU([a, b]))
+        }
+        ValueLang::I64DivS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64DivS([a, b]))
+        }
+        ValueLang::I64RemU([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64RemU([a, b]))
+        }
+        ValueLang::I64RemS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64RemS([a, b]))
+        }
+        ValueLang::I64And([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64And([a, b]))
+        }
+        ValueLang::I64Or([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Or([a, b]))
+        }
+        ValueLang::I64Xor([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Xor([a, b]))
+        }
+        ValueLang::I64ShrU([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64ShrU([a, b]))
+        }
+        ValueLang::I64ShrS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64ShrS([a, b]))
+        }
+        ValueLang::I64Rotl([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Rotl([a, b]))
+        }
+        ValueLang::I64Rotr([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Rotr([a, b]))
+        }
+        ValueLang::I64Eq([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Eq([a, b]))
+        }
+        ValueLang::I64Ne([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64Ne([a, b]))
+        }
+        ValueLang::I64LtS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64LtS([a, b]))
+        }
+        ValueLang::I64LeS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64LeS([a, b]))
+        }
+        ValueLang::I64GtS([a, b]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            let b = go_subtree(src, *b, dst, memo);
+            dst.add(ValueLang::I64GtS([a, b]))
+        }
+        ValueLang::I64Eqz([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I64Eqz([a]))
+        }
+        ValueLang::I64Clz([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I64Clz([a]))
+        }
+        ValueLang::I64Ctz([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I64Ctz([a]))
+        }
+        ValueLang::I64Popcnt([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I64Popcnt([a]))
+        }
+        ValueLang::I64ExtendI32S([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I64ExtendI32S([a]))
+        }
+        ValueLang::I64ExtendI32U([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I64ExtendI32U([a]))
+        }
+        ValueLang::I32WrapI64([a]) => {
+            let a = go_subtree(src, *a, dst, memo);
+            dst.add(ValueLang::I32WrapI64([a]))
+        }
     };
     memo.insert(id, mapped);
     mapped
@@ -209,15 +338,25 @@ impl SymMachine {
         parse_value_expr(&format!("?L{slot}"))
     }
 
+    /// Unknown stack slot entering a straight-line block (`?in_0`, …; SuperStack `in_0`).
+    pub fn stack_input_symbol(index: usize) -> ValueExpr {
+        parse_value_expr(&format!("?in_{index}"))
+    }
+
+    pub fn implicit_stack_inputs(count: usize) -> Vec<ValueExpr> {
+        (0..count).map(Self::stack_input_symbol).collect()
+    }
+
+    /// Pre-seed the stack with `count` implicit inputs (bottom to top).
+    pub fn seed_implicit_stack_inputs(&mut self, count: usize) {
+        self.stack = Self::implicit_stack_inputs(count);
+    }
+
+    /// SuperStack-style entry: every local is an unknown `?L{i}` (not zero-initialized).
     pub fn function_entry(num_params: u32, total_locals: u32, max_stack: usize) -> Self {
         let mut locals = BTreeMap::new();
         for slot in 0..total_locals {
-            let init = if slot < num_params {
-                Self::local_symbol(slot)
-            } else {
-                parse_value_expr("0")
-            };
-            locals.insert(slot, init);
+            locals.insert(slot, Self::local_symbol(slot));
         }
         Self {
             stack: Vec::new(),
@@ -229,13 +368,27 @@ impl SymMachine {
         }
     }
 
+    /// Machine at segment/chunk entry: symbolic locals plus optional initial stack.
+    pub fn from_segment_entry(
+        num_params: u32,
+        bounds: &SegmentBounds,
+        init: &SymState,
+        max_stack: usize,
+    ) -> Self {
+        let total_locals = bounds.max_local + 1;
+        let mut m = Self::function_entry(num_params, total_locals, max_stack);
+        m.stack = init.stack.clone();
+        m.begin_segment();
+        m
+    }
+
     pub fn begin_segment(&mut self) {
         self.segment_start_locals = self.locals.clone();
     }
 
     pub fn to_init_state(&self) -> SymState {
         let mut locals = BTreeMap::new();
-        for slot in 0..self.num_params {
+        for slot in 0..self.total_locals {
             locals.insert(slot, LocalReq::Need(Self::local_symbol(slot)));
         }
         SymState {
@@ -266,11 +419,15 @@ impl SymMachine {
         }
     }
 
-    /// Init state for a sub-chunk starting at the current machine position.
+    /// Init state for a sub-chunk: carried stack plus every local as `?L{i}` (SuperStack per-chunk frame).
     pub fn to_chunk_init_state(&self) -> SymState {
+        let mut locals = BTreeMap::new();
+        for slot in 0..self.total_locals {
+            locals.insert(slot, LocalReq::Need(Self::local_symbol(slot)));
+        }
         SymState {
             stack: self.stack.clone(),
-            locals: BTreeMap::new(),
+            locals,
         }
     }
 
@@ -442,6 +599,30 @@ impl SymMachine {
                     vec![],
                 )))
             }
+            SemOp::Opaque {
+                id,
+                pops,
+                pushes,
+                storage,
+            } => {
+                let mut inputs = Vec::with_capacity(*pops as usize);
+                for _ in 0..*pops {
+                    inputs.push(expr_name(&self.pop()?));
+                }
+                inputs.reverse();
+                let mut results = Vec::with_capacity(*pushes as usize);
+                for i in 0..*pushes {
+                    let sym = format!("?opaque_{id}_{i}");
+                    results.push(sym.clone());
+                    self.push_expr(parse_value_expr(&sym))?;
+                }
+                Ok(Some(OpaqueMeta::from_exec(
+                    *id,
+                    *storage,
+                    inputs,
+                    results,
+                )))
+            }
         }
     }
 
@@ -473,5 +654,20 @@ mod tests {
         let expected = init();
         assert_eq!(init_state.stack, expected.stack);
         assert_eq!(init_state.locals, expected.locals);
+    }
+
+    #[test]
+    fn implicit_stack_inputs_seed_local_tee() {
+        let bounds = SegmentBounds::new(3, 4);
+        let mut machine = SymMachine::function_entry(0, 3, bounds.max_stack);
+        machine.seed_implicit_stack_inputs(1);
+        machine.begin_segment();
+        machine.exec(&SemOp::LocalTee(2)).expect("local.tee with implicit input");
+        let fin = machine.to_fin_state();
+        assert_eq!(fin.stack.len(), 1);
+        assert!(matches!(
+            fin.locals.get(&2),
+            Some(LocalReq::Need(v)) if v.to_string() == "?in_0"
+        ));
     }
 }

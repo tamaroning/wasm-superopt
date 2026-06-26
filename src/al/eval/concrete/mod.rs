@@ -2,7 +2,9 @@
 
 mod value_ast;
 
-pub use value_ast::{concrete_valid_rewrite, eval_value_ast_concrete};
+pub use value_ast::{
+    concrete_valid_rewrite, eval_value_ast_concrete, eval_value_ast_concrete_sig,
+};
 
 use super::env::Env;
 use super::error::EvalError;
@@ -29,6 +31,13 @@ pub fn call_func(name: &str, args: Vec<AlValue>) -> EvalResult<AlValue> {
 
 fn eval_builtin(name: &str, args: &[AlValue]) -> Option<AlValue> {
     match name {
+        "sizenn" => {
+            let nt = match args.first()? {
+                AlValue::NumType(nt) => *nt,
+                _ => return None,
+            };
+            Some(AlValue::Nat(nt.bit_width() as u64))
+        }
         "truncz" => {
             let r = args.first()?.clone();
             let rat = match r {
@@ -39,27 +48,118 @@ fn eval_builtin(name: &str, args: &[AlValue]) -> Option<AlValue> {
         }
         "iclz_" => {
             let n = args.get(0)?.as_nat()? as u32;
-            let i = args.get(1)?.as_nat()? as u32;
-            let clz = if i == 0 { n } else { i.leading_zeros() - (32 - n) };
+            let i = args.get(1)?.as_nat()? as u64;
+            let mask = if n == 64 { u64::MAX } else { (1u64 << n) - 1 };
+            let i = i & mask;
+            let clz = if i == 0 {
+                n
+            } else {
+                i.leading_zeros() - (64 - n)
+            };
             Some(AlValue::Nat(clz as u64))
         }
         "ictz_" => {
             let n = args.get(0)?.as_nat()? as u32;
-            let i = args.get(1)?.as_nat()? as u32;
-            let ctz = if i == 0 { n } else { i.trailing_zeros() };
-            if n == 32 {
-                Some(AlValue::Nat(ctz as u64))
-            } else {
-                Some(AlValue::Nat(ctz.min(n) as u64))
-            }
+            let i = args.get(1)?.as_nat()? as u64;
+            let mask = if n == 64 { u64::MAX } else { (1u64 << n) - 1 };
+            let i = i & mask;
+            let ctz = if i == 0 { n } else { i.trailing_zeros().min(n) };
+            Some(AlValue::Nat(ctz as u64))
         }
         "ipopcnt_" => {
-            let _n = args.get(0)?.as_nat()? as u32;
-            let i = args.get(1)?.as_nat()? as u32;
-            Some(AlValue::Nat(i.count_ones() as u64))
+            let n = args.get(0)?.as_nat()? as u32;
+            let i = args.get(1)?.as_nat()? as u64;
+            let mask = if n == 64 { u64::MAX } else { (1u64 << n) - 1 };
+            Some(AlValue::Nat((i & mask).count_ones() as u64))
         }
+        "fadd_" | "fsub_" | "fmul_" | "fdiv_" | "fmin_" | "fmax_" | "fcopysign_" => {
+            float_binop_builtin(name, args)
+        }
+        "fabs_" | "fneg_" | "fsqrt_" | "fceil_" | "ffloor_" | "ftrunc_" | "fnearest_" => {
+            float_unop_builtin(name, args)
+        }
+        "feq_" | "fne_" | "flt_" | "fgt_" | "fle_" | "fge_" => float_relop_builtin(name, args),
         _ => None,
     }
+}
+
+fn nat_bits(args: &[AlValue], idx: usize) -> Option<u64> {
+    args.get(idx)?.as_nat()
+}
+
+fn float_width(args: &[AlValue]) -> Option<u32> {
+    Some(args.first()?.as_nat()? as u32)
+}
+
+fn float_binop_builtin(name: &str, args: &[AlValue]) -> Option<AlValue> {
+    let bits = float_width(args)?;
+    let a = nat_bits(args, 1)?;
+    let b = nat_bits(args, 2)?;
+    let out = match (bits, name) {
+        (32, "fadd_") => (f32::from_bits(a as u32) + f32::from_bits(b as u32)).to_bits() as u64,
+        (32, "fsub_") => (f32::from_bits(a as u32) - f32::from_bits(b as u32)).to_bits() as u64,
+        (32, "fmul_") => (f32::from_bits(a as u32) * f32::from_bits(b as u32)).to_bits() as u64,
+        (32, "fdiv_") => (f32::from_bits(a as u32) / f32::from_bits(b as u32)).to_bits() as u64,
+        (32, "fmin_") => f32::from_bits(a as u32).min(f32::from_bits(b as u32)).to_bits() as u64,
+        (32, "fmax_") => f32::from_bits(a as u32).max(f32::from_bits(b as u32)).to_bits() as u64,
+        (32, "fcopysign_") => f32::from_bits(a as u32)
+            .copysign(f32::from_bits(b as u32))
+            .to_bits() as u64,
+        (64, "fadd_") => (f64::from_bits(a) + f64::from_bits(b)).to_bits(),
+        (64, "fsub_") => (f64::from_bits(a) - f64::from_bits(b)).to_bits(),
+        (64, "fmul_") => (f64::from_bits(a) * f64::from_bits(b)).to_bits(),
+        (64, "fdiv_") => (f64::from_bits(a) / f64::from_bits(b)).to_bits(),
+        (64, "fmin_") => f64::from_bits(a).min(f64::from_bits(b)).to_bits(),
+        (64, "fmax_") => f64::from_bits(a).max(f64::from_bits(b)).to_bits(),
+        (64, "fcopysign_") => f64::from_bits(a).copysign(f64::from_bits(b)).to_bits(),
+        _ => return None,
+    };
+    Some(AlValue::List(vec![AlValue::Nat(out)]))
+}
+
+fn float_unop_builtin(name: &str, args: &[AlValue]) -> Option<AlValue> {
+    let bits = float_width(args)?;
+    let a = nat_bits(args, 1)?;
+    let out = match (bits, name) {
+        (32, "fabs_") => f32::from_bits(a as u32).abs().to_bits() as u64,
+        (32, "fneg_") => (-f32::from_bits(a as u32)).to_bits() as u64,
+        (32, "fsqrt_") => f32::from_bits(a as u32).sqrt().to_bits() as u64,
+        (32, "fceil_") => f32::from_bits(a as u32).ceil().to_bits() as u64,
+        (32, "ffloor_") => f32::from_bits(a as u32).floor().to_bits() as u64,
+        (32, "ftrunc_") => f32::from_bits(a as u32).trunc().to_bits() as u64,
+        (32, "fnearest_") => f32::from_bits(a as u32).round().to_bits() as u64,
+        (64, "fabs_") => f64::from_bits(a).abs().to_bits(),
+        (64, "fneg_") => (-f64::from_bits(a)).to_bits(),
+        (64, "fsqrt_") => f64::from_bits(a).sqrt().to_bits(),
+        (64, "fceil_") => f64::from_bits(a).ceil().to_bits(),
+        (64, "ffloor_") => f64::from_bits(a).floor().to_bits(),
+        (64, "ftrunc_") => f64::from_bits(a).trunc().to_bits(),
+        (64, "fnearest_") => f64::from_bits(a).round().to_bits(),
+        _ => return None,
+    };
+    Some(AlValue::List(vec![AlValue::Nat(out)]))
+}
+
+fn float_relop_builtin(name: &str, args: &[AlValue]) -> Option<AlValue> {
+    let bits = float_width(args)?;
+    let a = nat_bits(args, 1)?;
+    let b = nat_bits(args, 2)?;
+    let cmp = match (bits, name) {
+        (32, "feq_") => f32::from_bits(a as u32) == f32::from_bits(b as u32),
+        (32, "fne_") => f32::from_bits(a as u32) != f32::from_bits(b as u32),
+        (32, "flt_") => f32::from_bits(a as u32) < f32::from_bits(b as u32),
+        (32, "fgt_") => f32::from_bits(a as u32) > f32::from_bits(b as u32),
+        (32, "fle_") => f32::from_bits(a as u32) <= f32::from_bits(b as u32),
+        (32, "fge_") => f32::from_bits(a as u32) >= f32::from_bits(b as u32),
+        (64, "feq_") => f64::from_bits(a) == f64::from_bits(b),
+        (64, "fne_") => f64::from_bits(a) != f64::from_bits(b),
+        (64, "flt_") => f64::from_bits(a) < f64::from_bits(b),
+        (64, "fgt_") => f64::from_bits(a) > f64::from_bits(b),
+        (64, "fle_") => f64::from_bits(a) <= f64::from_bits(b),
+        (64, "fge_") => f64::from_bits(a) >= f64::from_bits(b),
+        _ => return None,
+    };
+    Some(AlValue::Nat(u64::from(cmp)))
 }
 
 fn eval_func_body(func: &FuncA, env: &mut Env) -> EvalResult<AlValue> {
@@ -209,9 +309,16 @@ pub fn eval_pred(pred: &Pred, env: &mut Env) -> EvalResult<bool> {
         }
         Pred::TypeIsInn(expr) => Ok(matches!(
             eval_expr(expr, env)?,
-            AlValue::NumType(NumType::I32)
+            AlValue::NumType(nt) if nt.is_inn()
         )),
-        Pred::TypeIsFnn(_) => Ok(false),
+        Pred::TypeIsFnn(expr) => Ok(matches!(
+            eval_expr(expr, env)?,
+            AlValue::NumType(nt) if nt.is_fnn()
+        )),
+        Pred::NumTypeEq(expr, expected) => Ok(matches!(
+            eval_expr(expr, env)?,
+            AlValue::NumType(nt) if nt == *expected
+        )),
         Pred::BinOpEq(expr, expected) => Ok(matches!(
             &eval_expr(expr, env)?,
             AlValue::BinOp(b) if *b == *expected
@@ -388,21 +495,22 @@ pub fn eval_expr(expr: &Expr, env: &mut Env) -> EvalResult<AlValue> {
         Expr::LShr(a, b) => {
             let an = nat_of(&eval_expr(a, env)?)?;
             let bn = nat_of(&eval_expr(b, env)?)?;
-            Ok(AlValue::Nat(an >> bn))
+            Ok(AlValue::Nat(an.wrapping_shr((bn % 64) as u32)))
         }
         Expr::AShr(a, b) => {
-            let an = nat_of(&eval_expr(a, env)?)? as u32;
+            let an = nat_of(&eval_expr(a, env)?)?;
             let bn = nat_of(&eval_expr(b, env)?)?;
-            Ok(AlValue::Nat((an as i32 >> bn) as u32 as u64))
+            let shift = (bn % 64) as u32;
+            Ok(AlValue::Nat((an as i64).wrapping_shr(shift) as u64))
         }
         Expr::Rotl(a, b) => {
             let an = nat_of(&eval_expr(a, env)?)? as u32;
-            let bn = nat_of(&eval_expr(b, env)?)? as u32;
+            let bn = (nat_of(&eval_expr(b, env)?)? % 32) as u32;
             Ok(AlValue::Nat(an.rotate_left(bn) as u64))
         }
         Expr::Rotr(a, b) => {
             let an = nat_of(&eval_expr(a, env)?)? as u32;
-            let bn = nat_of(&eval_expr(b, env)?)? as u32;
+            let bn = (nat_of(&eval_expr(b, env)?)? % 32) as u32;
             Ok(AlValue::Nat(an.rotate_right(bn) as u64))
         }
         Expr::Neg(v) => {

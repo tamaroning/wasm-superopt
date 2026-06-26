@@ -46,7 +46,8 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         | SemOp::I32Store { .. }
         | SemOp::Call { .. }
         | SemOp::GlobalGet { .. }
-        | SemOp::GlobalSet { .. } => {
+        | SemOp::GlobalSet { .. }
+        | SemOp::Opaque { .. } => {
             panic!("opaque {op:?} is not supported in AL synthesis")
         }
     }
