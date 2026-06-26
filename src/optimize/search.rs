@@ -245,6 +245,7 @@ pub fn solve_astar_traced(
     let mut best = cfg.max_depth;
 
     let mut memo = HashSet::new();
+    let mut parent_map: std::collections::HashMap<MemoKey, MemoKey> = std::collections::HashMap::new();
     let mut heap = BinaryHeap::new();
     let initial = SearchState::initial(segment, &segment.fin);
     let h0 = h_goal(&initial.goal, init, bounds, &mut canon);
@@ -284,6 +285,17 @@ pub fn solve_astar_traced(
                 if g <= best {
                     best = g;
                     best_path = Some(ops);
+                    if let Some(tr) = trace.as_deref_mut() {
+                        let solution_key = memo_key(&state, &mut canon);
+                        let mut keys = vec![solution_key.clone()];
+                        let mut cur = parent_map.get(&solution_key).cloned();
+                        while let Some(k) = cur {
+                            keys.push(k.clone());
+                            cur = parent_map.get(&k).cloned();
+                        }
+                        keys.reverse();
+                        tr.set_solution_path(&keys);
+                    }
                 }
                 memo_record(&mut memo, &state, &mut canon);
             }
@@ -300,6 +312,11 @@ pub fn solve_astar_traced(
             if nf <= best {
                 let child_key = memo_key(&next, &mut canon);
                 let pruned = memo.contains(&child_key);
+                if !pruned {
+                    parent_map
+                        .entry(child_key.clone())
+                        .or_insert(parent_key.clone());
+                }
                 if let (Some(tr), Some(pid)) = (trace.as_deref_mut(), parent_id) {
                     let child_id = tr.intern(&child_key, &next, ng, NodeKind::Intermediate);
                     tr.add_edge(pid, child_id, &op, pruned);

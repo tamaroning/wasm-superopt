@@ -37,6 +37,8 @@ pub struct SearchTrace {
     nodes: Vec<TraceNode>,
     edges: Vec<TraceEdge>,
     solution_id: Option<u32>,
+    /// Node ids from fin (root) to init (solution), inclusive.
+    solution_path: Option<Vec<u32>>,
 }
 
 impl SearchTrace {
@@ -110,19 +112,64 @@ impl SearchTrace {
         self.solution_id
     }
 
+    pub fn set_solution_path(&mut self, keys: &[MemoKey]) {
+        let path: Vec<u32> = keys
+            .iter()
+            .filter_map(|k| self.key_to_id.get(k).copied())
+            .collect();
+        if path.len() == keys.len() {
+            self.solution_path = Some(path);
+        }
+    }
+
+    pub fn solution_path(&self) -> Option<&[u32]> {
+        self.solution_path.as_deref()
+    }
+
+    fn solution_path_edges(&self) -> Vec<(u32, u32)> {
+        let Some(path) = &self.solution_path else {
+            return vec![];
+        };
+        path.windows(2)
+            .map(|w| (w[0], w[1]))
+            .collect()
+    }
+
     pub fn to_dot(&self) -> String {
         let mut out = String::from(
             "digraph search {\n  rankdir=BT;\n  graph [dpi=300];\n  node [shape=box, fontname=\"Courier\", fontsize=9];\n  edge [fontname=\"Courier\", fontsize=8];\n",
         );
+        let path_nodes: std::collections::HashSet<u32> = self
+            .solution_path
+            .as_ref()
+            .map(|p| p.iter().copied().collect())
+            .unwrap_or_default();
+        let path_edges: std::collections::HashSet<(u32, u32)> =
+            self.solution_path_edges().into_iter().collect();
+
         for node in &self.nodes {
-            let (fill, style) = match node.kind {
-                NodeKind::Root => ("lightyellow", "filled,bold"),
-                NodeKind::Solution => ("lightgreen", "filled,bold"),
-                NodeKind::MemoSkip => ("whitesmoke", "filled,dashed"),
-                NodeKind::Intermediate => ("white", "filled"),
+            let on_path = path_nodes.contains(&node.id);
+            let (fill, style) = if on_path {
+                match node.kind {
+                    NodeKind::Root => ("lightyellow", "filled,bold"),
+                    NodeKind::Solution => ("lightgreen", "filled,bold"),
+                    _ => ("mistyrose", "filled,bold"),
+                }
+            } else {
+                match node.kind {
+                    NodeKind::Root => ("lightyellow", "filled,bold"),
+                    NodeKind::Solution => ("lightgreen", "filled,bold"),
+                    NodeKind::MemoSkip => ("whitesmoke", "filled,dashed"),
+                    NodeKind::Intermediate => ("white", "filled"),
+                }
+            };
+            let extra = if on_path {
+                ", color=red, penwidth=2.5"
+            } else {
+                ""
             };
             out.push_str(&format!(
-                "  n{} [label=\"{}\", style=\"{}\", fillcolor=\"{}\"];\n",
+                "  n{} [label=\"{}\", style=\"{}\", fillcolor=\"{}\"{extra}];\n",
                 node.id,
                 dot_escape(&node.label),
                 style,
@@ -130,8 +177,15 @@ impl SearchTrace {
             ));
         }
         for edge in &self.edges {
+            let on_path = path_edges.contains(&(edge.from, edge.to));
             let suffix = if edge.pruned { " (memo)" } else { "" };
-            let edge_attrs = if edge.pruned {
+            let edge_attrs = if on_path {
+                format!(
+                    " [color=red, penwidth=2.5, label=\"{}{}\"]",
+                    dot_escape(&edge.op),
+                    suffix
+                )
+            } else if edge.pruned {
                 format!(
                     " [style=dashed, color=gray, label=\"{}{}\"]",
                     dot_escape(&edge.op),
@@ -144,9 +198,6 @@ impl SearchTrace {
                 "  n{} -> n{}{};\n",
                 edge.from, edge.to, edge_attrs
             ));
-        }
-        if let Some(sid) = self.solution_id {
-            out.push_str(&format!("  n{sid} [penwidth=2];\n"));
         }
         out.push_str("}\n");
         out
@@ -250,5 +301,11 @@ mod tests {
         );
         assert!(trace.solution_node().is_some());
         assert!(trace.num_edges() > 0);
+        let path = trace.solution_path().expect("solution path");
+        assert!(path.len() >= 2);
+        assert_eq!(path.first().copied(), trace.nodes.iter().find(|n| n.kind == NodeKind::Root).map(|n| n.id));
+        assert_eq!(path.last().copied(), trace.solution_node());
+        let dot = trace.to_dot();
+        assert!(dot.contains("color=red"));
     }
 }
