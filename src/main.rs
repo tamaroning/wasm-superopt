@@ -59,6 +59,10 @@ struct Cli {
     #[arg(long, short = 'w')]
     direct_timeout: bool,
 
+    /// Fixed per-segment solver timeout in seconds (overrides storage-based default and `-w`).
+    #[arg(long, value_name = "SECS")]
+    segment_timeout: Option<u64>,
+
     /// Split segments longer than N instructions (0 = no split; default 10).
     #[arg(long, default_value_t = wasm::DEFAULT_MAX_SEGMENT_INSTR)]
     split: usize,
@@ -128,7 +132,8 @@ fn main() {
     let cfg = optimize::SearchConfig {
         max_depth: cli.window,
         timeout_secs: None,
-        direct_timeout: cli.direct_timeout,
+        direct_timeout: cli.direct_timeout && cli.segment_timeout.is_none(),
+        fixed_segment_timeout: cli.segment_timeout,
     };
     let results = optimize::optimize_and_print_segments(
         &info.segments,

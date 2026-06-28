@@ -19,6 +19,7 @@ class BenchmarkSuite:
     label: str
     bench_dir: Path
     default_exclude: tuple[str, ...]
+    default_tools: tuple[str, ...]
 
 
 SUITES: dict[str, BenchmarkSuite] = {
@@ -27,18 +28,21 @@ SUITES: dict[str, BenchmarkSuite] = {
         label="wasm-r3-bench",
         bench_dir=(_REPO_ROOT / "../wasm-benchmarks/wasm-r3-bench").resolve(),
         default_exclude=("ffmpeg",),
+        default_tools=("ewasm", "superstack-greedy"),
     ),
     "rosetta": BenchmarkSuite(
         name="rosetta",
         label="Rosetta Code benchmarks",
         bench_dir=_REPO_ROOT / "benchmarks/rosetta",
         default_exclude=(),
+        default_tools=("ewasm", "superstack-greedy"),
     ),
     "wsouper": BenchmarkSuite(
         name="wsouper",
         label="Souper benchmarks",
         bench_dir=_REPO_ROOT / "benchmarks/wsouper",
         default_exclude=(),
+        default_tools=("ewasm", "superstack"),
     ),
 }
 

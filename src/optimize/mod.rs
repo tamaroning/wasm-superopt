@@ -164,7 +164,9 @@ pub fn optimize_segments(
 }
 
 fn default_timeout_label(cfg: &SearchConfig) -> String {
-    if cfg.direct_timeout {
+    if let Some(secs) = cfg.fixed_segment_timeout {
+        format!("{secs}s (fixed per segment)")
+    } else if cfg.direct_timeout {
         format!("{DIRECT_TIMEOUT_SECS}s (direct)")
     } else {
         format!("{DEFAULT_TIMEOUT_BASE_SECS}s base (+10s per storage op)")

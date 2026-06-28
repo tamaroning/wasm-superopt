@@ -32,26 +32,16 @@ uv sync
 From the repository root:
 
 ```bash
-# 1) Run benchmarks (SuperStack SAT + ewasm; default split width 15)
-uv run --project scripts wasm-bench-run \
-  --suite r3 \
-  --tools superstack ewasm \
-  --only factorial \
-  -j 28 \
-  --timeout 600
+# 1) Run benchmarks (SuperStack SAT + ewasm)
+#  - sequence timeout: 300s
+#  - timeout for each program: 3600s
+uv run --project scripts wasm-bench-run --suite wsouper -j 28 --split 20 --segment-timeout 300 --timeout 3600
 
-# Rosetta benchmarks
-uv run --project scripts wasm-bench-run --suite rosetta -j 8
+# 2) Re-merge raw CSVs (optional; plot also auto-merges if combined_blocks.csv is missing)
+uv run --project scripts wasm-bench-merge --suite wsouper
 
-# Souper benchmarks
-uv run --project scripts wasm-bench-run --suite wsouper --only mimc_test
-
-# 2) Re-merge raw CSVs (example: exclude huge benchmarks like ffmpeg on r3)
-uv run --project scripts wasm-bench-merge --suite r3 --exclude ffmpeg
-
-# 3) Plot
-uv run --project scripts wasm-bench-plot --suite r3 --exclude ffmpeg
-uv run --project scripts wasm-bench-plot --suite rosetta
+# 3) Plot (requires wasm-bench-run output; auto-merges raw/*.csv when combined_blocks.csv is absent)
+uv run --project scripts wasm-bench-plot --suite wsouper
 uv run --project scripts wasm-bench-plot --suite r3 --benchmark game-of-life --exclude ''
 ```
 
@@ -78,8 +68,9 @@ Note: superstack only supports the following r3 benchmarks:
 ## Caveats (comparison limits)
 
 1. **ewasm type support** — i32 arithmetic is optimized with A*. i64/f32/f64 locals and instructions are parsed as symbolic execution (`opaque`), like SuperStack; segment splitting continues. Only i32 is optimized.
-2. **SuperStack greedy ≠ ewasm A\*** — SuperStack here uses `--greedy` (fast heuristic). ewasm uses A* shortest-path search. Add `--tools superstack-sat` for SAT comparison.
-3. **Default split** — `wasm-bench-run` uses `--split 15` / `-sp 15` by default (ewasm CLI alone defaults to 10; SuperStack defaults to no splitting).
+2. **SuperStack greedy ≠ ewasm A\*** — `r3` / `rosetta` default to `superstack-greedy` (fast heuristic). `wsouper` defaults to `superstack` (SAT via `--ub-greedy`). ewasm uses A* shortest-path search.
+3. **Default split** — `wasm-bench-run` uses `--split 25` / `-sp 25` by default (ewasm CLI alone defaults to 10; SuperStack defaults to no splitting).
 4. **Parallelism** — `-j` maps to ewasm `-j` and SuperStack `-j` for parallel block optimization.
-5. **Large benchmarks** — `ffmpeg.wasm` has 300k+ blocks. Use `--exclude ffmpeg` when plotting the r3 suite.
-6. **SuperStack wasm support** — SuperStack's bundled `pywasm` only supports MVP-ish wasm. Many r3 benchmarks (including `mandelbrot`) use bulk-memory (`0xfc` opcodes) or other extensions and fail with `section size mismatch` / `KeyError: 252`. ewasm uses its own parser and can still run them. Benchmarks that typically work with SuperStack: `factorial`, `game-of-life`, `hydro`, `jqkungfu`, `jsc`, `pathfinding`, `sandspiel`, `ffmpeg`.
+5. **Segment timeout** — `--segment-timeout SECS` sets a fixed solver timeout per sequence/block for both ewasm and SuperStack (default: `10 × (1 + storage ops)`; SuperStack `-w` / ewasm `-w` use 300s).
+6. **Large benchmarks** — `ffmpeg.wasm` has 300k+ blocks. Use `--exclude ffmpeg` when plotting the r3 suite.
+7. **SuperStack wasm support** — SuperStack's bundled `pywasm` only supports MVP-ish wasm. Many r3 benchmarks (including `mandelbrot`) use bulk-memory (`0xfc` opcodes) or other extensions and fail with `section size mismatch` / `KeyError: 252`. ewasm uses its own parser and can still run them. Benchmarks that typically work with SuperStack: `factorial`, `game-of-life`, `hydro`, `jqkungfu`, `jsc`, `pathfinding`, `sandspiel`, `ffmpeg`.

@@ -114,6 +114,8 @@ pub struct SearchConfig {
     pub timeout_secs: Option<u64>,
     /// Use 300s per segment instead of `10 * (1 + storage)`.
     pub direct_timeout: bool,
+    /// Fixed per-segment timeout; overrides `direct_timeout` and storage-based defaults.
+    pub fixed_segment_timeout: Option<u64>,
 }
 
 impl Default for SearchConfig {
@@ -122,16 +124,21 @@ impl Default for SearchConfig {
             max_depth: DEFAULT_MAX_DEPTH,
             timeout_secs: None,
             direct_timeout: false,
+            fixed_segment_timeout: None,
         }
     }
 }
 
 impl SearchConfig {
     pub fn for_segment(&self, segment: &StraightSegment) -> Self {
+        let timeout = self
+            .fixed_segment_timeout
+            .unwrap_or_else(|| segment_timeout_secs(segment, self.direct_timeout));
         Self {
             max_depth: self.max_depth,
-            timeout_secs: Some(segment_timeout_secs(segment, self.direct_timeout)),
+            timeout_secs: Some(timeout),
             direct_timeout: self.direct_timeout,
+            fixed_segment_timeout: self.fixed_segment_timeout,
         }
     }
 }

@@ -51,6 +51,7 @@ def run_ewasm(
     split: int,
     jobs: int,
     timeout: int,
+    segment_timeout: int | None,
     *,
     ui: BenchmarkRunnerUI | None = None,
     cwd: Path | None = None,
@@ -65,6 +66,8 @@ def run_ewasm(
         "-c",
         str(csv_path),
     ]
+    if segment_timeout is not None:
+        cmd.extend(["--segment-timeout", str(segment_timeout)])
     if ui is not None:
         code, output, elapsed = run_cmd_tracked(cmd, timeout=timeout, ui=ui, cwd=cwd)
     else:
@@ -88,6 +91,7 @@ def run_superstack(
     split: int,
     jobs: int,
     timeout: int,
+    segment_timeout: int | None,
     mode: str,
     *,
     ui: BenchmarkRunnerUI | None = None,
@@ -104,6 +108,8 @@ def run_superstack(
         "-c",
         str(csv_path),
     ]
+    if segment_timeout is not None:
+        cmd.extend(["--segment-timeout", str(segment_timeout)])
     if mode == "greedy":
         cmd.append("--greedy")
     elif mode == "sat":
@@ -187,12 +193,25 @@ def main() -> int:
         default=1,
         help="Parallel jobs for ewasm and SuperStack block optimization (default: 1)",
     )
-    parser.add_argument("--timeout", type=int, default=600, help="Per-benchmark timeout (seconds)")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=3600,
+        help="Per-benchmark timeout in seconds (default: 3600 = 1 hour)",
+    )
+    parser.add_argument(
+        "--segment-timeout",
+        type=int,
+        default=None,
+        metavar="SECS",
+        help="Fixed solver timeout per sequence/block in seconds (ewasm/SuperStack --segment-timeout)",
+    )
     parser.add_argument(
         "--tools",
         nargs="+",
         choices=["ewasm", "superstack-greedy", "superstack"],
-        default=["ewasm", "superstack-greedy"],
+        default=None,
+        help="Tools to run (default: suite-specific; wsouper uses ewasm + superstack SAT)",
     )
     parser.add_argument("--limit", type=int, default=0, help="Limit number of wasm files (0 = all)")
     parser.add_argument("--only", nargs="*", help="Run only these benchmark basenames")
@@ -204,6 +223,7 @@ def main() -> int:
     args = parser.parse_args()
 
     suite = resolve_suite(args.suite)
+    tools = args.tools or list(suite.default_tools)
     bench_dir = args.bench_dir or suite.bench_dir
     out_dir_path = args.out_dir or out_dir(args.suite)
     superstack_python = args.superstack_python or default_superstack_python(args.superstack)
@@ -229,10 +249,11 @@ def main() -> int:
         console.print(f"[red]no .wasm files found in[/] {bench_dir}")
         return 1
 
-    run_total = len(wasm_files) * len(args.tools)
+    run_total = len(wasm_files) * len(tools)
     console.print(f"[bold]Suite:[/] {suite.label} ({bench_dir})")
+    console.print(f"[bold]Tools:[/] {', '.join(tools)}")
     console.print(f"[bold]Output:[/] {out_dir_path}")
-    console.print(f"[bold]Runs:[/] {len(wasm_files)} benchmarks × {len(args.tools)} tools = {run_total}")
+    console.print(f"[bold]Runs:[/] {len(wasm_files)} benchmarks × {len(tools)} tools = {run_total}")
 
     summary_rows: list[dict[str, str | float | int]] = []
     combined_rows: list[dict[str, str]] = []
@@ -251,7 +272,7 @@ def main() -> int:
         for bench_index, wasm in enumerate(wasm_files, start=1):
             benchmark = wasm.stem
 
-            for tool_name in args.tools:
+            for tool_name in tools:
                 run_index += 1
                 if ui is not None:
                     ui.begin_run(
@@ -280,6 +301,8 @@ def main() -> int:
                         "-c",
                         str(csv_path),
                     ]
+                    if args.segment_timeout is not None:
+                        cmd.extend(["--segment-timeout", str(args.segment_timeout)])
                     if args.plain:
                         print(f"  >> {_format_cmd(cmd)}", flush=True)
                     status, output, elapsed = run_ewasm(
@@ -289,6 +312,7 @@ def main() -> int:
                         args.split,
                         args.jobs,
                         args.timeout,
+                        args.segment_timeout,
                         ui=ui,
                     )
                 elif tool_name in superstack_modes:
@@ -311,6 +335,8 @@ def main() -> int:
                             cmd.append("--greedy")
                         else:
                             cmd.append("--ub-greedy")
+                        if args.segment_timeout is not None:
+                            cmd.extend(["--segment-timeout", str(args.segment_timeout)])
                         print(f"  >> {_format_cmd(cmd)}", flush=True)
                     status, output, elapsed = run_superstack(
                         superstack_python,
@@ -320,6 +346,7 @@ def main() -> int:
                         args.split,
                         args.jobs,
                         args.timeout,
+                        args.segment_timeout,
                         mode,
                         ui=ui,
                     )

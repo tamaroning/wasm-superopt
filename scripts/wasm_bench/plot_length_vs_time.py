@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from wasm_bench.suites import SUITE_NAMES, combined_csv, plots_dir, resolve_suite
+from wasm_bench.merge_raw_csvs import merge_raw_csvs
+from wasm_bench.suites import SUITE_NAMES, combined_csv, plots_dir, raw_dir, resolve_suite
 
 
 def load_data(path: Path, benchmark: str | None, exclude: list[str], max_length: int) -> pd.DataFrame:
@@ -168,14 +169,34 @@ def main() -> int:
     input_path = args.input or combined_csv(args.suite)
     out_dir_path = args.out_dir or plots_dir(args.suite)
 
-    if not input_path.exists():
-        print(f"missing input: {input_path}")
-        return 1
-
     if args.exclude is None:
         exclude = list(suite.default_exclude)
     else:
         exclude = [x for x in args.exclude if x]
+
+    if not input_path.exists():
+        out_path, count = merge_raw_csvs(
+            args.suite,
+            out_path=input_path,
+            exclude=exclude or None,
+        )
+        if count == 0:
+            raw_dir_path = raw_dir(args.suite)
+            print(f"missing input: {input_path}")
+            if not raw_dir_path.is_dir() or not any(raw_dir_path.glob("*.csv")):
+                print(
+                    f"No benchmark results for suite {args.suite!r}. "
+                    f"Run first:\n"
+                    f"  uv run --project scripts wasm-bench-run --suite {args.suite}"
+                )
+            else:
+                print(
+                    f"Raw CSVs exist under {raw_dir_path} but produced no rows "
+                    f"(check --exclude filters)."
+                )
+            return 1
+        print(f"merged {count} rows from {raw_dir(args.suite)} -> {out_path}")
+        input_path = out_path
 
     out_dir_path.mkdir(parents=True, exist_ok=True)
     df = load_data(input_path, args.benchmark, exclude, args.max_length)

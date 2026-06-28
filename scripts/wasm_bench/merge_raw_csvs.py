@@ -23,6 +23,56 @@ def infer_meta(path: Path) -> tuple[str, str]:
     raise ValueError(f"unrecognized csv name: {path.name}")
 
 
+def collect_raw_rows(
+    raw_dir_path: Path,
+    *,
+    benchmark: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    if not raw_dir_path.is_dir():
+        return rows
+    for csv_path in sorted(raw_dir_path.glob("*.csv")):
+        tool, bench = infer_meta(csv_path)
+        if benchmark and bench not in benchmark:
+            continue
+        if exclude and bench in exclude:
+            continue
+        with csv_path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                row["tool"] = tool
+                row["benchmark"] = bench
+                rows.append(row)
+    return rows
+
+
+def write_combined_csv(out_path: Path, rows: list[dict[str, str]]) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = sorted({k for row in rows for k in row})
+    with out_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def merge_raw_csvs(
+    suite: str,
+    *,
+    raw_dir_path: Path | None = None,
+    out_path: Path | None = None,
+    benchmark: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> tuple[Path, int]:
+    raw_dir_path = raw_dir_path or raw_dir(suite)
+    out_path = out_path or combined_csv(suite)
+    rows = collect_raw_rows(raw_dir_path, benchmark=benchmark, exclude=exclude)
+    if not rows:
+        return out_path, 0
+    write_combined_csv(out_path, rows)
+    return out_path, len(rows)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -47,35 +97,18 @@ def main() -> int:
     parser.add_argument("--exclude", action="append", help="Exclude these benchmarks")
     args = parser.parse_args()
 
-    raw_dir_path = args.raw_dir or raw_dir(args.suite)
-    out_path = args.out or combined_csv(args.suite)
-
-    rows: list[dict[str, str]] = []
-    for csv_path in sorted(raw_dir_path.glob("*.csv")):
-        tool, benchmark = infer_meta(csv_path)
-        if args.benchmark and benchmark not in args.benchmark:
-            continue
-        if args.exclude and benchmark in args.exclude:
-            continue
-        with csv_path.open(newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                row["tool"] = tool
-                row["benchmark"] = benchmark
-                rows.append(row)
-
-    if not rows:
+    out_path, count = merge_raw_csvs(
+        args.suite,
+        raw_dir_path=args.raw_dir,
+        out_path=args.out,
+        benchmark=args.benchmark,
+        exclude=args.exclude,
+    )
+    if count == 0:
         print("no rows")
         return 1
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = sorted({k for row in rows for k in row})
-    with out_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    print(f"wrote {out_path} ({len(rows)} rows)")
+    print(f"wrote {out_path} ({count} rows)")
     return 0
 
 
