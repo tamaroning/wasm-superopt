@@ -107,6 +107,28 @@ pub fn validate_solution_ops(ops: &[SemOp], segment: &StraightSegment) -> bool {
         && ops_respect_dependencies(ops, &segment.dependencies)
 }
 
+/// Solver backend for length minimization.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Backend {
+    /// Backward shortest-path A* search (idea.md).
+    #[default]
+    Astar,
+    /// Descending Pure-SAT iteration (wasm_superopt_sat_encoding.md).
+    ///
+    /// Only segments without side effects/opaque ops are SAT-encoded; others fall
+    /// back to [`Backend::Astar`].
+    Sat,
+}
+
+impl Backend {
+    pub fn label(self) -> &'static str {
+        match self {
+            Backend::Astar => "A*",
+            Backend::Sat => "SAT",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
     pub max_depth: usize,
@@ -116,6 +138,8 @@ pub struct SearchConfig {
     pub direct_timeout: bool,
     /// Fixed per-segment timeout; overrides `direct_timeout` and storage-based defaults.
     pub fixed_segment_timeout: Option<u64>,
+    /// Solver backend (A* by default).
+    pub backend: Backend,
 }
 
 impl Default for SearchConfig {
@@ -125,6 +149,7 @@ impl Default for SearchConfig {
             timeout_secs: None,
             direct_timeout: false,
             fixed_segment_timeout: None,
+            backend: Backend::default(),
         }
     }
 }
@@ -139,6 +164,7 @@ impl SearchConfig {
             timeout_secs: Some(timeout),
             direct_timeout: self.direct_timeout,
             fixed_segment_timeout: self.fixed_segment_timeout,
+            backend: self.backend,
         }
     }
 }
@@ -393,6 +419,7 @@ mod tests {
             bounds: SegmentBounds::new(1, 4),
             opaque_meta: vec![],
             dependencies: vec![],
+            disasm_by_id: Default::default(),
         }
     }
 

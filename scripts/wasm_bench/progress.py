@@ -28,7 +28,10 @@ from rich.text import Text
 OPTIMIZING_TOTAL_RE = re.compile(r"=== Optimizing (\d+) segment")
 PARALLEL_START_RE = re.compile(r"optimizing (\d+) segment\(s\) with (\d+) threads")
 SEGMENT_STEP_RE = re.compile(r"\[(\d+)/(\d+)\]")
+DONE_STATUS_RE = re.compile(r"instr done \((improved|timeout|unchanged)\)")
 FUNC_SEGMENT_RE = re.compile(r"^func \d+ segment ")
+FUNC_IMPROVED_RE = re.compile(r"->\s*\d+\s*\(saved ")
+FUNC_TIMEOUT_RE = re.compile(r"\(timeout\)\s*$")
 TOTAL_SUMMARY_RE = re.compile(r"Total: .+ across (\d+) segment")
 
 
@@ -39,6 +42,10 @@ class SegmentState:
     parallel_jobs: int | None = None
     parallel_phase: bool = False
     last_line: str = ""
+    improved: int = 0
+    timeout: int = 0
+    unchanged: int = 0
+    inline_counted: bool = False
 
 
 @dataclass
@@ -93,8 +100,17 @@ class BenchmarkRunnerUI:
         info.add_row("Benchmark", f"{state.benchmark} ({state.benchmark_index}/{state.benchmark_total})")
         info.add_row("Tool", state.tool)
         info.add_row("Run", f"{state.run_index}/{state.run_total}")
-        if state.segments.last_line:
-            info.add_row("Latest", Text(state.segments.last_line, overflow="ellipsis", no_wrap=True))
+        seg = state.segments
+        if seg.improved or seg.timeout or seg.unchanged:
+            results = Text()
+            results.append(f"{seg.improved} improved", style="green")
+            results.append(" · ")
+            results.append(f"{seg.timeout} timeout", style="red")
+            results.append(" · ")
+            results.append(f"{seg.unchanged} unchanged", style="yellow")
+            info.add_row("Results", results)
+        if seg.last_line:
+            info.add_row("Latest", Text(seg.last_line, overflow="ellipsis", no_wrap=True))
 
         return Group(
             Panel(info, title="wasm-bench", border_style="cyan"),
@@ -194,6 +210,10 @@ class BenchmarkRunnerUI:
             state.segments.total = int(match.group(1))
             state.segments.done = 0
             state.segments.parallel_phase = False
+            state.segments.improved = 0
+            state.segments.timeout = 0
+            state.segments.unchanged = 0
+            state.segments.inline_counted = False
             total = state.segments.total
             self._reset_segment_task(f"Preparing optimization: {total} segments", total=total, completed=0)
             self._refresh()
@@ -207,6 +227,10 @@ class BenchmarkRunnerUI:
             state.segments.done = 0
             state.segments.parallel_jobs = jobs
             state.segments.parallel_phase = True
+            state.segments.improved = 0
+            state.segments.timeout = 0
+            state.segments.unchanged = 0
+            state.segments.inline_counted = False
             state.elapsed_sec = 0.0
             self._reset_segment_task(
                 f"Parallel optimization: {total} segments / {jobs} threads",
@@ -221,9 +245,20 @@ class BenchmarkRunnerUI:
         if match:
             done = int(match.group(1))
             total = int(match.group(2))
-            state.segments.total = total
-            state.segments.done = done
-            state.segments.parallel_phase = False
+            seg = state.segments
+            seg.total = total
+            seg.done = done
+            seg.parallel_phase = False
+            status_match = DONE_STATUS_RE.search(stripped)
+            if status_match:
+                status = status_match.group(1)
+                if status == "improved":
+                    seg.improved += 1
+                elif status == "timeout":
+                    seg.timeout += 1
+                else:
+                    seg.unchanged += 1
+                seg.inline_counted = True
             self._stop_ticker()
             self._reset_segment_task(
                 f"Optimizing: {done}/{total} segments",
@@ -235,6 +270,13 @@ class BenchmarkRunnerUI:
 
         if FUNC_SEGMENT_RE.match(stripped):
             seg = state.segments
+            if not seg.inline_counted:
+                if FUNC_IMPROVED_RE.search(stripped):
+                    seg.improved += 1
+                elif FUNC_TIMEOUT_RE.search(stripped):
+                    seg.timeout += 1
+                else:
+                    seg.unchanged += 1
             if seg.total is not None:
                 seg.done = min(seg.done + 1, seg.total)
                 self._stop_ticker()

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import subprocess
 import sys
 from pathlib import Path
 
@@ -31,6 +32,22 @@ def _format_cmd(cmd: list[str]) -> str:
     return " ".join(f'"{part}"' if " " in part else part for part in cmd)
 
 
+def build_ewasm(*, console: Console, plain: bool) -> int:
+    cmd = ["cargo", "build", "--release"]
+    label = _format_cmd(cmd)
+    if plain:
+        print(f">> {label}", flush=True)
+    else:
+        console.print(f"[bold]Building ewasm[/] ({label})")
+    proc = subprocess.run(cmd, cwd=_REPO_ROOT)
+    if proc.returncode != 0:
+        console.print("[red]cargo build --release failed[/]")
+        return proc.returncode
+    if not plain:
+        console.print("[green]ewasm built successfully[/]")
+    return 0
+
+
 def read_statistics_rows(path: Path, tool: str, benchmark: str) -> list[dict[str, str]]:
     if not path.exists():
         return []
@@ -52,6 +69,7 @@ def run_ewasm(
     jobs: int,
     timeout: int,
     segment_timeout: int | None,
+    solver: str = "astar",
     *,
     ui: BenchmarkRunnerUI | None = None,
     cwd: Path | None = None,
@@ -65,6 +83,8 @@ def run_ewasm(
         str(jobs),
         "-c",
         str(csv_path),
+        "--solver",
+        solver,
     ]
     if segment_timeout is not None:
         cmd.extend(["--segment-timeout", str(segment_timeout)])
@@ -173,6 +193,12 @@ def main() -> int:
         help="Output directory (default: bench-results/<suite>)",
     )
     parser.add_argument("--ewasm", type=Path, default=DEFAULT_EWASM)
+    parser.add_argument(
+        "--ewasm-solver",
+        choices=["astar", "sat"],
+        default="astar",
+        help="ewasm solver backend: astar (default) or sat (descending Pure-SAT)",
+    )
     parser.add_argument("--superstack", type=Path, default=DEFAULT_SUPERSTACK)
     parser.add_argument(
         "--superstack-python",
@@ -220,6 +246,11 @@ def main() -> int:
         action="store_true",
         help="Plain text output (no rich progress UI; streams subprocess output)",
     )
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="Skip automatic `cargo build --release` before running ewasm",
+    )
     args = parser.parse_args()
 
     suite = resolve_suite(args.suite)
@@ -248,6 +279,11 @@ def main() -> int:
     if not wasm_files:
         console.print(f"[red]no .wasm files found in[/] {bench_dir}")
         return 1
+
+    if "ewasm" in tools and not args.no_build:
+        build_code = build_ewasm(console=console, plain=args.plain)
+        if build_code != 0:
+            return build_code
 
     run_total = len(wasm_files) * len(tools)
     console.print(f"[bold]Suite:[/] {suite.label} ({bench_dir})")
@@ -300,6 +336,8 @@ def main() -> int:
                         str(args.jobs),
                         "-c",
                         str(csv_path),
+                        "--solver",
+                        args.ewasm_solver,
                     ]
                     if args.segment_timeout is not None:
                         cmd.extend(["--segment-timeout", str(args.segment_timeout)])
@@ -313,6 +351,7 @@ def main() -> int:
                         args.jobs,
                         args.timeout,
                         args.segment_timeout,
+                        args.ewasm_solver,
                         ui=ui,
                     )
                 elif tool_name in superstack_modes:

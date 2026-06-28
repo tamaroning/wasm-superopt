@@ -271,6 +271,7 @@ mod tests {
             bounds: SegmentBounds::new(1, 4),
             opaque_meta: vec![],
             dependencies: vec![],
+            disasm_by_id: Default::default(),
         }
     }
 

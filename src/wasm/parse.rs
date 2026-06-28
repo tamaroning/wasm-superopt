@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::sym::{ForwardError, LocalReq, SymMachine};
 use crate::wasm::deps::compute_dependencies;
 use crate::wasm::segment::OpaqueMeta;
+use crate::wasm::superstack_disasm::operator_disasm;
 use crate::wasm::{SegmentBounds, StraightSegment};
 use crate::wasm::stack_analysis::{
     operator_is_storage, operator_stack_effect_with_types, stack_bounds_ops, stack_bounds_operators,
@@ -94,8 +95,11 @@ pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
                 let num_params = func_type.params().len() as u32;
                 let declared = count_declared_locals(&body)?;
                 let total_locals = num_params + declared;
+                // Use the module-level function index (imports included) so block ids match
+                // SuperStack's `function_{addr}` naming, where `addr` indexes into the full
+                // function list (imported host functions first, then defined functions).
                 extract_from_body(
-                    code_func_index,
+                    module_func_index as u32,
                     num_params,
                     total_locals,
                     ModuleStackTypes {
@@ -212,8 +216,10 @@ fn extract_from_body(
     let (_, func_max_stack) = stack_bounds_operators(&operators, stack_types);
     let bounds_template = SegmentBounds::new(total_locals, func_max_stack);
 
-    let mut segment_index = 0usize;
-    for block in blocks_from_operators(&operators) {
+    // Enumerate basic blocks the same way SuperStack does: the block index `i` counts
+    // every basic block (including all-control / empty ones), and only non-empty blocks
+    // emit a segment. This keeps `function_{f}_block_{i}` aligned with SuperStack.
+    for (block_index, block) in blocks_from_operators(&operators).into_iter().enumerate() {
         let optimizable = filter_optimizable_ops(&block);
         if optimizable.is_empty() {
             continue;
@@ -225,7 +231,7 @@ fn extract_from_body(
             bounds_template,
             stack_types,
             &optimizable,
-            &mut segment_index,
+            block_index,
             out,
             warnings,
         );
@@ -237,6 +243,8 @@ fn extract_from_body(
 struct OpClassCtx<'a> {
     stack_types: ModuleStackTypes<'a>,
     next_access_id: u32,
+    /// SuperStack-style disassembly text for each id-bearing op, keyed by access id.
+    disasm_by_id: std::collections::HashMap<u32, String>,
 }
 
 impl<'a> OpClassCtx<'a> {
@@ -254,7 +262,7 @@ fn extract_from_ops(
     bounds_template: SegmentBounds,
     stack_types: ModuleStackTypes<'_>,
     ops: &[Operator<'_>],
-    segment_index: &mut usize,
+    block_index: usize,
     out: &mut Vec<StraightSegment>,
     warnings: &mut Vec<String>,
 ) {
@@ -270,6 +278,7 @@ fn extract_from_ops(
     let mut ctx = OpClassCtx {
         stack_types,
         next_access_id: 0,
+        disasm_by_id: std::collections::HashMap::new(),
     };
 
     for op in ops {
@@ -286,16 +295,17 @@ fn extract_from_ops(
                     Ok(None) => collected.push(sem),
                     Err(e) => {
                         let msg = format!(
-                            "func {func_index} segment {segment_index} forward exec {sem:?}: {e:?}"
+                            "func {func_index} block {block_index} forward exec {sem:?}: {e:?}"
                         );
                         warnings.push(msg);
                         flush_segment(
                             func_index,
                             num_params,
                             total_locals,
-                            segment_index,
+                            block_index,
                             &mut collected,
                             &mut opaque_meta,
+                            &ctx.disasm_by_id,
                             &machine,
                             bounds,
                             out,
@@ -304,34 +314,15 @@ fn extract_from_ops(
                     }
                 }
             }
-            OpClass::PopStack => {
-                if !collecting {
-                    continue;
-                }
-                if let Err(e) = machine.pop() {
-                    warn_exec(func_index, *segment_index, "drop", e, warnings);
-                    flush_and_stop(
-                        func_index,
-                        segment_index,
-                        &mut collected,
-                        &mut opaque_meta,
-                        &mut machine,
-                        bounds,
-                        out,
-                        num_params,
-                        total_locals,
-                    );
-                    collecting = false;
-                }
-            }
             OpClass::Unsupported => {
                 flush_segment(
                     func_index,
                     num_params,
                     total_locals,
-                    segment_index,
+                    block_index,
                     &mut collected,
                     &mut opaque_meta,
+                    &ctx.disasm_by_id,
                     &machine,
                     bounds,
                     out,
@@ -346,9 +337,10 @@ fn extract_from_ops(
             func_index,
             num_params,
             total_locals,
-            segment_index,
+            block_index,
             &mut collected,
             &mut opaque_meta,
+            &ctx.disasm_by_id,
             &machine,
             bounds,
             out,
@@ -380,11 +372,13 @@ fn segment_init_state(total_locals: u32, ops: &[SemOp]) -> crate::sym::SymState 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flush_and_stop(
     func_index: u32,
-    segment_index: &mut usize,
+    block_index: usize,
     ops: &mut Vec<SemOp>,
     opaque_meta: &mut Vec<OpaqueMeta>,
+    disasm_by_id: &std::collections::HashMap<u32, String>,
     machine: &mut SymMachine,
     bounds: SegmentBounds,
     out: &mut Vec<StraightSegment>,
@@ -395,9 +389,10 @@ fn flush_and_stop(
         func_index,
         num_params,
         total_locals,
-        segment_index,
+        block_index,
         ops,
         opaque_meta,
+        disasm_by_id,
         machine,
         bounds,
         out,
@@ -406,13 +401,15 @@ fn flush_and_stop(
     machine.begin_segment();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flush_segment(
     func_index: u32,
     num_params: u32,
     total_locals: u32,
-    segment_index: &mut usize,
+    block_index: usize,
     ops: &mut Vec<SemOp>,
     opaque_meta: &mut Vec<OpaqueMeta>,
+    disasm_by_id: &std::collections::HashMap<u32, String>,
     machine: &SymMachine,
     mut bounds: SegmentBounds,
     out: &mut Vec<StraightSegment>,
@@ -431,10 +428,16 @@ fn flush_segment(
         return;
     }
     let dependencies = compute_dependencies(ops, opaque_meta);
+    // Keep only the disasm entries for ops in this segment.
+    let segment_disasm: std::collections::HashMap<u32, String> = ops
+        .iter()
+        .filter_map(|op| op.opaque_id())
+        .filter_map(|id| disasm_by_id.get(&id).map(|d| (id, d.clone())))
+        .collect();
     out.push(StraightSegment {
         func_index,
         num_params,
-        segment_index: *segment_index,
+        segment_index: block_index,
         split_part: None,
         ops: ops.clone(),
         init: init.clone(),
@@ -442,16 +445,19 @@ fn flush_segment(
         bounds,
         opaque_meta: opaque_meta.clone(),
         dependencies,
+        disasm_by_id: segment_disasm,
     });
-    *segment_index += 1;
     ops.clear();
     opaque_meta.clear();
 }
 
 enum OpClass {
     Supported(SemOp),
-    PopStack,
     Unsupported,
+}
+
+fn record_id_disasm(ctx: &mut OpClassCtx<'_>, id: u32, op: &Operator<'_>) {
+    ctx.disasm_by_id.insert(id, operator_disasm(op));
 }
 
 fn load_sem(id: u32, mem: u32, offset: u32) -> SemOp {
@@ -462,8 +468,15 @@ fn store_sem(id: u32, mem: u32, offset: u32) -> SemOp {
     SemOp::I32Store { id, mem, offset }
 }
 
-fn opaque_sem(ctx: &mut OpClassCtx<'_>, pops: usize, pushes: usize, storage: bool) -> OpClass {
+fn opaque_sem(
+    ctx: &mut OpClassCtx<'_>,
+    op: &Operator<'_>,
+    pops: usize,
+    pushes: usize,
+    storage: bool,
+) -> OpClass {
     let id = ctx.fresh_id();
+    record_id_disasm(ctx, id, op);
     OpClass::Supported(SemOp::Opaque {
         id,
         pops: pops as u8,
@@ -502,23 +515,26 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         Operator::LocalGet { local_index } => OpClass::Supported(SemOp::LocalGet(*local_index)),
         Operator::LocalSet { local_index } => OpClass::Supported(SemOp::LocalSet(*local_index)),
         Operator::LocalTee { local_index } => OpClass::Supported(SemOp::LocalTee(*local_index)),
-        Operator::Drop => OpClass::PopStack,
+        Operator::Drop => OpClass::Supported(SemOp::Drop),
         Operator::I32Load { memarg, .. }
         | Operator::I32Load8S { memarg, .. }
         | Operator::I32Load8U { memarg, .. }
         | Operator::I32Load16S { memarg, .. }
         | Operator::I32Load16U { memarg, .. } => {
             let id = ctx.fresh_id();
+            record_id_disasm(ctx, id, op);
             OpClass::Supported(load_sem(id, memarg.memory, memarg.offset as u32))
         }
         Operator::I32Store { memarg, .. }
         | Operator::I32Store8 { memarg, .. }
         | Operator::I32Store16 { memarg, .. } => {
             let id = ctx.fresh_id();
+            record_id_disasm(ctx, id, op);
             OpClass::Supported(store_sem(id, memarg.memory, memarg.offset as u32))
         }
         Operator::GlobalGet { global_index } => {
             let id = ctx.fresh_id();
+            record_id_disasm(ctx, id, op);
             OpClass::Supported(SemOp::GlobalGet {
                 id,
                 global_index: *global_index,
@@ -526,6 +542,7 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         }
         Operator::GlobalSet { global_index } => {
             let id = ctx.fresh_id();
+            record_id_disasm(ctx, id, op);
             OpClass::Supported(SemOp::GlobalSet {
                 id,
                 global_index: *global_index,
@@ -533,6 +550,7 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         }
         Operator::Call { function_index } => {
             let id = ctx.fresh_id();
+            record_id_disasm(ctx, id, op);
             let ft = match ctx
                 .stack_types
                 .module_func_types
@@ -565,7 +583,7 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         _ => {
             if let Some((pops, pushes)) = operator_stack_effect_with_types(op, ctx.stack_types)
             {
-                opaque_sem(ctx, pops, pushes, operator_is_storage(op))
+                opaque_sem(ctx, op, pops, pushes, operator_is_storage(op))
             } else {
                 OpClass::Unsupported
             }

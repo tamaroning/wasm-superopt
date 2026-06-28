@@ -16,7 +16,7 @@ Results are written under `bench-results/<suite>/`.
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) installed
-- ewasm: `cargo build --release`
+- ewasm: built automatically by `wasm-bench-run` (`cargo build --release`; use `--no-build` to skip)
 - SuperStack: `cd ../superstack && python -m venv .venv && .venv/bin/pip install -r requirements.txt` (the runner uses that `.venv` automatically)
 - For `r3` suite: wasm files in `../wasm-benchmarks/wasm-r3-bench/`
 
@@ -35,7 +35,7 @@ From the repository root:
 # 1) Run benchmarks (SuperStack SAT + ewasm)
 #  - sequence timeout: 300s
 #  - timeout for each program: 3600s
-uv run --project scripts wasm-bench-run --suite wsouper -j 28 --split 20 --segment-timeout 300 --timeout 3600
+uv run --project scripts wasm-bench-run --suite wsouper --only mux1_1 -j 28 --split 15 --segment-timeout 30 --timeout 3600
 
 # 2) Re-merge raw CSVs (optional; plot also auto-merges if combined_blocks.csv is missing)
 uv run --project scripts wasm-bench-merge --suite wsouper
@@ -68,7 +68,7 @@ Note: superstack only supports the following r3 benchmarks:
 ## Caveats (comparison limits)
 
 1. **ewasm type support** — i32 arithmetic is optimized with A*. i64/f32/f64 locals and instructions are parsed as symbolic execution (`opaque`), like SuperStack; segment splitting continues. Only i32 is optimized.
-2. **SuperStack greedy ≠ ewasm A\*** — `r3` / `rosetta` default to `superstack-greedy` (fast heuristic). `wsouper` defaults to `superstack` (SAT via `--ub-greedy`). ewasm uses A* shortest-path search.
+2. **SuperStack greedy ≠ ewasm A\*** — `r3` / `rosetta` default to `superstack-greedy` (fast heuristic). `wsouper` defaults to `superstack` (SAT via `--ub-greedy`). ewasm uses A* shortest-path search by default; pass `--ewasm-solver sat` to use the descending Pure-SAT backend (CaDiCaL) instead. The SAT backend encodes side effects directly (SuperStack-style): memory/global/call/opaque ops become uninterpreted instructions with `storage` (exactly-once), at-most-once, and dependency-order (`deplist`) constraints, so there is no A* fallback. If a segment is too large to encode or cannot be improved, the original sequence is kept.
 3. **Default split** — `wasm-bench-run` uses `--split 25` / `-sp 25` by default (ewasm CLI alone defaults to 10; SuperStack defaults to no splitting).
 4. **Parallelism** — `-j` maps to ewasm `-j` and SuperStack `-j` for parallel block optimization.
 5. **Segment timeout** — `--segment-timeout SECS` sets a fixed solver timeout per sequence/block for both ewasm and SuperStack (default: `10 × (1 + storage ops)`; SuperStack `-w` / ewasm `-w` use 300s).

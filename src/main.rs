@@ -78,6 +78,25 @@ struct Cli {
     /// Number of parallel jobs for rule synthesis and segment optimization.
     #[arg(short = 'j', long = "jobs", default_value_t = 1)]
     jobs: usize,
+
+    /// Solver backend: `astar` (backward A*) or `sat` (descending Pure-SAT).
+    #[arg(long, value_enum, default_value_t = SolverArg::Astar)]
+    solver: SolverArg,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SolverArg {
+    Astar,
+    Sat,
+}
+
+impl From<SolverArg> for optimize::Backend {
+    fn from(s: SolverArg) -> Self {
+        match s {
+            SolverArg::Astar => optimize::Backend::Astar,
+            SolverArg::Sat => optimize::Backend::Sat,
+        }
+    }
 }
 
 fn main() {
@@ -134,6 +153,7 @@ fn main() {
         timeout_secs: None,
         direct_timeout: cli.direct_timeout && cli.segment_timeout.is_none(),
         fixed_segment_timeout: cli.segment_timeout,
+        backend: cli.solver.into(),
     };
     let results = optimize::optimize_and_print_segments(
         &info.segments,

@@ -42,7 +42,8 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) => {
             panic!("local {op:?} uses meta AL (Step_read/local.*), not flat AlSpec")
         }
-        SemOp::I32Load { .. }
+        SemOp::Drop
+        | SemOp::I32Load { .. }
         | SemOp::I32Store { .. }
         | SemOp::Call { .. }
         | SemOp::GlobalGet { .. }

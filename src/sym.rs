@@ -533,6 +533,10 @@ impl SymMachine {
                 self.locals.insert(*slot, v);
                 Ok(None)
             }
+            SemOp::Drop => {
+                self.pop()?;
+                Ok(None)
+            }
             SemOp::I32Load { id, .. } => {
                 let addr = self.pop()?;
                 let sym = format!("?load_{id}");

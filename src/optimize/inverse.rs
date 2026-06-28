@@ -435,6 +435,7 @@ mod tests {
             bounds: *bounds,
             opaque_meta: vec![],
             dependencies: vec![],
+            disasm_by_id: Default::default(),
         };
         applicable_peels(&state, &empty, bounds, canon)
             .into_iter()
@@ -484,6 +485,7 @@ mod tests {
             bounds: SegmentBounds::new(1, 4),
             opaque_meta: vec![],
             dependencies: vec![],
+            disasm_by_id: Default::default(),
         };
         let peels = applicable_peels(&state, &empty, &SegmentBounds::new(1, 4), &mut canon);
         let binops: Vec<_> = peels

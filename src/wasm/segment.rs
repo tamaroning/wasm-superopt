@@ -51,6 +51,10 @@ pub struct StraightSegment {
     pub bounds: SegmentBounds,
     pub opaque_meta: Vec<OpaqueMeta>,
     pub dependencies: Vec<(u32, u32)>,
+    /// SuperStack-style disassembly text for each id-bearing op, keyed by access id.
+    /// Used to render `previous_solution` / `solution_found` exactly like SuperStack
+    /// (the abstract `SemOp` representation otherwise drops the original mnemonic).
+    pub disasm_by_id: std::collections::HashMap<u32, String>,
 }
 
 impl StraightSegment {

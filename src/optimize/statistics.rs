@@ -1,6 +1,7 @@
 //! SuperStack-compatible `statistics.csv` rows for benchmark analysis.
 
-use super::search::{format_ops_csv, validate_solution_ops};
+use super::search::validate_solution_ops;
+use crate::wasm::format_ops_superstack_csv;
 use super::SegmentOptResult;
 use crate::wasm::StraightSegment;
 use serde::Serialize;
@@ -159,7 +160,7 @@ pub fn statistics_row(result: &SegmentOptResult) -> StatisticsRow {
         if let Some(ops) = &result.optimized {
             let opt_len = ops.len();
             (
-                format_ops_csv(ops),
+                format_ops_superstack_csv(ops, &result.segment.disasm_by_id),
                 opt_len,
                 opt_len,
                 opt_len,
@@ -172,7 +173,7 @@ pub fn statistics_row(result: &SegmentOptResult) -> StatisticsRow {
 
     StatisticsRow {
         block_id: block_id(segment),
-        previous_solution: format_ops_csv(&segment.ops),
+        previous_solution: format_ops_superstack_csv(&segment.ops, &segment.disasm_by_id),
         timeout,
         solver_time_in_sec: (result.solver_time_secs * 1000.0).round() / 1000.0,
         outcome,
@@ -224,6 +225,7 @@ mod tests {
             bounds: SegmentBounds::new(1, 4),
             opaque_meta: vec![],
             dependencies: vec![],
+            disasm_by_id: Default::default(),
         }
     }
 

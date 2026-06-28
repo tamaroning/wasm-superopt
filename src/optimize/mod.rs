@@ -5,12 +5,13 @@ mod canon;
 pub(crate) mod fixtures;
 mod heuristic;
 mod inverse;
+mod sat;
 mod search;
 mod search_graph;
 mod statistics;
 
 pub use search::{
-    DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
+    Backend, DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
     format_ops,
 };
 pub use search_graph::SearchTrace;
@@ -40,6 +41,15 @@ impl SegmentOptResult {
             .as_ref()
             .map(|o| orig.saturating_sub(o.len()))
             .unwrap_or(0)
+    }
+
+    /// Short status label for progress reporting: `improved`, `timeout`, or `unchanged`.
+    pub fn status_label(&self) -> &'static str {
+        match &self.optimized {
+            Some(ops) if ops.len() < self.segment.original_len() => "improved",
+            _ if self.timed_out => "timeout",
+            _ => "unchanged",
+        }
     }
 }
 
@@ -76,8 +86,15 @@ pub fn optimize_segment_with_trace(
             timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
         };
     }
-    let mut trace = dump_search.map(|_| SearchTrace::default());
-    let result = solve_astar_traced(segment, rules, &segment_cfg, trace.as_mut());
+    let (result, trace) = if segment_cfg.backend == Backend::Sat {
+        // The SAT backend handles all segments (including side effects) directly; if
+        // it cannot improve/encode a segment it keeps the original (no A* fallback).
+        (sat::solve_sat(segment, rules, &segment_cfg), None)
+    } else {
+        let mut trace = dump_search.map(|_| SearchTrace::default());
+        let r = solve_astar_traced(segment, rules, &segment_cfg, trace.as_mut());
+        (r, trace)
+    };
     if let Some(path) = dump_search {
         if let Some(tr) = trace.as_ref() {
             let mut dot = tr.to_dot();
@@ -144,16 +161,18 @@ pub fn optimize_segments(
             .map(|segment| {
                 let result = optimize_segment(segment, rules, cfg);
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                let status = result.status_label();
                 let seg = &result.segment;
                 let mut stderr = io::stderr().lock();
                 let _ = writeln!(
                     stderr,
-                    "[{}/{}] func {} segment {} — {} instr done",
+                    "[{}/{}] func {} segment {} — {} instr done ({})",
                     n,
                     total,
                     seg.func_index,
                     seg.label(),
                     seg.original_len(),
+                    status,
                 );
                 let _ = stderr.flush();
                 drop(stderr);
@@ -230,7 +249,8 @@ pub fn optimize_and_print_segments(
         String::new()
     };
     println!(
-        "=== Optimizing {total} segment(s) (A*, timeout: {}{}{jobs_note}) ===\n",
+        "=== Optimizing {total} segment(s) ({}, timeout: {}{}{jobs_note}) ===\n",
+        cfg.backend.label(),
         default_timeout_label(cfg),
         split_note
     );

@@ -13,6 +13,20 @@ import pandas as pd
 from wasm_bench.merge_raw_csvs import merge_raw_csvs
 from wasm_bench.suites import SUITE_NAMES, combined_csv, plots_dir, raw_dir, resolve_suite
 
+TOOL_COLORS = {
+    "ewasm": "#2563eb",
+    "superstack": "#dc2626",
+    "superstack-greedy": "#dc2626",
+    "superstack-sat": "#16a34a",
+}
+FALLBACK_COLORS = ("#9333ea", "#ca8a04", "#0891b2", "#be123c")
+
+
+def tool_color(tool: str, index: int) -> str:
+    if tool in TOOL_COLORS:
+        return TOOL_COLORS[tool]
+    return FALLBACK_COLORS[index % len(FALLBACK_COLORS)]
+
 
 def load_data(path: Path, benchmark: str | None, exclude: list[str], max_length: int) -> pd.DataFrame:
     df = pd.read_csv(path)
@@ -33,24 +47,31 @@ def bucket_lengths(lengths: pd.Series, width: int) -> pd.Series:
     return ((lengths - 1) // width) * width + 1
 
 
-def plot_scatter(df: pd.DataFrame, out: Path, suite_label: str) -> None:
+def scatter_x_positions(lengths: pd.Series, tool_index: int, tool_count: int, dodge: float) -> np.ndarray:
+    if tool_count <= 1 or dodge <= 0:
+        return lengths.to_numpy(dtype=float)
+    offset = (tool_index - (tool_count - 1) / 2) * dodge
+    return lengths.to_numpy(dtype=float) + offset
+
+
+def plot_scatter(df: pd.DataFrame, out: Path, suite_label: str, dodge: float = 0.18) -> None:
     fig, ax = plt.subplots(figsize=(10, 6))
     tools = sorted(df["tool"].unique())
-    colors = {"ewasm": "#2563eb", "superstack-greedy": "#dc2626", "superstack-sat": "#16a34a"}
-    for tool in tools:
+    for i, tool in enumerate(tools):
         sub = df[df["tool"] == tool]
         ax.scatter(
-            sub["initial_length"],
+            scatter_x_positions(sub["initial_length"], i, len(tools), dodge),
             sub["solver_time_in_sec"],
             alpha=0.55,
             s=28,
             label=tool,
-            color=colors.get(tool, None),
+            color=tool_color(tool, i),
         )
+    lengths = sorted(df["initial_length"].unique())
+    ax.set_xticks(lengths)
     ax.set_xlabel("Block length (instructions)")
     ax.set_ylabel("Solver time (seconds)")
     ax.set_title(f"Block length vs solver time ({suite_label})")
-    ax.set_yscale("log")
     ax.grid(True, alpha=0.25)
     ax.legend()
     fig.tight_layout()
@@ -74,7 +95,6 @@ def plot_binned_stats(df: pd.DataFrame, out: Path, bucket_width: int) -> None:
     width = 0.8 / max(len(tools), 1)
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    colors = {"ewasm": "#2563eb", "superstack-greedy": "#dc2626", "superstack-sat": "#16a34a"}
     for i, tool in enumerate(tools):
         sub = grouped[grouped["tool"] == tool].set_index("length_bucket").reindex(buckets)
         means = sub["mean"].to_numpy()
@@ -88,7 +108,7 @@ def plot_binned_stats(df: pd.DataFrame, out: Path, bucket_width: int) -> None:
             yerr=stds,
             capsize=3,
             label=tool,
-            color=colors.get(tool, None),
+            color=tool_color(tool, i),
             alpha=0.85,
         )
         for bar, mean, count in zip(bars, means, counts):
@@ -104,10 +124,15 @@ def plot_binned_stats(df: pd.DataFrame, out: Path, bucket_width: int) -> None:
                 rotation=90,
             )
 
-    labels = [f"{b}-{b + bucket_width - 1}" for b in buckets]
+    if bucket_width == 1:
+        labels = [f"{b}" for b in buckets]
+        xlabel = "Block length (instructions)"
+    else:
+        labels = [f"{b}-{b + bucket_width - 1}" for b in buckets]
+        xlabel = f"Block length bucket ({bucket_width}-instr bins)"
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.set_xlabel(f"Block length bucket ({bucket_width}-instr bins)")
+    ax.set_xlabel(xlabel)
     ax.set_ylabel("Mean solver time (seconds)")
     ax.set_title("Mean ± std solver time by block length")
     ax.grid(True, axis="y", alpha=0.25)
@@ -162,7 +187,7 @@ def main() -> int:
         help="Exclude benchmarks (default: suite-specific, e.g. ffmpeg for r3; use '' to exclude none)",
     )
     parser.add_argument("--max-length", type=int, default=0, help="Keep blocks up to this length (0 = all)")
-    parser.add_argument("--bucket-width", type=int, default=5)
+    parser.add_argument("--bucket-width", type=int, default=1)
     args = parser.parse_args()
 
     suite = resolve_suite(args.suite)

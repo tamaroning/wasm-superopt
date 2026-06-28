@@ -13,5 +13,6 @@ csv = "1"
 wasmparser = "0.252.0"
 wat = "1.252.0"
 rayon = "1"
+cadical = "0.1"
 
 [dev-dependencies]

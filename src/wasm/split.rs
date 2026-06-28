@@ -72,6 +72,11 @@ pub fn split_segment(segment: &StraightSegment, max_instr: usize) -> Vec<Straigh
 
         let opaque_meta = chunk_opaque_meta(segment, &ops);
         let dependencies = compute_dependencies(&ops, &opaque_meta);
+        let disasm_by_id: std::collections::HashMap<u32, String> = ops
+            .iter()
+            .filter_map(|op| op.opaque_id())
+            .filter_map(|id| segment.disasm_by_id.get(&id).map(|d| (id, d.clone())))
+            .collect();
 
         out.push(StraightSegment {
             func_index: segment.func_index,
@@ -84,6 +89,7 @@ pub fn split_segment(segment: &StraightSegment, max_instr: usize) -> Vec<Straigh
             bounds,
             opaque_meta,
             dependencies,
+            disasm_by_id,
         });
     }
 

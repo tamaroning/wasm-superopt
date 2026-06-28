@@ -83,6 +83,7 @@ pub fn semop_stack_effect(op: &SemOp) -> (usize, usize) {
         SemOp::LocalGet(_) => (0, 1),
         SemOp::LocalSet(_) => (1, 0),
         SemOp::LocalTee(_) => (1, 1),
+        SemOp::Drop => (1, 0),
         SemOp::I32Load { .. } => (1, 1),
         SemOp::I32Store { .. } => (2, 0),
         SemOp::Call { pops, pushes, .. } => (*pops as usize, *pushes as usize),

@@ -38,6 +38,7 @@ pub enum SemOp {
     LocalGet(u32),
     LocalSet(u32),
     LocalTee(u32),
+    Drop,
     I32Load {
         id: u32,
         mem: u32,
@@ -102,6 +103,7 @@ impl SemOp {
             SemOp::LocalGet(x) => local_op_name("local.get", *x),
             SemOp::LocalSet(x) => local_op_name("local.set", *x),
             SemOp::LocalTee(x) => local_op_name("local.tee", *x),
+            SemOp::Drop => "drop",
             SemOp::I32Load { .. } => "i32.load",
             SemOp::I32Store { .. } => "i32.store",
             SemOp::Call { .. } => "call",
@@ -186,6 +188,7 @@ impl fmt::Display for SemOp {
             SemOp::LocalGet(x) => write!(f, "local.get {x}"),
             SemOp::LocalSet(x) => write!(f, "local.set {x}"),
             SemOp::LocalTee(x) => write!(f, "local.tee {x}"),
+            SemOp::Drop => write!(f, "drop"),
             SemOp::I32Load {
                 id,
                 mem,
