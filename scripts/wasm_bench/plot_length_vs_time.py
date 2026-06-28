@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot instruction length vs solver time from r3 benchmark combined CSV."""
+"""Plot instruction length vs solver time from benchmark combined CSV."""
 
 from __future__ import annotations
 
@@ -10,9 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_INPUT = _REPO_ROOT / "bench-results/r3/combined_blocks.csv"
-DEFAULT_OUT = _REPO_ROOT / "bench-results/r3/plots"
+from wasm_bench.suites import SUITE_NAMES, combined_csv, plots_dir, resolve_suite
 
 
 def load_data(path: Path, benchmark: str | None, exclude: list[str], max_length: int) -> pd.DataFrame:
@@ -34,7 +32,7 @@ def bucket_lengths(lengths: pd.Series, width: int) -> pd.Series:
     return ((lengths - 1) // width) * width + 1
 
 
-def plot_scatter(df: pd.DataFrame, out: Path) -> None:
+def plot_scatter(df: pd.DataFrame, out: Path, suite_label: str) -> None:
     fig, ax = plt.subplots(figsize=(10, 6))
     tools = sorted(df["tool"].unique())
     colors = {"ewasm": "#2563eb", "superstack-greedy": "#dc2626", "superstack-sat": "#16a34a"}
@@ -50,7 +48,7 @@ def plot_scatter(df: pd.DataFrame, out: Path) -> None:
         )
     ax.set_xlabel("Block length (instructions)")
     ax.set_ylabel("Solver time (seconds)")
-    ax.set_title("Block length vs solver time (wasm-r3-bench)")
+    ax.set_title(f"Block length vs solver time ({suite_label})")
     ax.set_yscale("log")
     ax.grid(True, alpha=0.25)
     ax.legend()
@@ -137,32 +135,61 @@ def write_summary_table(df: pd.DataFrame, out: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
+    parser.add_argument(
+        "--suite",
+        choices=SUITE_NAMES,
+        default="r3",
+        help="Benchmark suite to plot (default: r3)",
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Combined CSV path (default: bench-results/<suite>/combined_blocks.csv)",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Plot output directory (default: bench-results/<suite>/plots)",
+    )
     parser.add_argument("--benchmark", help="Plot only this benchmark")
-    parser.add_argument("--exclude", action="append", default=["ffmpeg"], help="Exclude benchmarks (use '' to exclude none)")
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=None,
+        help="Exclude benchmarks (default: suite-specific, e.g. ffmpeg for r3; use '' to exclude none)",
+    )
     parser.add_argument("--max-length", type=int, default=0, help="Keep blocks up to this length (0 = all)")
     parser.add_argument("--bucket-width", type=int, default=5)
     args = parser.parse_args()
 
-    if not args.input.exists():
-        print(f"missing input: {args.input}")
+    suite = resolve_suite(args.suite)
+    input_path = args.input or combined_csv(args.suite)
+    out_dir_path = args.out_dir or plots_dir(args.suite)
+
+    if not input_path.exists():
+        print(f"missing input: {input_path}")
         return 1
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    exclude = [x for x in (args.exclude or []) if x]
-    df = load_data(args.input, args.benchmark, exclude, args.max_length)
+    if args.exclude is None:
+        exclude = list(suite.default_exclude)
+    else:
+        exclude = [x for x in args.exclude if x]
+
+    out_dir_path.mkdir(parents=True, exist_ok=True)
+    df = load_data(input_path, args.benchmark, exclude, args.max_length)
     if df.empty:
         print("no rows to plot")
         return 1
 
-    plot_scatter(df, args.out_dir / "length_vs_time_scatter.png")
-    plot_binned_stats(df, args.out_dir / "length_vs_time_binned.png", args.bucket_width)
-    write_summary_table(df, args.out_dir / "summary_by_tool.csv")
+    plot_scatter(df, out_dir_path / "length_vs_time_scatter.png", suite.label)
+    plot_binned_stats(df, out_dir_path / "length_vs_time_binned.png", args.bucket_width)
+    write_summary_table(df, out_dir_path / "summary_by_tool.csv")
 
     print(f"rows: {len(df)}")
     print(f"tools: {sorted(df['tool'].unique())}")
-    print(f"wrote plots to {args.out_dir}")
+    print(f"wrote plots to {out_dir_path}")
     return 0
 
 

@@ -22,6 +22,7 @@ use egg::Rewrite;
 use search::solve_astar_traced;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Debug)]
 pub struct SegmentOptResult {
@@ -134,11 +135,30 @@ pub fn optimize_segments(
             .map(|segment| optimize_segment(segment, rules, cfg))
             .collect();
     }
+    let total = segments.len();
+    let done = AtomicUsize::new(0);
     crate::parallel::run_with_threads(jobs, || {
         use rayon::prelude::*;
         segments
             .par_iter()
-            .map(|segment| optimize_segment(segment, rules, cfg))
+            .map(|segment| {
+                let result = optimize_segment(segment, rules, cfg);
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                let seg = &result.segment;
+                let mut stderr = io::stderr().lock();
+                let _ = writeln!(
+                    stderr,
+                    "[{}/{}] func {} segment {} — {} instr done",
+                    n,
+                    total,
+                    seg.func_index,
+                    seg.label(),
+                    seg.original_len(),
+                );
+                let _ = stderr.flush();
+                drop(stderr);
+                result
+            })
             .collect()
     })
 }
