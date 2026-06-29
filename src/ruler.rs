@@ -4,7 +4,7 @@
 //! saturate with proven rules, then match characteristic vectors across e-classes.
 
 use crate::lang::ValueLang;
-use crate::semantics::{synthesis_constants, StackTy};
+use crate::semantics::{synthesis_const_values, StackTy};
 use crate::value::{
     asts_valid_rewrite_random, asts_valid_rewrite_z3, is_ast_rewrite_pair, is_directed_ast_pair,
     value_ast_from_expr, value_ast_to_expr, AstEvalSignature, RuleSignature, ValueAst, ValueOp,
@@ -16,6 +16,9 @@ use std::io::{self, Write};
 
 const EQSAT_ITER_LIMIT: usize = 20;
 const EQSAT_NODE_LIMIT: usize = 100_000;
+
+/// Stack sorts for which Ruler term enumeration builds e-graph terms each size step.
+const SYNTH_SORTS: [StackTy; 4] = [StackTy::I32, StackTy::I64, StackTy::F32, StackTy::F64];
 
 fn report(msg: &str) {
     let _ = writeln!(io::stderr(), "{msg}");
@@ -59,20 +62,19 @@ impl RulerTermSet {
         self.ensure_size_buckets(sort, size);
 
         if size == 1 {
-            let inputs: Vec<(usize, StackTy)> = self
+            let sym_indices: Vec<usize> = self
                 .sig
                 .inputs
                 .iter()
-                .copied()
                 .enumerate()
-                .filter(|(_, ty)| *ty == sort)
+                .filter(|(_, ty)| **ty == sort)
+                .map(|(i, _)| i)
                 .collect();
-            for (i, _) in inputs {
+            for i in sym_indices {
                 self.add_ast(&ValueAst::symbol(i));
             }
-            for &c in synthesis_constants() {
-                self.add_ast(&ValueAst::const_ty(StackTy::I32, c as i64));
-                self.add_ast(&ValueAst::const_ty(StackTy::I64, c as i64));
+            for &c in synthesis_const_values(sort) {
+                self.add_ast(&ValueAst::const_ty(sort, c));
             }
             return;
         }
@@ -303,11 +305,14 @@ fn report_verify_progress(done: usize, total: usize) {
 }
 
 /// Ruler core loop for one rule signature: enumerate by size, compact, cvec-match, verify.
+///
+/// `verify_jobs`: parallel candidate verification (`par_iter`); use `1` when signatures
+/// are already processed in parallel to avoid oversubscribing threads.
 pub fn discover_rules_for_signature(
     sig: &RuleSignature,
     max_ast_size: usize,
     random_tests: usize,
-    jobs: usize,
+    verify_jobs: usize,
     ctx: &z3::Context,
     proven_keys: &mut HashSet<(String, String)>,
     rules_out: &mut Vec<(String, String)>,
@@ -318,7 +323,7 @@ pub fn discover_rules_for_signature(
     let mut z3_queries = 0usize;
 
     for size in 1..=max_ast_size {
-        for &sort in &[StackTy::I32, StackTy::I64] {
+        for &sort in &SYNTH_SORTS {
             term_set.add_terms_of_size(sort, size);
         }
         report(&format!(
@@ -339,7 +344,7 @@ pub fn discover_rules_for_signature(
                 candidates.len()
             ));
 
-            let new_rules = if jobs <= 1 {
+            let new_rules = if verify_jobs <= 1 {
                 verify_candidates(
                     sig,
                     &candidates,
@@ -354,7 +359,6 @@ pub fn discover_rules_for_signature(
                     sig,
                     &candidates,
                     random_tests,
-                    jobs,
                     proven_keys,
                     &mut pairs_checked,
                     &mut z3_queries,
@@ -429,7 +433,6 @@ fn verify_candidates_parallel(
     sig: &RuleSignature,
     candidates: &[(ValueAst, ValueAst)],
     random_tests: usize,
-    _jobs: usize,
     proven_keys: &mut HashSet<(String, String)>,
     pairs_checked: &mut usize,
     z3_queries: &mut usize,
@@ -478,6 +481,11 @@ fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
     } else {
         (rhs.to_string(), lhs.to_string())
     }
+}
+
+/// Dedup key for rewrite rules merged across parallel signature workers.
+pub fn canonical_rewrite_key(lhs: &str, rhs: &str) -> (String, String) {
+    canonical_key(lhs, rhs)
 }
 
 /// For each LHS pattern, keep only the smallest RHS (prefer `0` over `(i32.shr_s 0 ?a)`).
@@ -539,6 +547,25 @@ mod tests {
         assert!(
             term_set.num_classes() < term_set.num_nodes(),
             "expected some e-class merges"
+        );
+    }
+
+    #[test]
+    fn f32_signature_builds_float_terms() {
+        let sig = RuleSignature {
+            inputs: vec![StackTy::F32],
+            output: StackTy::F32,
+        };
+        let mut term_set = RulerTermSet::new(sig);
+        for size in 1..=3 {
+            for &sort in &SYNTH_SORTS {
+                term_set.add_terms_of_size(sort, size);
+            }
+        }
+        assert!(
+            term_set.num_classes() > 4,
+            "F32 sig should grow beyond input/const leaves, got {} classes",
+            term_set.num_classes()
         );
     }
 }

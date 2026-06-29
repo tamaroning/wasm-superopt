@@ -101,6 +101,32 @@ fn binop_shr_s_and_xor_concrete() {
 }
 
 #[test]
+fn f32_double_neg_is_identity() {
+    use crate::al::eval_value_ast_concrete_sig;
+
+    let sig = RuleSignature {
+        inputs: vec![StackTy::F32],
+        output: StackTy::F32,
+    };
+    let x = ValueAst::symbol(0);
+    let double_neg = ValueAst::app(ValueOp::F32Neg, vec![ValueAst::app(ValueOp::F32Neg, vec![x.clone()])]);
+    for bits in [
+        0u32,
+        f32::to_bits(1.0),
+        f32::to_bits(-1.0),
+        f32::to_bits(3.5),
+        f32::to_bits(f32::NAN),
+        f32::to_bits(f32::INFINITY),
+    ] {
+        let inputs = vec![crate::value::f32_bits_to_i64(bits)];
+        let lhs = eval_value_ast_concrete_sig(&sig, &double_neg, &inputs);
+        let rhs = eval_value_ast_concrete_sig(&sig, &x, &inputs);
+        assert!(!lhs.trap && !rhs.trap, "bits={bits:#x}");
+        assert_eq!(lhs.value, rhs.value, "bits={bits:#x}");
+    }
+}
+
+#[test]
 fn suspicious_shr_xor_rule_is_invalid() {
     use crate::value::{asts_valid_rewrite_random, parse_value_expr};
 

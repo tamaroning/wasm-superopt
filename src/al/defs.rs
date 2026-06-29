@@ -1741,6 +1741,91 @@ pub fn truncz_def() -> FuncA {
     }
 }
 
+// =============================================================================
+// fadd_, fsub_, …  (wasm-2.0.al — hint(builtin); bodies in concrete eval)
+// =============================================================================
+
+const FLOAT_BINOP_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("i_1", ParamType::Nat),
+    mp("i_2", ParamType::Nat),
+];
+const FLOAT_UNOP_PARAMS: &[Param] = &[mp("N", ParamType::Nat), mp("iN", ParamType::Nat)];
+const FLOAT_RELOP_PARAMS: &[Param] = &[
+    mp("N", ParamType::Nat),
+    mp("i_1", ParamType::Nat),
+    mp("i_2", ParamType::Nat),
+];
+
+fn float_builtin_def(id: &'static str, params: &'static [Param]) -> FuncA {
+    FuncA {
+        id,
+        params,
+        body: vec![Instr::FailI],
+    }
+}
+
+pub fn fadd_def() -> FuncA {
+    float_builtin_def("fadd_", FLOAT_BINOP_PARAMS)
+}
+pub fn fsub_def() -> FuncA {
+    float_builtin_def("fsub_", FLOAT_BINOP_PARAMS)
+}
+pub fn fmul_def() -> FuncA {
+    float_builtin_def("fmul_", FLOAT_BINOP_PARAMS)
+}
+pub fn fdiv_def() -> FuncA {
+    float_builtin_def("fdiv_", FLOAT_BINOP_PARAMS)
+}
+pub fn fmin_def() -> FuncA {
+    float_builtin_def("fmin_", FLOAT_BINOP_PARAMS)
+}
+pub fn fmax_def() -> FuncA {
+    float_builtin_def("fmax_", FLOAT_BINOP_PARAMS)
+}
+pub fn fcopysign_def() -> FuncA {
+    float_builtin_def("fcopysign_", FLOAT_BINOP_PARAMS)
+}
+pub fn fabs_def() -> FuncA {
+    float_builtin_def("fabs_", FLOAT_UNOP_PARAMS)
+}
+pub fn fneg_def() -> FuncA {
+    float_builtin_def("fneg_", FLOAT_UNOP_PARAMS)
+}
+pub fn fsqrt_def() -> FuncA {
+    float_builtin_def("fsqrt_", FLOAT_UNOP_PARAMS)
+}
+pub fn fceil_def() -> FuncA {
+    float_builtin_def("fceil_", FLOAT_UNOP_PARAMS)
+}
+pub fn ffloor_def() -> FuncA {
+    float_builtin_def("ffloor_", FLOAT_UNOP_PARAMS)
+}
+pub fn ftrunc_def() -> FuncA {
+    float_builtin_def("ftrunc_", FLOAT_UNOP_PARAMS)
+}
+pub fn fnearest_def() -> FuncA {
+    float_builtin_def("fnearest_", FLOAT_UNOP_PARAMS)
+}
+pub fn feq_def() -> FuncA {
+    float_builtin_def("feq_", FLOAT_RELOP_PARAMS)
+}
+pub fn fne_def() -> FuncA {
+    float_builtin_def("fne_", FLOAT_RELOP_PARAMS)
+}
+pub fn flt_def() -> FuncA {
+    float_builtin_def("flt_", FLOAT_RELOP_PARAMS)
+}
+pub fn fgt_def() -> FuncA {
+    float_builtin_def("fgt_", FLOAT_RELOP_PARAMS)
+}
+pub fn fle_def() -> FuncA {
+    float_builtin_def("fle_", FLOAT_RELOP_PARAMS)
+}
+pub fn fge_def() -> FuncA {
+    float_builtin_def("fge_", FLOAT_RELOP_PARAMS)
+}
+
 /// Look up a SpecTec `$fn` definition by name.
 pub fn lookup_func(name: &str) -> Option<FuncA> {
     Some(match name {
@@ -1767,6 +1852,26 @@ pub fn lookup_func(name: &str) -> Option<FuncA> {
         "ictz_" => ictz_def(),
         "ipopcnt_" => ipopcnt_def(),
         "truncz" => truncz_def(),
+        "fadd_" => fadd_def(),
+        "fsub_" => fsub_def(),
+        "fmul_" => fmul_def(),
+        "fdiv_" => fdiv_def(),
+        "fmin_" => fmin_def(),
+        "fmax_" => fmax_def(),
+        "fcopysign_" => fcopysign_def(),
+        "fabs_" => fabs_def(),
+        "fneg_" => fneg_def(),
+        "fsqrt_" => fsqrt_def(),
+        "fceil_" => fceil_def(),
+        "ffloor_" => ffloor_def(),
+        "ftrunc_" => ftrunc_def(),
+        "fnearest_" => fnearest_def(),
+        "feq_" => feq_def(),
+        "fne_" => fne_def(),
+        "flt_" => flt_def(),
+        "fgt_" => fgt_def(),
+        "fle_" => fle_def(),
+        "fge_" => fge_def(),
         "local" => local_def(),
         "with_local" => with_local_def(),
         _ => return None,
@@ -1844,5 +1949,12 @@ mod tests {
         assert!(lookup_func("ictz_").is_some());
         assert!(lookup_func("ipopcnt_").is_some());
         assert!(lookup_func("truncz").is_some());
+    }
+
+    #[test]
+    fn lookup_includes_float_builtins() {
+        assert!(lookup_func("fadd_").is_some());
+        assert!(lookup_func("fabs_").is_some());
+        assert!(lookup_func("feq_").is_some());
     }
 }

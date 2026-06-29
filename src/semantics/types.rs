@@ -6,6 +6,8 @@ use std::fmt;
 pub enum StackTy {
     I32,
     I64,
+    F32,
+    F64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

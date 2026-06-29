@@ -4,7 +4,7 @@
 
 use crate::al::z3_context;
 use crate::lang::ValueLang;
-use crate::ruler::discover_rules_for_signature;
+use crate::ruler::{canonical_rewrite_key, discover_rules_for_signature};
 use crate::value::{enumerate_signatures, is_reachable, RuleSignature, ValueAst};
 use egg::{Pattern, Rewrite};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SynthesizedRule {
@@ -30,7 +31,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 15;
+const RULES_CACHE_FORMAT_VERSION: u32 = 17;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
@@ -141,55 +142,112 @@ pub fn synthesize_rules(
         .into_iter()
         .filter(|sig| is_reachable(sig))
         .collect();
-    let mut proven = Vec::new();
+    let total_sigs = signatures.len();
+
+    report_progress(&format!(
+        "synthesis (Ruler): max_ast_size={max_ast_size}, max_arity={max_arity}, random_tests={random_tests}, jobs={jobs}, {total_sigs} signatures"
+    ));
+
+    struct SigWork {
+        sig: RuleSignature,
+        rules: Vec<(String, String)>,
+        pairs_checked: usize,
+        z3_queries: usize,
+    }
+
+    fn synthesize_one_signature(
+        sig: &RuleSignature,
+        max_ast_size: usize,
+        random_tests: usize,
+        verify_jobs: usize,
+    ) -> SigWork {
+        let ctx = z3_context();
+        let mut local_seen = HashSet::new();
+        let mut local_rules = Vec::new();
+        let (pairs_checked, z3_queries) = discover_rules_for_signature(
+            sig,
+            max_ast_size,
+            random_tests,
+            verify_jobs,
+            &ctx,
+            &mut local_seen,
+            &mut local_rules,
+        );
+        SigWork {
+            sig: sig.clone(),
+            rules: local_rules,
+            pairs_checked,
+            z3_queries,
+        }
+    }
+
+    let parallel_sigs = jobs > 1;
+    let verify_jobs = if parallel_sigs { 1 } else { jobs.max(1) };
+
+    let results: Vec<SigWork> = crate::parallel::run_with_threads(jobs, || {
+        if parallel_sigs {
+            use rayon::prelude::*;
+            let done = AtomicUsize::new(0);
+            signatures
+                .par_iter()
+                .map(|sig| {
+                    let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                    report_progress(&format!("[{n}/{total_sigs}] signature {sig}"));
+                    synthesize_one_signature(
+                        sig,
+                        max_ast_size,
+                        random_tests,
+                        verify_jobs,
+                    )
+                })
+                .collect()
+        } else {
+            let mut out = Vec::with_capacity(total_sigs);
+            for (sig_idx, sig) in signatures.iter().enumerate() {
+                report_progress(&format!(
+                    "[{}/{}] signature {sig}",
+                    sig_idx + 1,
+                    total_sigs
+                ));
+                out.push(synthesize_one_signature(
+                    sig,
+                    max_ast_size,
+                    random_tests,
+                    verify_jobs,
+                ));
+            }
+            out
+        }
+    });
+
     let mut seen = HashSet::new();
+    let mut proven = Vec::new();
     let mut pairs_checked = 0usize;
     let mut z3_queries = 0usize;
 
-    report_progress(&format!(
-        "synthesis (Ruler): max_ast_size={max_ast_size}, max_arity={max_arity}, random_tests={random_tests}, jobs={jobs}, {} signatures",
-        signatures.len()
-    ));
-
-    crate::parallel::run_with_threads(jobs, || {
-        let ctx = z3_context();
-        for (sig_idx, sig) in signatures.iter().enumerate() {
-            report_progress(&format!(
-                "[{}/{}] signature {sig}",
-                sig_idx + 1,
-                signatures.len()
-            ));
-
-            let mut local_rules = Vec::new();
-            let (checked, z3) = discover_rules_for_signature(
-                sig,
-                max_ast_size,
-                random_tests,
-                jobs,
-                &ctx,
-                &mut seen,
-                &mut local_rules,
-            );
-            pairs_checked += checked;
-            z3_queries += z3;
-
-            let added_here = local_rules.len();
-            for (lhs, rhs) in local_rules {
-                let name = format!("syn-{}", proven.len());
-                proven.push(SynthesizedRule {
-                    name,
-                    lhs,
-                    rhs,
-                    signature: sig.clone(),
-                });
+    for work in results {
+        pairs_checked += work.pairs_checked;
+        z3_queries += work.z3_queries;
+        let added_here = work.rules.len();
+        for (lhs, rhs) in work.rules {
+            let key = canonical_rewrite_key(&lhs, &rhs);
+            if !seen.insert(key) {
+                continue;
             }
-
-            report_progress(&format!(
-                "  done {sig}: +{added_here} rules ({total} total)",
-                total = proven.len()
-            ));
+            let name = format!("syn-{}", proven.len());
+            proven.push(SynthesizedRule {
+                name,
+                lhs,
+                rhs,
+                signature: work.sig.clone(),
+            });
         }
-    });
+        report_progress(&format!(
+            "  done {}: +{added_here} rules ({total} total)",
+            work.sig,
+            total = proven.len()
+        ));
+    }
 
     report_progress(&format!(
         "synthesis complete: {pairs_checked} pairs checked, {z3_queries} Z3 queries, {} rules",
@@ -306,6 +364,21 @@ mod tests {
     }
 
     #[test]
+    fn f32_ast_pattern_uses_float_literals() {
+        let add = ValueAst::app(
+            ValueOp::F32Add,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::F32, f32::to_bits(-1.0) as i32 as i64),
+            ],
+        );
+        assert_eq!(add.to_pattern(), "(f32.add ?a -1.0)");
+        add.to_pattern()
+            .parse::<egg::Pattern<crate::lang::ValueLang>>()
+            .expect("f32 float literal pattern");
+    }
+
+    #[test]
     fn i64_ast_pattern_for_mul_const2() {
         let mul = ValueAst::app(
             ValueOp::I64Mul,
@@ -377,8 +450,8 @@ mod tests {
             total_pairs += collect_candidate_indices(sig, &asts).len();
         }
         assert!(
-            total_pairs < 6_000_000,
-            "expected pruned pair count under 6M, got {total_pairs}"
+            total_pairs < 12_000_000,
+            "expected pruned pair count under 12M, got {total_pairs}"
         );
     }
 }

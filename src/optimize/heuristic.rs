@@ -104,7 +104,7 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         return 0;
     }
     match &expr[expr.root()] {
-        ValueLang::I32Const(_) | ValueLang::I64Const(_) | ValueLang::Symbol(_) => 1,
+        ValueLang::I32Const(_) | ValueLang::I64Const(_) | ValueLang::F32Const(_) | ValueLang::F64Const(_) | ValueLang::Symbol(_) => 1,
         ValueLang::I32Add([a, b])
         | ValueLang::I32Sub([a, b])
         | ValueLang::I32Mul([a, b])
@@ -159,8 +159,23 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         | ValueLang::I64Popcnt([a])
         | ValueLang::I64ExtendI32S([a])
         | ValueLang::I64ExtendI32U([a])
-        | ValueLang::I32WrapI64([a]) => {
+        |         ValueLang::I32WrapI64([a]) => {
             1 + residual_depth(&subtree_expr(expr, *a), avail, canon)
+        }
+        node => {
+            if let Some((_, children)) = crate::value::ValueOp::from_lang(node) {
+                match children.as_slice() {
+                    [a] => 1 + residual_depth(&subtree_expr(expr, *a), avail, canon),
+                    [a, b] => {
+                        let da = residual_depth(&subtree_expr(expr, *a), avail, canon);
+                        let db = residual_depth(&subtree_expr(expr, *b), avail, canon);
+                        1 + da.max(db)
+                    }
+                    _ => 1,
+                }
+            } else {
+                1
+            }
         }
     }
 }

@@ -364,7 +364,83 @@ fn eval_op(sig: &RuleSignature, op: ValueOp, args: &[&ValueAst], inputs: &[i64])
                 trap: false,
             }
         }
+        F32Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Add),
+        F32Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Sub),
+        F32Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Mul),
+        F32Div => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::FloatDiv),
+        F32Min => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Min),
+        F32Max => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Max),
+        F32Copysign => {
+            eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Copysign)
+        }
+        F64Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Add),
+        F64Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Sub),
+        F64Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Mul),
+        F64Div => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::FloatDiv),
+        F64Min => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Min),
+        F64Max => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Max),
+        F64Copysign => {
+            eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Copysign)
+        }
+        F32Eq => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Eq),
+        F32Ne => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Ne),
+        F32Lt => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Flt),
+        F32Le => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Fle),
+        F32Gt => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Fgt),
+        F32Ge => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Fge),
+        F64Eq => eval_float_relop(args, sig, inputs, NumType::F64, WasmRelOp::Eq),
+        F64Ne => eval_float_relop(args, sig, inputs, NumType::F64, WasmRelOp::Ne),
+        F64Lt => eval_float_relop(args, sig, inputs, NumType::F64, WasmRelOp::Flt),
+        F64Le => eval_float_relop(args, sig, inputs, NumType::F64, WasmRelOp::Fle),
+        F64Gt => eval_float_relop(args, sig, inputs, NumType::F64, WasmRelOp::Fgt),
+        F64Ge => eval_float_relop(args, sig, inputs, NumType::F64, WasmRelOp::Fge),
+        F32Abs => eval_float_unop(args, sig, inputs, NumType::F32, WasmUnOp::Abs),
+        F32Neg => eval_float_unop(args, sig, inputs, NumType::F32, WasmUnOp::Neg),
+        F32Sqrt => eval_float_unop(args, sig, inputs, NumType::F32, WasmUnOp::Sqrt),
+        F32Ceil => eval_float_unop(args, sig, inputs, NumType::F32, WasmUnOp::Ceil),
+        F32Floor => eval_float_unop(args, sig, inputs, NumType::F32, WasmUnOp::Floor),
+        F32Trunc => eval_float_unop(args, sig, inputs, NumType::F32, WasmUnOp::Trunc),
+        F32Nearest => eval_float_unop(args, sig, inputs, NumType::F32, WasmUnOp::Nearest),
+        F64Abs => eval_float_unop(args, sig, inputs, NumType::F64, WasmUnOp::Abs),
+        F64Neg => eval_float_unop(args, sig, inputs, NumType::F64, WasmUnOp::Neg),
+        F64Sqrt => eval_float_unop(args, sig, inputs, NumType::F64, WasmUnOp::Sqrt),
+        F64Ceil => eval_float_unop(args, sig, inputs, NumType::F64, WasmUnOp::Ceil),
+        F64Floor => eval_float_unop(args, sig, inputs, NumType::F64, WasmUnOp::Floor),
+        F64Trunc => eval_float_unop(args, sig, inputs, NumType::F64, WasmUnOp::Trunc),
+        F64Nearest => eval_float_unop(args, sig, inputs, NumType::F64, WasmUnOp::Nearest),
     }
+}
+
+fn eval_float_relop(
+    args: &[&ValueAst],
+    sig: &RuleSignature,
+    inputs: &[i64],
+    nt: NumType,
+    relop: WasmRelOp,
+) -> ValueAstResult {
+    let l = eval_value_ast_concrete_sig(sig, args[0], inputs);
+    if l.trap {
+        return l;
+    }
+    let r = eval_value_ast_concrete_sig(sig, args[1], inputs);
+    if r.trap {
+        return r;
+    }
+    eval_relop(l.value, r.value, nt, relop)
+}
+
+fn eval_float_unop(
+    args: &[&ValueAst],
+    sig: &RuleSignature,
+    inputs: &[i64],
+    nt: NumType,
+    unop: WasmUnOp,
+) -> ValueAstResult {
+    let c = eval_value_ast_concrete_sig(sig, args[0], inputs);
+    if c.trap {
+        return c;
+    }
+    eval_unop_list(c.value, nt, unop)
 }
 
 /// Concrete evaluation of a [`ValueAst`] under a rule signature.

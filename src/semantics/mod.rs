@@ -126,8 +126,42 @@ pub fn concrete_ops() -> Vec<SemOp> {
 
 const SYNTHESIS_CONSTS: [i32; 4] = [0, 1, 2, -1];
 
+const SYNTHESIS_I32: [i64; 4] = [0, 1, 2, -1];
+const SYNTHESIS_I64: [i64; 4] = [0, 1, 2, -1];
+
+const fn f32_bits_carrier(bits: u32) -> i64 {
+    bits as i32 as i64
+}
+
+const fn f64_bits_carrier(bits: u64) -> i64 {
+    bits as i64
+}
+
+const SYNTHESIS_F32: [i64; 4] = [
+    f32_bits_carrier(0),
+    f32_bits_carrier(f32::to_bits(1.0)),
+    f32_bits_carrier(f32::to_bits(-1.0)),
+    f32_bits_carrier(f32::to_bits(2.0)),
+];
+const SYNTHESIS_F64: [i64; 4] = [
+    f64_bits_carrier(0),
+    f64_bits_carrier(f64::to_bits(1.0)),
+    f64_bits_carrier(f64::to_bits(-1.0)),
+    f64_bits_carrier(f64::to_bits(2.0)),
+];
+
 pub fn synthesis_constants() -> &'static [i32] {
     &SYNTHESIS_CONSTS
+}
+
+/// Synthesis leaf constants for `ty`, as the `i64` carrier stored in [`ValueAst::Const`].
+pub fn synthesis_const_values(ty: StackTy) -> &'static [i64] {
+    match ty {
+        StackTy::I32 => &SYNTHESIS_I32,
+        StackTy::I64 => &SYNTHESIS_I64,
+        StackTy::F32 => &SYNTHESIS_F32,
+        StackTy::F64 => &SYNTHESIS_F64,
+    }
 }
 
 pub fn synthesis_signatures(max_arity: usize) -> Vec<crate::value::RuleSignature> {
@@ -188,5 +222,12 @@ mod tests {
     #[test]
     fn synthesis_inputs_has_no_empty_stack() {
         assert!(synthesis_inputs().iter().all(|input| !input.is_empty()));
+    }
+
+    #[test]
+    fn synthesis_const_values_per_type() {
+        assert_eq!(synthesis_const_values(StackTy::I32), &[0, 1, 2, -1]);
+        assert_eq!(synthesis_const_values(StackTy::F32)[1], f32::to_bits(1.0) as i32 as i64);
+        assert_eq!(synthesis_const_values(StackTy::F64)[2], f64::to_bits(-1.0) as i64);
     }
 }

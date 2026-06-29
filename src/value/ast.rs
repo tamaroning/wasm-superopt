@@ -1,8 +1,8 @@
 //! Typed expression trees for rule synthesis.
 
 use super::ops::{RuleSignature, ValueOp};
-use crate::lang::ValueLang;
-use crate::semantics::{StackTy, synthesis_constants};
+use crate::lang::{F32Bits, F64Bits, ValueLang};
+use crate::semantics::{StackTy, synthesis_const_values};
 use egg::{Id, RecExpr, Symbol};
 
 /// Pure expression tree for rule synthesis (symbols `?a`, `?b`, …).
@@ -75,7 +75,11 @@ impl ValueAst {
     pub fn to_pattern(&self) -> String {
         match self {
             Self::Symbol(i) => format!("?{}", (b'a' + *i as u8) as char),
-            Self::Const { value, .. } => value.to_string(),
+            Self::Const { ty, value } => match ty {
+                StackTy::F32 => format!("{}", F32Bits::from_i64_carrier(*value)),
+                StackTy::F64 => format!("{}", F64Bits::from_i64_carrier(*value)),
+                _ => value.to_string(),
+            },
             Self::App { op, args } => {
                 let name = op.pattern_name();
                 let parts: Vec<String> = args.iter().map(ValueAst::to_pattern).collect();
@@ -152,6 +156,8 @@ pub fn value_ast_to_expr(ast: &ValueAst) -> RecExpr<ValueLang> {
             ValueAst::Const { ty, value } => match ty {
                 StackTy::I32 => expr.add(ValueLang::I32Const(*value as i32)),
                 StackTy::I64 => expr.add(ValueLang::I64Const(*value)),
+                StackTy::F32 => expr.add(ValueLang::F32Const(F32Bits::from_i64_carrier(*value))),
+                StackTy::F64 => expr.add(ValueLang::F64Const(F64Bits::from_i64_carrier(*value))),
             },
             ValueAst::App { op, args } => {
                 let child_ids: Vec<Id> = args.iter().map(|a| go(a, expr)).collect();
@@ -186,6 +192,8 @@ pub fn value_ast_from_expr(expr: &RecExpr<ValueLang>) -> Option<ValueAst> {
             ValueLang::Symbol(s) => Some(ValueAst::Symbol(synthesis_symbol_index(s)?)),
             ValueLang::I32Const(n) => Some(ValueAst::const_ty(StackTy::I32, *n as i64)),
             ValueLang::I64Const(n) => Some(ValueAst::const_ty(StackTy::I64, *n)),
+            ValueLang::F32Const(n) => Some(ValueAst::const_ty(StackTy::F32, n.to_i64_carrier())),
+            ValueLang::F64Const(n) => Some(ValueAst::const_ty(StackTy::F64, n.to_i64_carrier())),
             node => {
                 let (op, child_ids) = ValueOp::from_lang(node)?;
                 let args: Option<Vec<ValueAst>> = child_ids.iter().map(|&c| go(c, expr)).collect();
@@ -203,27 +211,25 @@ pub fn enumerate_value_asts(sig: &RuleSignature, max_size: usize) -> Vec<ValueAs
     }
     let mut by_sort_size: std::collections::HashMap<StackTy, Vec<Vec<ValueAst>>> =
         std::collections::HashMap::new();
-    for &sort in &[StackTy::I32, StackTy::I64] {
+    for &sort in &[StackTy::I32, StackTy::I64, StackTy::F32, StackTy::F64] {
         by_sort_size.insert(sort, (0..max_size).map(|_| Vec::new()).collect());
     }
 
     for (i, &ty) in sig.inputs.iter().enumerate() {
         by_sort_size.get_mut(&ty).unwrap()[0].push(ValueAst::symbol(i));
     }
-    for &c in synthesis_constants() {
-        by_sort_size
-            .get_mut(&StackTy::I32)
-            .unwrap()[0]
-            .push(ValueAst::const_ty(StackTy::I32, c as i64));
-        by_sort_size
-            .get_mut(&StackTy::I64)
-            .unwrap()[0]
-            .push(ValueAst::const_ty(StackTy::I64, c as i64));
+    for &sort in &[StackTy::I32, StackTy::I64, StackTy::F32, StackTy::F64] {
+        for &c in synthesis_const_values(sort) {
+            by_sort_size
+                .get_mut(&sort)
+                .unwrap()[0]
+                .push(ValueAst::const_ty(sort, c));
+        }
     }
 
     for total in 2..=max_size {
         let idx = total - 1;
-        for &sort in &[StackTy::I32, StackTy::I64] {
+        for &sort in &[StackTy::I32, StackTy::I64, StackTy::F32, StackTy::F64] {
             let mut new_asts = Vec::new();
             for op in ValueOp::ops_with_result(sort) {
                 let pops = op.pops();
