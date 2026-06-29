@@ -30,7 +30,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 14;
+const RULES_CACHE_FORMAT_VERSION: u32 = 15;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
@@ -235,7 +235,21 @@ fn parse_rewrite(name: &str, lhs: &str, rhs: &str) -> Result<Rewrite<ValueLang, 
 mod tests {
     use super::*;
     use crate::semantics::StackTy;
-    use crate::value::{enumerate_value_asts, is_directed_ast_pair, ValueAst, ValueOp};
+    use crate::value::{enumerate_value_asts, is_ast_rewrite_pair, is_directed_ast_pair, ValueAst, ValueOp};
+
+    #[test]
+    fn constant_fold_rhs_allowed_in_rewrite_pair() {
+        let sig = RuleSignature::new(vec![StackTy::I32], StackTy::I32);
+        let mul0 = ValueAst::app(
+            ValueOp::I32Mul,
+            vec![
+                ValueAst::symbol(0),
+                ValueAst::const_ty(StackTy::I32, 0),
+            ],
+        );
+        let zero = ValueAst::const_ty(StackTy::I32, 0);
+        assert!(is_ast_rewrite_pair(&sig, &mul0, &zero));
+    }
 
     #[test]
     fn reachable_signatures_exclude_unreachable_output() {

@@ -105,7 +105,18 @@ pub fn is_ast_rewrite_pair(sig: &RuleSignature, lhs: &ValueAst, rhs: &ValueAst) 
     if is_commutative_swap(lhs, rhs) {
         return false;
     }
-    lhs.uses_each_symbol_once(sig) && rhs.uses_each_symbol_once(sig)
+    lhs.uses_each_symbol_once(sig) && valid_rewrite_rhs(sig, rhs)
+}
+
+/// RHS of a rewrite: well-typed, correct output sort, each symbol used at most once.
+/// Unlike the LHS, constants and folds (e.g. `?a * 0 → 0`) need not mention every symbol.
+fn valid_rewrite_rhs(sig: &RuleSignature, rhs: &ValueAst) -> bool {
+    if rhs.type_of(sig) != Some(sig.output) {
+        return false;
+    }
+    let mut counts = vec![0usize; sig.inputs.len()];
+    rhs.collect_symbol_counts(&mut counts);
+    counts.iter().all(|&c| c <= 1)
 }
 
 fn is_commutative_swap(lhs: &ValueAst, rhs: &ValueAst) -> bool {

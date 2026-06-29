@@ -36,8 +36,16 @@ def load_data(path: Path, benchmark: str | None, exclude: list[str], max_length:
         df = df[~df["benchmark"].isin(exclude)]
     df["initial_length"] = pd.to_numeric(df["initial_length"], errors="coerce")
     df["solver_time_in_sec"] = pd.to_numeric(df["solver_time_in_sec"], errors="coerce")
+    df["saved_length"] = pd.to_numeric(df.get("saved_length", 0), errors="coerce").fillna(0)
     df = df.dropna(subset=["initial_length", "solver_time_in_sec"])
     df = df[df["initial_length"] > 0]
+    df["saved_length"] = df["saved_length"].clip(lower=0)
+    df["improved"] = df["saved_length"] > 0
+    df["reduction_pct"] = np.where(
+        df["improved"],
+        100.0 * df["saved_length"] / df["initial_length"],
+        0.0,
+    )
     if max_length > 0:
         df = df[df["initial_length"] <= max_length]
     return df
@@ -142,6 +150,213 @@ def plot_binned_stats(df: pd.DataFrame, out: Path, bucket_width: int) -> None:
     plt.close(fig)
 
 
+def plot_saved_scatter(df: pd.DataFrame, out: Path, suite_label: str, dodge: float = 0.18) -> None:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    tools = sorted(df["tool"].unique())
+    for i, tool in enumerate(tools):
+        sub = df[df["tool"] == tool]
+        ax.scatter(
+            scatter_x_positions(sub["initial_length"], i, len(tools), dodge),
+            sub["saved_length"],
+            alpha=0.55,
+            s=28,
+            label=tool,
+            color=tool_color(tool, i),
+        )
+    lengths = sorted(df["initial_length"].unique())
+    ax.set_xticks(lengths)
+    ax.set_xlabel("Block length (instructions)")
+    ax.set_ylabel("Instructions saved")
+    ax.set_title(f"Block length vs improvement ({suite_label})")
+    ax.grid(True, alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out, dpi=160)
+    plt.close(fig)
+
+
+def plot_saved_binned(df: pd.DataFrame, out: Path, bucket_width: int) -> None:
+    df = df.copy()
+    df["length_bucket"] = bucket_lengths(df["initial_length"], bucket_width)
+    grouped = (
+        df.groupby(["tool", "length_bucket"])["saved_length"]
+        .agg(["mean", "std", "count", "sum"])
+        .reset_index()
+    )
+    grouped = grouped[grouped["count"] >= 1]
+
+    tools = sorted(df["tool"].unique())
+    buckets = sorted(grouped["length_bucket"].unique())
+    x = np.arange(len(buckets))
+    width = 0.8 / max(len(tools), 1)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for i, tool in enumerate(tools):
+        sub = grouped[grouped["tool"] == tool].set_index("length_bucket").reindex(buckets)
+        means = sub["mean"].to_numpy()
+        stds = sub["std"].fillna(0).to_numpy()
+        counts = sub["count"].fillna(0).to_numpy()
+        offset = (i - (len(tools) - 1) / 2) * width
+        bars = ax.bar(
+            x + offset,
+            means,
+            width,
+            yerr=stds,
+            capsize=3,
+            label=tool,
+            color=tool_color(tool, i),
+            alpha=0.85,
+        )
+        for bar, mean, count in zip(bars, means, counts):
+            if np.isnan(mean) or count == 0:
+                continue
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f"n={int(count)}",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                rotation=90,
+            )
+
+    if bucket_width == 1:
+        labels = [f"{b}" for b in buckets]
+        xlabel = "Block length (instructions)"
+    else:
+        labels = [f"{b}-{b + bucket_width - 1}" for b in buckets]
+        xlabel = f"Block length bucket ({bucket_width}-instr bins)"
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Mean instructions saved")
+    ax.set_title("Mean ± std instructions saved by block length")
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out, dpi=160)
+    plt.close(fig)
+
+
+def plot_improvement_rate_binned(df: pd.DataFrame, out: Path, bucket_width: int) -> None:
+    df = df.copy()
+    df["length_bucket"] = bucket_lengths(df["initial_length"], bucket_width)
+    grouped = (
+        df.groupby(["tool", "length_bucket"])["improved"]
+        .agg(["mean", "count"])
+        .reset_index()
+        .rename(columns={"mean": "improvement_rate"})
+    )
+    grouped = grouped[grouped["count"] >= 1]
+
+    tools = sorted(df["tool"].unique())
+    buckets = sorted(grouped["length_bucket"].unique())
+    x = np.arange(len(buckets))
+    width = 0.8 / max(len(tools), 1)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for i, tool in enumerate(tools):
+        sub = grouped[grouped["tool"] == tool].set_index("length_bucket").reindex(buckets)
+        rates = 100.0 * sub["improvement_rate"].fillna(0).to_numpy()
+        counts = sub["count"].fillna(0).to_numpy()
+        offset = (i - (len(tools) - 1) / 2) * width
+        bars = ax.bar(
+            x + offset,
+            rates,
+            width,
+            label=tool,
+            color=tool_color(tool, i),
+            alpha=0.85,
+        )
+        for bar, rate, count in zip(bars, rates, counts):
+            if count == 0:
+                continue
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f"n={int(count)}",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                rotation=90,
+            )
+
+    if bucket_width == 1:
+        labels = [f"{b}" for b in buckets]
+        xlabel = "Block length (instructions)"
+    else:
+        labels = [f"{b}-{b + bucket_width - 1}" for b in buckets]
+        xlabel = f"Block length bucket ({bucket_width}-instr bins)"
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Blocks improved (%)")
+    ax.set_ylim(0, 100)
+    ax.set_title("Share of blocks with any instruction reduction")
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out, dpi=160)
+    plt.close(fig)
+
+
+def plot_improvement_summary(df: pd.DataFrame, out: Path, suite_label: str) -> None:
+    tools = sorted(df["tool"].unique())
+    totals = [df.loc[df["tool"] == tool, "saved_length"].sum() for tool in tools]
+    rates = [
+        100.0 * df.loc[df["tool"] == tool, "improved"].mean() if len(df[df["tool"] == tool]) else 0.0
+        for tool in tools
+    ]
+
+    x = np.arange(len(tools))
+    width = 0.35
+
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    bars = ax1.bar(
+        x - width / 2,
+        totals,
+        width,
+        label="Total instructions saved",
+        color=[tool_color(tool, i) for i, tool in enumerate(tools)],
+        alpha=0.85,
+    )
+    ax1.set_ylabel("Total instructions saved")
+    ax1.set_xlabel("Tool")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(tools, rotation=20, ha="right")
+    for bar, total in zip(bars, totals):
+        ax1.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            f"{int(total)}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    ax2 = ax1.twinx()
+    ax2.plot(
+        x + width / 2,
+        rates,
+        "o-",
+        color="#374151",
+        linewidth=2,
+        markersize=8,
+        label="Blocks improved (%)",
+    )
+    ax2.set_ylabel("Blocks improved (%)")
+    ax2.set_ylim(0, max(100, max(rates) * 1.1 if rates else 100))
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+    ax1.set_title(f"Optimization summary ({suite_label})")
+    ax1.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out, dpi=160)
+    plt.close(fig)
+
+
 def write_summary_table(df: pd.DataFrame, out: Path) -> None:
     summary = (
         df.groupby("tool")
@@ -153,9 +368,16 @@ def write_summary_table(df: pd.DataFrame, out: Path) -> None:
             std_time=("solver_time_in_sec", "std"),
             median_time=("solver_time_in_sec", "median"),
             p95_time=("solver_time_in_sec", lambda s: s.quantile(0.95)),
+            total_saved=("saved_length", "sum"),
+            blocks_improved=("improved", "sum"),
+            pct_improved=("improved", "mean"),
+            mean_saved=("saved_length", "mean"),
+            mean_saved_when_improved=("saved_length", lambda s: s[s > 0].mean() if (s > 0).any() else 0.0),
+            mean_reduction_pct=("reduction_pct", lambda s: s[s > 0].mean() if (s > 0).any() else 0.0),
         )
         .reset_index()
     )
+    summary["pct_improved"] = 100.0 * summary["pct_improved"]
     summary.to_csv(out, index=False)
 
 
@@ -231,6 +453,10 @@ def main() -> int:
 
     plot_scatter(df, out_dir_path / "length_vs_time_scatter.png", suite.label)
     plot_binned_stats(df, out_dir_path / "length_vs_time_binned.png", args.bucket_width)
+    plot_saved_scatter(df, out_dir_path / "length_vs_saved_scatter.png", suite.label)
+    plot_saved_binned(df, out_dir_path / "length_vs_saved_binned.png", args.bucket_width)
+    plot_improvement_rate_binned(df, out_dir_path / "improvement_rate_binned.png", args.bucket_width)
+    plot_improvement_summary(df, out_dir_path / "improvement_summary.png", suite.label)
     write_summary_table(df, out_dir_path / "summary_by_tool.csv")
 
     print(f"rows: {len(df)}")

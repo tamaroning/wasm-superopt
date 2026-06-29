@@ -378,6 +378,14 @@ impl SymMachine {
         let total_locals = bounds.max_local + 1;
         let mut m = Self::function_entry(num_params, total_locals, max_stack);
         m.stack = init.stack.clone();
+        for (&slot, req) in &init.locals {
+            if slot >= total_locals {
+                continue;
+            }
+            if let LocalReq::Need(v) = req {
+                m.locals.insert(slot, v.clone());
+            }
+        }
         m.begin_segment();
         m
     }
@@ -424,6 +432,20 @@ impl SymMachine {
         let mut locals = BTreeMap::new();
         for slot in 0..self.total_locals {
             locals.insert(slot, LocalReq::Need(Self::local_symbol(slot)));
+        }
+        SymState {
+            stack: self.stack.clone(),
+            locals,
+        }
+    }
+
+    /// Init state for a split sub-chunk: carried stack and actual symbolic local values.
+    pub fn to_carried_init_state(&self) -> SymState {
+        let mut locals = BTreeMap::new();
+        for slot in 0..self.total_locals {
+            if let Some(v) = self.locals.get(&slot) {
+                locals.insert(slot, LocalReq::Need(v.clone()));
+            }
         }
         SymState {
             stack: self.stack.clone(),
@@ -658,6 +680,35 @@ mod tests {
         let expected = init();
         assert_eq!(init_state.stack, expected.stack);
         assert_eq!(init_state.locals, expected.locals);
+    }
+
+    #[test]
+    fn from_segment_entry_applies_carried_locals() {
+        let bounds = SegmentBounds::new(0, 4);
+        let mut init_locals = BTreeMap::new();
+        for slot in 0..=4 {
+            init_locals.insert(slot, LocalReq::Need(SymMachine::local_symbol(slot)));
+        }
+        init_locals.insert(
+            3,
+            LocalReq::Need(parse_value_expr("(i32.add (i32.add (i32.add ?L3 1) 1) 1)")),
+        );
+        let init = SymState {
+            stack: vec![],
+            locals: init_locals,
+        };
+        let mut m = SymMachine::from_segment_entry(0, &bounds, &init, bounds.max_stack);
+        m.exec(&SemOp::I32Const(1)).unwrap();
+        m.exec(&SemOp::I32Add).unwrap();
+        m.exec(&SemOp::LocalSet(3)).unwrap();
+        let fin = m.to_fin_state();
+        assert!(matches!(
+            fin.locals.get(&3),
+            Some(LocalReq::Need(v)) if v.to_string().contains("?L3")
+        ));
+        let got = fin.locals.get(&3).unwrap();
+        let expected = parse_value_expr("(i32.add (i32.add (i32.add (i32.add ?L3 1) 1) 1) 1)");
+        assert_eq!(got, &LocalReq::Need(expected));
     }
 
     #[test]

@@ -3,20 +3,11 @@
 use crate::semantics::SemOp;
 use crate::sym::SymMachine;
 use crate::wasm::deps::compute_dependencies;
-use crate::wasm::segment::{OpaqueMeta, SegmentBounds, StraightSegment};
+use crate::wasm::segment::{SegmentBounds, StraightSegment};
 use crate::wasm::stack_analysis::stack_bounds_ops;
 
 /// Default maximum instructions per optimization chunk (SuperStack smoke eval uses 10).
 pub const DEFAULT_MAX_SEGMENT_INSTR: usize = 10;
-
-fn chunk_opaque_meta(segment: &StraightSegment, ops: &[SemOp]) -> Vec<OpaqueMeta> {
-    segment
-        .opaque_meta
-        .iter()
-        .filter(|m| ops.iter().any(|op| op.opaque_id() == Some(m.id)))
-        .cloned()
-        .collect()
-}
 
 fn chunk_bounds(segment: &StraightSegment, ops: &[SemOp]) -> SegmentBounds {
     let (_, max_stack) = stack_bounds_ops(ops);
@@ -32,7 +23,6 @@ pub fn split_segment(segment: &StraightSegment, max_instr: usize) -> Vec<Straigh
         return vec![segment.clone()];
     }
 
-    let total_locals = segment.bounds.max_local.saturating_add(1);
     let mut machine = SymMachine::from_segment_entry(
         segment.num_params,
         &segment.bounds,
@@ -51,17 +41,23 @@ pub fn split_segment(segment: &StraightSegment, max_instr: usize) -> Vec<Straigh
         let init = if part == 0 {
             segment.init.clone()
         } else {
-            machine.to_chunk_init_state()
+            machine.to_carried_init_state()
         };
 
         if part > 0 {
             machine.begin_segment();
         }
 
+        let mut opaque_meta = Vec::new();
         for op in &ops {
-            machine
-                .exec(op)
-                .unwrap_or_else(|e| panic!("re-exec func {} segment {} part {part}: {e:?}", segment.func_index, segment.segment_index));
+            match machine.exec_with_meta(op) {
+                Ok(Some(meta)) => opaque_meta.push(meta),
+                Ok(None) => {}
+                Err(e) => panic!(
+                    "re-exec func {} segment {} part {part}: {e:?}",
+                    segment.func_index, segment.segment_index
+                ),
+            }
         }
 
         let fin = machine.to_fin_state();
@@ -70,7 +66,6 @@ pub fn split_segment(segment: &StraightSegment, max_instr: usize) -> Vec<Straigh
             return vec![segment.clone()];
         }
 
-        let opaque_meta = chunk_opaque_meta(segment, &ops);
         let dependencies = compute_dependencies(&ops, &opaque_meta);
         let disasm_by_id: std::collections::HashMap<u32, String> = ops
             .iter()

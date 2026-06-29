@@ -14,6 +14,7 @@ pub use search::{
     Backend, DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
     format_ops,
 };
+pub use sat::{classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv, SatDiagnosis, SatGapRow};
 pub use search_graph::SearchTrace;
 pub use statistics::{statistics_rows, write_statistics_csv};
 use crate::lang::ValueLang;

@@ -236,7 +236,9 @@ impl RulerTermSet {
                 .unwrap()
                 .insert(class);
         }
-        if ast.uses_each_symbol_once(&self.sig) {
+        if ast.uses_each_symbol_once(&self.sig)
+            || matches!(ast, ValueAst::Const { ty, .. } if ty == self.sig.output)
+        {
             let sig = AstEvalSignature::of(&ast, &self.sig, &self.test_inputs);
             self.class_cvec.insert(class, sig);
         }
@@ -327,7 +329,7 @@ pub fn discover_rules_for_signature(
 
         loop {
             term_set.compact_with_rules(&rewrites);
-            let candidates = term_set.cvec_match_pairs();
+            let candidates = minimize_rhs_per_lhs(term_set.cvec_match_pairs());
             if candidates.is_empty() {
                 break;
             }
@@ -476,6 +478,22 @@ fn canonical_key(lhs: &str, rhs: &str) -> (String, String) {
     } else {
         (rhs.to_string(), lhs.to_string())
     }
+}
+
+/// For each LHS pattern, keep only the smallest RHS (prefer `0` over `(i32.shr_s 0 ?a)`).
+fn minimize_rhs_per_lhs(pairs: Vec<(ValueAst, ValueAst)>) -> Vec<(ValueAst, ValueAst)> {
+    let mut best: HashMap<String, (ValueAst, ValueAst)> = HashMap::new();
+    for (lhs, rhs) in pairs {
+        let key = lhs.to_pattern();
+        let replace = match best.get(&key) {
+            None => true,
+            Some((_, prev_rhs)) => rhs.size() < prev_rhs.size(),
+        };
+        if replace {
+            best.insert(key, (lhs, rhs));
+        }
+    }
+    best.into_values().collect()
 }
 
 #[cfg(test)]

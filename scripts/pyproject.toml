@@ -14,6 +14,7 @@ dependencies = [
 wasm-bench-run = "wasm_bench.run_benchmarks:cli"
 wasm-bench-merge = "wasm_bench.merge_raw_csvs:cli"
 wasm-bench-plot = "wasm_bench.plot_length_vs_time:cli"
+wasm-bench-classify-gaps = "wasm_bench.classify_sat_gaps:cli"
 
 [build-system]
 requires = ["hatchling"]
