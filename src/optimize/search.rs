@@ -25,6 +25,17 @@ pub struct SearchResult {
     pub ops: Option<Vec<SemOp>>,
     pub timed_out: bool,
     pub solver_time_secs: f64,
+    /// True when the solver proved no shorter valid sequence exists (SAT UNSAT at best length).
+    pub proven_optimal: bool,
+}
+
+/// How stack/local values are compared during grounding checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GroundEqMode {
+    /// Representative `canon()` id equality (A* goal test).
+    Canon,
+    /// `≡_R` via `values_equivalent` including joint saturation (forward validation).
+    Saturate,
 }
 
 #[derive(Clone, Debug)]
@@ -66,11 +77,33 @@ pub fn is_grounded(
     bounds: &SegmentBounds,
     canon: &mut Canonizer,
 ) -> bool {
+    grounded_with(state, init, bounds, canon, GroundEqMode::Canon)
+}
+
+fn values_match(
+    a: &crate::optimize::canon::ValueExpr,
+    b: &crate::optimize::canon::ValueExpr,
+    canon: &mut Canonizer,
+    mode: GroundEqMode,
+) -> bool {
+    match mode {
+        GroundEqMode::Canon => canon.canon(a) == canon.canon(b),
+        GroundEqMode::Saturate => canon.values_equivalent(a, b),
+    }
+}
+
+fn grounded_with(
+    state: &SymState,
+    init: &SymState,
+    bounds: &SegmentBounds,
+    canon: &mut Canonizer,
+    mode: GroundEqMode,
+) -> bool {
     if state.stack.len() != init.stack.len() {
         return false;
     }
     for (a, b) in state.stack.iter().zip(init.stack.iter()) {
-        if canon.canon(a) != canon.canon(b) {
+        if !values_match(a, b, canon, mode) {
             return false;
         }
     }
@@ -86,7 +119,7 @@ pub fn is_grounded(
             (None | Some(LocalReq::DontCare), None) => {}
             (Some(LocalReq::DontCare), _) | (None, Some(LocalReq::DontCare)) => {}
             (Some(LocalReq::Need(v)), Some(LocalReq::Need(init_v))) => {
-                if canon.canon(v) != canon.canon(init_v) {
+                if !values_match(v, init_v, canon, mode) {
                     return false;
                 }
             }
@@ -109,6 +142,26 @@ pub fn validate_solution_ops(ops: &[SemOp], segment: &StraightSegment) -> bool {
     storage_ops_preserved(&segment.ops, ops) && ops_respect_dependencies(ops, &segment.dependencies)
 }
 
+/// Highest local slot referenced by `ops` (includes synthetic scratch locals).
+fn max_local_slot(ops: &[SemOp]) -> Option<u32> {
+    ops.iter()
+        .filter_map(|op| match op {
+            SemOp::LocalGet(s) | SemOp::LocalSet(s) | SemOp::LocalTee(s) => Some(*s),
+            _ => None,
+        })
+        .max()
+}
+
+/// Bounds widened so the validation machine can execute synthetic scratch locals in `ops`.
+/// `max_stack` is unchanged; only `max_local` grows to cover scratch slots.
+fn scratch_extended_bounds(bounds: &SegmentBounds, ops: &[SemOp]) -> SegmentBounds {
+    let needed = max_local_slot(ops).unwrap_or(0);
+    SegmentBounds {
+        max_local: bounds.max_local.max(needed),
+        max_stack: bounds.max_stack,
+    }
+}
+
 /// Whether each opaque op in `ops` consumes operands ≡_R to the original segment.
 pub fn opaque_inputs_equivalent(
     ops: &[SemOp],
@@ -121,9 +174,10 @@ pub fn opaque_inputs_equivalent(
         .map(|m| (m.id, m))
         .collect();
 
+    let exec_bounds = scratch_extended_bounds(&segment.bounds, ops);
     let mut m = SymMachine::from_segment_entry(
         segment.num_params,
-        &segment.bounds,
+        &exec_bounds,
         &segment.init,
         segment.bounds.max_stack,
     );
@@ -175,15 +229,21 @@ fn solution_forward_valid(
     bounds: &SegmentBounds,
     canon: &mut Canonizer,
 ) -> bool {
-    let mut m =
-        SymMachine::from_segment_entry(segment.num_params, bounds, &segment.init, bounds.max_stack);
+    let exec_bounds = scratch_extended_bounds(bounds, ops);
+    let mut m = SymMachine::from_segment_entry(
+        segment.num_params,
+        &exec_bounds,
+        &segment.init,
+        bounds.max_stack,
+    );
     for op in ops {
         if m.exec(op).is_err() {
             return false;
         }
     }
     let got = m.to_fin_state();
-    is_grounded(&got, &segment.fin, bounds, canon)
+    // Ground against the original bounds so scratch slots (> max_local) are ignored.
+    grounded_with(&got, &segment.fin, bounds, canon, GroundEqMode::Saturate)
 }
 
 /// Default SAT instruction-length cap when `--split 0` (no chunking).
@@ -233,7 +293,12 @@ pub struct SearchConfig {
     pub backend: Backend,
     /// Max segment length for SAT encoding (`0` in segment → use [`DEFAULT_MAX_SAT_LEN`]).
     pub max_sat_len: usize,
+    /// Synthetic scratch locals (SuperStack `local.tee[-1]`) added beyond `max_local` for CSE.
+    pub scratch_locals: usize,
 }
+
+/// Default number of synthetic scratch locals (SuperStack-style `local.tee[-1]`).
+pub const DEFAULT_SCRATCH_LOCALS: usize = 1;
 
 impl Default for SearchConfig {
     fn default() -> Self {
@@ -244,6 +309,7 @@ impl Default for SearchConfig {
             fixed_segment_timeout: None,
             backend: Backend::default(),
             max_sat_len: DEFAULT_MAX_SAT_LEN,
+            scratch_locals: DEFAULT_SCRATCH_LOCALS,
         }
     }
 }
@@ -260,6 +326,7 @@ impl SearchConfig {
             fixed_segment_timeout: self.fixed_segment_timeout,
             backend: self.backend,
             max_sat_len: self.max_sat_len,
+            scratch_locals: self.scratch_locals,
         }
     }
 }
@@ -440,6 +507,7 @@ pub fn solve_astar_traced(
         ops: best_path,
         timed_out,
         solver_time_secs: started.elapsed().as_secs_f64(),
+        proven_optimal: !timed_out,
     }
 }
 

@@ -230,7 +230,7 @@ struct Dims {
     r: usize,
     n: usize,
     n_ops: usize,
-    /// Stack value-domain size: `n` real values + `⊥` at index `n`.
+    /// Stack value-domain size: `n` real values + `⊥` at index `n` + `⊤` at index `n+1`.
     sd: usize,
     /// Local value-domain size: `n` real values + `★` at index `n`.
     ld: usize,
@@ -241,7 +241,7 @@ struct Dims {
 
 impl Dims {
     fn new(l: usize, h: usize, r: usize, n: usize, n_ops: usize) -> Self {
-        let sd = n + 1;
+        let sd = n + 2;
         let ld = n + 1;
         let nx = (l * n_ops) as i32;
         let ny = ((l + 1) * h * sd) as i32;
@@ -269,6 +269,11 @@ impl Dims {
 
     fn star(&self) -> usize {
         self.n
+    }
+
+    /// Out-of-vocabulary sink `⊤` (stack only; never matches boundaries or opaque operands).
+    fn top(&self) -> usize {
+        self.n + 1
     }
 
     /// `x_{i,o}` — op `o` chosen at step `i` (1-based steps).
@@ -498,6 +503,11 @@ fn classify_local_slots(
     let mut kinds = Vec::with_capacity(r);
     for rr in 0..r {
         let slot = rr as u32;
+        // Synthetic scratch locals (beyond `max_local`) may hold values via set/tee.
+        if slot > segment.bounds.max_local {
+            kinds.push(LocalSlotKind::Active);
+            continue;
+        }
         if written.contains(&slot) {
             kinds.push(LocalSlotKind::Active);
             continue;
@@ -834,7 +844,7 @@ fn build_ops(
     vocab: &Vocab,
     canon: &mut Canonizer,
     rules: &[egg::Rewrite<ValueLang, ()>],
-    _r: usize,
+    r: usize,
     deadline: Instant,
 ) -> Option<Vec<SatOp>> {
     if Instant::now() >= deadline {
@@ -872,6 +882,12 @@ fn build_ops(
     let mut active_slots: Vec<u32> = active_local_slots(segment).into_iter().collect();
     active_slots.sort();
     for slot in active_slots {
+        ops.push(SatOp::Get(slot));
+        ops.push(SatOp::Set(slot));
+        ops.push(SatOp::Tee(slot));
+    }
+    // Synthetic scratch locals (SuperStack `local.tee[-1]`): slots beyond `max_local`.
+    for slot in (segment.bounds.max_local + 1)..(r as u32) {
         ops.push(SatOp::Get(slot));
         ops.push(SatOp::Set(slot));
         ops.push(SatOp::Tee(slot));
@@ -935,7 +951,9 @@ fn build_ops(
     for (ki, &kind) in sat_unops.iter().enumerate() {
         let mut edges = Vec::new();
         for a in 0..n {
-            for &res in lookup_all(uni_ids[ki][a]) {
+            let reps = lookup_all(uni_ids[ki][a]);
+            if !reps.is_empty() {
+                let res = *reps.iter().min().unwrap();
                 edges.push((a, res));
             }
         }
@@ -947,7 +965,9 @@ fn build_ops(
         let mut edges = Vec::new();
         for a1 in 0..n {
             for a0 in 0..n {
-                for &res in lookup_all(bin_ids[ki][a1 * n + a0]) {
+                let reps = lookup_all(bin_ids[ki][a1 * n + a0]);
+                if !reps.is_empty() {
+                    let res = *reps.iter().min().unwrap();
                     edges.push((a1, a0, res));
                 }
             }
@@ -1095,6 +1115,7 @@ fn encode(
     let ld = dims.ld;
     let bot = dims.bot();
     let star = dims.star();
+    let top = dims.top();
     let nop = NOP_INDEX;
     let past = |cnf: &Cnf| Instant::now() >= deadline || cnf.over_limit;
     let local_kinds = classify_local_slots(segment, r, vocab, canon)?;
@@ -1154,6 +1175,10 @@ fn encode(
         }
     }
     for rr in 0..r {
+        // Synthetic scratch locals (beyond `max_local`) are dead at exit → unconstrained.
+        if rr as u32 > segment.bounds.max_local {
+            continue;
+        }
         match fin.locals.get(&(rr as u32)) {
             Some(LocalReq::Need(v)) => {
                 let idx = vocab.real_of_expr(canon, v)?;
@@ -1207,6 +1232,7 @@ fn encode(
                 SatOp::Set(slot) => {
                     let slot = *slot as usize;
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
+                    cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
                     for v in 0..n {
                         cnf.imply_iff(xio, dims.w(i, slot, v), dims.y(i - 1, 0, v));
                     }
@@ -1216,6 +1242,7 @@ fn encode(
                 SatOp::Tee(slot) => {
                     let slot = *slot as usize;
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
+                    cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
                     for v in 0..n {
                         cnf.imply_iff(xio, dims.w(i, slot, v), dims.y(i - 1, 0, v));
                     }
@@ -1234,6 +1261,8 @@ fn encode(
                         domain.push(dims.y(i - 1, 0, a));
                         cnf.add(vec![-xio, -dims.y(i - 1, 0, a), dims.y(i, 0, res)]);
                     }
+                    // Domain miss or ⊤ operand → result is ⊤ (out-of-vocab sink).
+                    domain.push(dims.y(i, 0, top));
                     cnf.add(domain);
                     // Top changes; deeper cells unchanged.
                     for j in 1..h {
@@ -1246,7 +1275,7 @@ fn encode(
                 SatOp::Binop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 1, bot)]);
-                    // E-graph valid edges only: positive transitions + per-arg1 domain.
+                    // Total function: positive real→real edges + per-a1 domain with ⊤ fallback.
                     let mut by_a1: HashMap<usize, Vec<usize>> = HashMap::new();
                     for &(a1, a0, res) in edges {
                         by_a1.entry(a1).or_default().push(a0);
@@ -1257,13 +1286,18 @@ fn encode(
                             dims.y(i, 0, res),
                         ]);
                     }
-                    for (a1, a0s) in by_a1 {
+                    for a1 in 0..n {
                         let mut clause = vec![-xio, -dims.y(i - 1, 1, a1)];
-                        for a0 in a0s {
-                            clause.push(dims.y(i - 1, 0, a0));
+                        if let Some(a0s) = by_a1.get(&a1) {
+                            for &a0 in a0s {
+                                clause.push(dims.y(i - 1, 0, a0));
+                            }
                         }
+                        clause.push(dims.y(i, 0, top));
                         cnf.add(clause);
                     }
+                    // Absorbing: ⊤ operand → ⊤ result.
+                    cnf.add(vec![-xio, -dims.y(i - 1, 1, top), dims.y(i, 0, top)]);
                     stack_pop_shift(&mut cnf, dims, i, xio, 1);
                     locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
@@ -1544,7 +1578,7 @@ pub fn profile_sat(
     let vocab_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let t1 = Instant::now();
-    let r = (segment.bounds.max_local as usize) + 1;
+    let r = (segment.bounds.max_local as usize) + 1 + cfg.scratch_locals;
     let ops = build_ops(segment, &vocab, &mut canon, rules, r, deadline).ok_or("ops")?;
     let ops_ms = t1.elapsed().as_secs_f64() * 1000.0;
     let n_binop_ops = ops
@@ -1702,7 +1736,7 @@ pub fn diagnose_sat(
         return SatDiagnosis::VocabBuildFailed;
     };
 
-    let r = (segment.bounds.max_local as usize) + 1;
+    let r = (segment.bounds.max_local as usize) + 1 + cfg.scratch_locals;
     let Some(ops) = build_ops(segment, &vocab, &mut canon, rules, r, deadline) else {
         return SatDiagnosis::OpsBuildFailed;
     };
@@ -1915,6 +1949,7 @@ pub fn solve_sat(
         ops: None,
         timed_out: true,
         solver_time_secs: started.elapsed().as_secs_f64(),
+        proven_optimal: false,
     };
 
     let l_orig = segment.ops.len();
@@ -1923,6 +1958,7 @@ pub fn solve_sat(
         ops: None,
         timed_out: false,
         solver_time_secs: started.elapsed().as_secs_f64(),
+        proven_optimal: false,
     };
 
     if l_orig == 0 || l_orig > cfg.max_sat_len {
@@ -1940,7 +1976,7 @@ pub fn solve_sat(
         return timeout_result();
     }
 
-    let r = (segment.bounds.max_local as usize) + 1;
+    let r = (segment.bounds.max_local as usize) + 1 + cfg.scratch_locals;
     let Some(ops) = build_ops(segment, &vocab, &mut canon, rules, r, deadline) else {
         if timed_out_now() {
             return timeout_result();
@@ -1995,6 +2031,7 @@ pub fn solve_sat(
                 ops: None,
                 timed_out: true,
                 solver_time_secs: started.elapsed().as_secs_f64(),
+                proven_optimal: false,
             };
         }
     }
@@ -2009,6 +2046,7 @@ pub fn solve_sat(
     };
 
     let mut timed_out = false;
+    let mut proven_optimal = false;
     let mut ell = l_orig as isize - 1;
     while ell >= 0 {
         let now = Instant::now();
@@ -2026,7 +2064,10 @@ pub fn solve_sat(
                 }
                 ell -= 1;
             }
-            Some(false) => break, // proven optimal
+            Some(false) => {
+                proven_optimal = true;
+                break;
+            }
             None => {
                 timed_out = true;
                 break;
@@ -2038,6 +2079,7 @@ pub fn solve_sat(
         ops: best,
         timed_out,
         solver_time_secs: started.elapsed().as_secs_f64(),
+        proven_optimal,
     }
 }
 
@@ -2075,6 +2117,100 @@ mod tests {
             canon.canon(&l6),
             "0*40+x should canon to ?L6 via builtin rewrite rules"
         );
+    }
+
+    #[test]
+    fn topsink_totalization_enables_tee_fusion() {
+        use crate::optimize::search::{Backend, SearchConfig};
+        use crate::optimize::statistics::block_id;
+        let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
+        if !path.is_file() {
+            return;
+        }
+        let info = parse_wasm_file(path).expect("parse sign_test");
+        let raw = split_raw_segments(&info.segments, 12);
+        let segments = materialize_segments(&raw, 1);
+        let rules_v = rules();
+        let cfg = SearchConfig {
+            backend: Backend::Sat,
+            max_sat_len: 12,
+            fixed_segment_timeout: Some(60),
+            scratch_locals: 1,
+            ..SearchConfig::default()
+        };
+        for (bid, expected_len) in [("function_94_block_8", 8), ("function_18_block_12", 11)] {
+            let seg = segments.iter().find(|s| block_id(s) == bid).unwrap();
+            let scfg = cfg.for_segment(seg);
+            let res = solve_sat(seg, &rules_v, &scfg);
+            assert_eq!(
+                res.ops.as_ref().map(|o| o.len()),
+                Some(expected_len),
+                "{bid}: expected {expected_len}-instruction fused solution"
+            );
+            assert!(
+                res.proven_optimal,
+                "{bid}: should prove optimality after ⊤-sink totalization"
+            );
+        }
+    }
+
+    #[test]
+    fn scratch_local_enables_tee_fusion_gap_blocks() {
+        use crate::optimize::search::{Backend, SearchConfig};
+        use crate::optimize::statistics::block_id;
+        let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
+        if !path.is_file() {
+            return;
+        }
+        let info = parse_wasm_file(path).expect("parse sign_test");
+        let raw = split_raw_segments(&info.segments, 12);
+        let segments = materialize_segments(&raw, 1);
+        let r = rules();
+
+        let cfg = |scratch: usize| SearchConfig {
+            backend: Backend::Sat,
+            max_sat_len: 12,
+            fixed_segment_timeout: Some(30),
+            scratch_locals: scratch,
+            ..SearchConfig::default()
+        };
+
+        // `local.tee[-1]` gap blocks: each needs one synthetic scratch local for CSE.
+        // (`function_94_block_2` looks similar but is an existing-local `tee[3]` fusion with a
+        // commutative-add reorder, so it is a separate encoding gap and not covered here.)
+        let gap_blocks = [
+            "function_41_block_4",
+            "function_42_block_2",
+            "function_43_block_2",
+            "function_61_block_4",
+            "function_69_block_1",
+        ];
+        for bid in gap_blocks {
+            let seg = segments
+                .iter()
+                .find(|s| block_id(s) == bid)
+                .unwrap_or_else(|| panic!("{bid} present at split 12"));
+
+            let with_scratch = solve_sat(seg, &r, &cfg(1).for_segment(seg));
+            let no_scratch = solve_sat(seg, &r, &cfg(0).for_segment(seg));
+            let len_with = with_scratch.ops.as_ref().map(|o| o.len());
+            let len_without = no_scratch.ops.as_ref().map(|o| o.len());
+            eprintln!(
+                "{bid}: scratch=1 -> {len_with:?}, scratch=0 -> {len_without:?} (orig {})",
+                seg.original_len()
+            );
+
+            assert_eq!(
+                len_without,
+                Some(seg.original_len()),
+                "{bid}: without scratch it should stay at original length"
+            );
+            assert_eq!(
+                len_with,
+                Some(seg.original_len() - 1),
+                "{bid}: scratch local should enable a 1-instruction reduction"
+            );
+        }
     }
 
     #[test]

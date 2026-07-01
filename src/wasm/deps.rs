@@ -82,21 +82,97 @@ fn simplify_dependencies(deps: &[(u32, u32)]) -> Vec<(u32, u32)> {
         return deps.to_vec();
     }
 
+    // Map opaque ids to dense indices for bitset-based reachability.
+    let mut id_to_idx: HashMap<u32, usize> = HashMap::new();
+    for &(a, b) in deps {
+        let n = id_to_idx.len();
+        id_to_idx.entry(a).or_insert(n);
+        let n = id_to_idx.len();
+        id_to_idx.entry(b).or_insert(n);
+    }
+    let n = id_to_idx.len();
+
+    // Deduped adjacency plus in-degrees for topological sort.
+    let mut succ: Vec<HashSet<usize>> = vec![HashSet::new(); n];
+    let mut indeg: Vec<usize> = vec![0; n];
+    for &(a, b) in deps {
+        let ai = id_to_idx[&a];
+        let bi = id_to_idx[&b];
+        if ai != bi && succ[ai].insert(bi) {
+            indeg[bi] += 1;
+        }
+    }
+
+    // Kahn topological sort; a cycle means topo won't cover every node.
+    let mut queue: Vec<usize> = (0..n).filter(|&i| indeg[i] == 0).collect();
+    let mut topo: Vec<usize> = Vec::with_capacity(n);
+    let mut qi = 0;
+    while qi < queue.len() {
+        let u = queue[qi];
+        qi += 1;
+        topo.push(u);
+        for &v in &succ[u] {
+            indeg[v] -= 1;
+            if indeg[v] == 0 {
+                queue.push(v);
+            }
+        }
+    }
+
+    if topo.len() != n {
+        // Cyclic input: fall back to the DFS-based reduction (rare in practice).
+        return simplify_dependencies_generic(deps);
+    }
+
+    // Reachability as bitsets: reach[u] = nodes reachable from u via >= 1 edge.
+    // Processing in reverse topological order guarantees successors are done first.
+    let words = n.div_ceil(64);
+    let mut reach: Vec<u64> = vec![0; n * words];
+    for &u in topo.iter().rev() {
+        let base = u * words;
+        for &v in &succ[u] {
+            reach[base + v / 64] |= 1u64 << (v % 64);
+            let vbase = v * words;
+            for w in 0..words {
+                reach[base + w] |= reach[vbase + w];
+            }
+        }
+    }
+
+    // Edge (a, b) is redundant iff b is reachable from a via a path of length >= 2,
+    // i.e. some successor c != b of a can already reach b.
+    deps.iter()
+        .copied()
+        .filter(|&(a, b)| {
+            let ai = id_to_idx[&a];
+            let bi = id_to_idx[&b];
+            if ai == bi {
+                return true;
+            }
+            let redundant = succ[ai]
+                .iter()
+                .any(|&c| c != bi && (reach[c * words + bi / 64] >> (bi % 64)) & 1 == 1);
+            !redundant
+        })
+        .collect()
+}
+
+/// DFS-based transitive reduction used as a fallback when the graph has cycles.
+fn simplify_dependencies_generic(deps: &[(u32, u32)]) -> Vec<(u32, u32)> {
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
     for &(a, b) in deps {
         adj.entry(a).or_default().insert(b);
     }
 
-    // Reachability from each node (SuperStack: nx.transitive_reduction).
     let mut reach: HashMap<u32, HashSet<u32>> = HashMap::new();
     for start in adj.keys().copied().collect::<Vec<_>>() {
         let mut seen = HashSet::new();
         let mut stack = vec![start];
-        while let Some(n) = stack.pop() {
-            if !seen.insert(n) {
+        while let Some(node) = stack.pop() {
+            if !seen.insert(node) {
                 continue;
             }
-            if let Some(nexts) = adj.get(&n) {
+            if let Some(nexts) = adj.get(&node) {
                 stack.extend(nexts);
             }
         }
@@ -109,9 +185,9 @@ fn simplify_dependencies(deps: &[(u32, u32)]) -> Vec<(u32, u32)> {
             let Some(succ) = adj.get(&a) else {
                 return true;
             };
-            !succ.iter().any(|&c| {
-                c != b && reach.get(&c).is_some_and(|r| r.contains(&b))
-            })
+            !succ
+                .iter()
+                .any(|&c| c != b && reach.get(&c).is_some_and(|r| r.contains(&b)))
         })
         .collect()
 }

@@ -20,8 +20,8 @@ pub use sat::{
 pub use statistics::block_id;
 use search::solve_astar_traced;
 pub use search::{
-    Backend, DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
-    format_ops, max_sat_len_for_split,
+    Backend, DEFAULT_MAX_DEPTH, DEFAULT_SCRATCH_LOCALS, DEFAULT_TIMEOUT_BASE_SECS,
+    DIRECT_TIMEOUT_SECS, SearchConfig, format_ops, max_sat_len_for_split,
 };
 pub use search_graph::SearchTrace;
 pub use statistics::{statistics_rows, write_statistics_csv};
@@ -36,6 +36,8 @@ pub struct SegmentOptResult {
     pub timed_out: bool,
     pub solver_time_secs: f64,
     pub timeout_secs: u64,
+    /// True when the backend proved no shorter valid sequence exists within the encoding.
+    pub proven_optimal: bool,
 }
 
 impl SegmentOptResult {
@@ -79,6 +81,7 @@ pub fn optimize_segment_with_trace(
             timed_out: false,
             solver_time_secs: 0.0,
             timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
+            proven_optimal: false,
         };
     }
     if !segment.init.validate_bounds(&segment.bounds)
@@ -90,6 +93,7 @@ pub fn optimize_segment_with_trace(
             timed_out: false,
             solver_time_secs: 0.0,
             timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
+            proven_optimal: false,
         };
     }
     let (result, trace) = if segment_cfg.backend == Backend::Sat {
@@ -131,6 +135,7 @@ pub fn optimize_segment_with_trace(
         timed_out: result.timed_out,
         solver_time_secs: result.solver_time_secs,
         timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
+        proven_optimal: result.proven_optimal,
     }
 }
 

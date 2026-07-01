@@ -84,6 +84,10 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = SolverArg::Sat)]
     solver: SolverArg,
 
+    /// Synthetic scratch locals (SuperStack `local.tee[-1]`) for CSE in the SAT encoding.
+    #[arg(long, default_value_t = optimize::DEFAULT_SCRATCH_LOCALS)]
+    scratch_locals: usize,
+
     /// Classify SAT failure modes for blocks where SuperStack improved but ewasm did not
     /// (reads `combined_blocks.csv` from wasm-bench; requires WASM input for segment lookup).
     #[arg(long, value_name = "CSV", conflicts_with_all = ["synthesize_only", "segments_only", "print_semantics"])]
@@ -214,6 +218,7 @@ fn search_config_from_cli(cli: &Cli) -> optimize::SearchConfig {
         fixed_segment_timeout: cli.segment_timeout,
         backend: cli.solver.into(),
         max_sat_len: optimize::max_sat_len_for_split(cli.split),
+        scratch_locals: cli.scratch_locals,
     }
 }
 
