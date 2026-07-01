@@ -21,9 +21,8 @@ pub struct StatisticsRow {
     pub timeout: u64,
     /// Wall-clock time spent in A* search for this block, in seconds.
     pub solver_time_in_sec: f64,
-    /// Search result label: `optimal`, `non_optimal`, `timeout`, or `no_solution`.
-    /// `optimal` means a valid model was found within the encoding (encoding- and rule-set-relative;
-    /// analogous to Denali's "near-optimal"), not necessarily globally shortest Wasm.
+    /// `optimal` means a valid model was found and proven shortest within the seed-closed
+    /// SAT encoding; `non_optimal` when improved but not proven or encoding incomplete.
     pub outcome: String,
     /// Instruction count of the input block (same as `initial_length` in SuperStack).
     pub initial_n_instrs: usize,
@@ -148,18 +147,18 @@ fn classify_outcome(
     }
 
     let shown_optimal = result.proven_optimal;
+    let outcome = if shown_optimal {
+        "optimal".to_string()
+    } else {
+        "non_optimal".to_string()
+    };
 
     if improved && checker {
-        return (
-            "optimal".to_string(),
-            true,
-            shown_optimal,
-            "astar".to_string(),
-        );
+        return (outcome, true, shown_optimal, "astar".to_string());
     }
 
     (
-        "optimal".to_string(),
+        outcome,
         true,
         shown_optimal,
         if checker {

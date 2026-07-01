@@ -25,7 +25,9 @@ pub struct SearchResult {
     pub ops: Option<Vec<SemOp>>,
     pub timed_out: bool,
     pub solver_time_secs: f64,
-    /// True when the solver proved no shorter valid sequence exists (SAT UNSAT at best length).
+    /// True when the solver proved no shorter valid sequence exists within the
+    /// seed-closed SAT encoding (`SubExpr(EqSat(SubExpr(seed)))`) and no invalid
+    /// checker-rejected models were encountered.
     pub proven_optimal: bool,
 }
 

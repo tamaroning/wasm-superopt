@@ -25,14 +25,13 @@ use super::search::{SearchConfig, SearchResult, solution_valid};
 use crate::lang::ValueLang;
 use crate::semantics::{
     InstKind, SemOp, StackTy, const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op,
-    sat_pure_ops, sem_from_inst_kind, sem_to_value_op, synthesis_const_exprs,
-    value_op_from_inst_kind, value_op_is_binop, value_op_is_unop,
+    sat_pure_ops, sem_from_inst_kind, sem_to_value_op, synthesis_const_exprs, value_op_is_binop,
+    value_op_is_unop,
 };
-use crate::sym::{LocalReq, SymMachine, SymState, ValueExpr, all_subtree_exprs};
+use crate::sym::{LocalReq, SymMachine, SymState, ValueExpr, all_subtree_exprs, subtree_expr};
 use crate::value::{ValueOp, parse_value_expr};
 use crate::wasm::{OpaqueMeta, StraightSegment};
 use cadical::{Solver, Timeout};
-use egg::{Id, Runner};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -53,12 +52,7 @@ fn max_vocab_for_segment(segment: &StraightSegment) -> usize {
 }
 /// Abort CNF generation beyond this many clauses (heavy sign_test blocks exceed ~1.5M).
 const MAX_CNF_CLAUSES: usize = 8_000_000;
-/// Equivalence-saturation rounds for vocabulary expansion (`k_sat`).
-const K_SAT: usize = 2;
 /// Equality-saturation limits for the batched operation-result-table build.
-const TABLE_ITER_LIMIT: usize = 12;
-const TABLE_NODE_LIMIT: usize = 100_000;
-
 /// Stack-height bound `H` for SAT encoding.
 ///
 /// Tee-fusion / spill-to-stack schedules can require a taller stack than the original
@@ -171,6 +165,8 @@ struct Vocab {
     equiv_class: Vec<usize>,
     /// Canon id → real index.
     index_of_canon: HashMap<CanonId, usize>,
+    /// False when `|V|` cap or saturation truncation left the closure incomplete.
+    complete: bool,
 }
 
 impl Vocab {
@@ -385,21 +381,6 @@ impl Cnf {
     }
 }
 
-fn kind_pattern(kind: InstKind) -> &'static str {
-    value_op_from_inst_kind(kind)
-        .expect("pure SAT op")
-        .pattern_name()
-}
-
-fn binop_expr(kind: InstKind, a1: &ValueExpr, a0: &ValueExpr) -> ValueExpr {
-    parse_value_expr(&format!("({} {a1} {a0})", kind_pattern(kind)))
-}
-
-fn unop_expr(kind: InstKind, a: &ValueExpr) -> ValueExpr {
-    parse_value_expr(&format!("({} {a})", kind_pattern(kind)))
-}
-
-/// Operand value-expr strings required at stack top-positions `0..pops` (top first),
 /// matching forward execution (`SymMachine::exec_with_meta`).
 fn opaque_in_at_top(sem: &SemOp, meta: &OpaqueMeta) -> Vec<String> {
     match sem {
@@ -749,17 +730,39 @@ fn build_vocab_with_limit(
     let mut index_of_canon: HashMap<CanonId, usize> = HashMap::new();
     let mut reals: Vec<ValueExpr> = Vec::new();
     let mut canon_ids: Vec<CanonId> = Vec::new();
+    let mut complete = true;
 
-    // Phase 1 — core vocabulary (trace + type-filtered synthesis constants). These MUST
-    // all fit so the original sequence is representable (first descending solve is SAT).
+    // V = SubExpr(EqSat(SubExpr(seed))) where seed = trace + boundaries + opaque symbols
+    // + type-filtered synthesis constants.
     let types = types_in_segment(segment);
     let mut core: Vec<ValueExpr> = seeds;
     core.extend(synthesis_const_exprs_for_types(&types));
     dedup_by_string(&mut core);
 
+    let mut sub0: Vec<ValueExpr> = Vec::new();
     for e in &core {
+        sub0.extend(all_subtree_exprs(e));
+    }
+    dedup_by_string(&mut sub0);
+
+    if Instant::now() >= deadline {
+        return None;
+    }
+    let saturated = canon.joint_saturate_materialize(&sub0);
+
+    let mut closure: Vec<ValueExpr> = Vec::new();
+    for e in &saturated {
+        closure.extend(all_subtree_exprs(e));
+    }
+    dedup_by_string(&mut closure);
+
+    for e in &closure {
         if Instant::now() >= deadline {
             return None;
+        }
+        if reals.len() >= max_vocab {
+            complete = false;
+            break;
         }
         if !try_insert_vocab(
             e,
@@ -769,68 +772,17 @@ fn build_vocab_with_limit(
             &mut reals,
             &mut canon_ids,
         ) {
-            return None; // core alone exceeds |V| cap
+            complete = false;
+            break;
         }
     }
 
-    // Phase 2 — subtree expansion (best-effort): dedupe by string before canon to avoid
-    // repeated e-graph work; stop at |V| cap without failing.
-    let mut subtree_candidates: Vec<ValueExpr> = Vec::new();
+    // Core seeds must all be representable for the original-program witness.
     for e in &core {
-        subtree_candidates.extend(all_subtree_exprs(e));
-    }
-    dedup_by_string(&mut subtree_candidates);
-    for e in &subtree_candidates {
-        if Instant::now() >= deadline {
+        let id = canon.canon(e);
+        if !index_of_canon.contains_key(&id) {
             return None;
         }
-        if reals.len() >= max_vocab {
-            break;
-        }
-        let _ = try_insert_vocab(
-            e,
-            canon,
-            max_vocab,
-            &mut index_of_canon,
-            &mut reals,
-            &mut canon_ids,
-        );
-    }
-
-    // Phase 3 — equivalence saturation (best-effort, capped): mul/shl decompositions, etc.
-    let mut frontier: Vec<ValueExpr> = reals.clone();
-    'rounds: for _ in 0..K_SAT {
-        if Instant::now() >= deadline {
-            return None;
-        }
-        let mut next: Vec<ValueExpr> = Vec::new();
-        for e in &frontier {
-            if Instant::now() >= deadline {
-                return None;
-            }
-            for (_, e1, e2) in canon.binop_decompositions(e) {
-                for cand in all_subtree_exprs(&e1)
-                    .into_iter()
-                    .chain(all_subtree_exprs(&e2))
-                {
-                    if !try_insert_vocab(
-                        &cand,
-                        canon,
-                        max_vocab,
-                        &mut index_of_canon,
-                        &mut reals,
-                        &mut canon_ids,
-                    ) {
-                        break 'rounds;
-                    }
-                    next.push(cand);
-                }
-            }
-        }
-        if next.is_empty() {
-            break;
-        }
-        frontier = next;
     }
 
     if reals.is_empty() {
@@ -848,27 +800,107 @@ fn build_vocab_with_limit(
             canon_ids,
             equiv_class,
             index_of_canon,
+            complete,
         },
         max_height,
     ))
 }
 
+/// Relative indices in `V` that are ≡_R-equivalent to `req` (for opaque operand pins).
+fn equiv_reals(vocab: &Vocab, req: usize) -> Vec<usize> {
+    let target = vocab.equiv_class[req];
+    vocab
+        .equiv_class
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &ec)| (ec == target).then_some(i))
+        .collect()
+}
+
+fn push_binop_edge(
+    edges: &mut Vec<(usize, usize, usize)>,
+    vocab: &Vocab,
+    a1: usize,
+    a0: usize,
+    res: usize,
+) {
+    for e1 in equiv_reals(vocab, a1) {
+        for e0 in equiv_reals(vocab, a0) {
+            for r in equiv_reals(vocab, res) {
+                let edge = (e1, e0, r);
+                if !edges.contains(&edge) {
+                    edges.push(edge);
+                }
+            }
+        }
+    }
+}
+
+fn push_unop_edge(edges: &mut Vec<(usize, usize)>, vocab: &Vocab, a: usize, res: usize) {
+    for e in equiv_reals(vocab, a) {
+        for r in equiv_reals(vocab, res) {
+            let edge = (e, r);
+            if !edges.contains(&edge) {
+                edges.push(edge);
+            }
+        }
+    }
+}
+
+/// Extract pure-op transition tables from structural decompositions present in `V`.
+fn extract_pure_edges_from_vocab(
+    vocab: &Vocab,
+    canon: &mut Canonizer,
+    sat_binops: &HashSet<InstKind>,
+    sat_unops: &HashSet<InstKind>,
+) -> (
+    HashMap<InstKind, Vec<(usize, usize, usize)>>,
+    HashMap<InstKind, Vec<(usize, usize)>>,
+) {
+    let mut binop_edges: HashMap<InstKind, Vec<(usize, usize, usize)>> = HashMap::new();
+    let mut unop_edges: HashMap<InstKind, Vec<(usize, usize)>> = HashMap::new();
+
+    for (res_idx, expr) in vocab.reals.iter().enumerate() {
+        let root = expr.root();
+        let Some((vop, child_ids)) = ValueOp::from_lang(&expr[root]) else {
+            continue;
+        };
+        let kind = inst_kind_from_value_op(vop);
+        if child_ids.len() == 2 && sat_binops.contains(&kind) {
+            let a1_expr = subtree_expr(expr, child_ids[0]);
+            let a0_expr = subtree_expr(expr, child_ids[1]);
+            if let (Some(a1), Some(a0)) = (
+                vocab.real_of_expr(canon, &a1_expr),
+                vocab.real_of_expr(canon, &a0_expr),
+            ) {
+                push_binop_edge(binop_edges.entry(kind).or_default(), vocab, a1, a0, res_idx);
+            }
+        } else if child_ids.len() == 1 && sat_unops.contains(&kind) {
+            let a_expr = subtree_expr(expr, child_ids[0]);
+            if let Some(a) = vocab.real_of_expr(canon, &a_expr) {
+                push_unop_edge(unop_edges.entry(kind).or_default(), vocab, a, res_idx);
+            }
+        }
+    }
+
+    (binop_edges, unop_edges)
+}
+
 /// Build the SAT instruction alphabet (NOP first), pruning ops with no defined result.
 ///
-/// Unary/binary result tables `T_∘` / `T_⊕` (§2.3): batched equality saturation over
-/// `V × V`, mapping every vocab index per result e-class, plus §2.1.4 trace rows.
+/// Pure-op tables are extracted from structural decompositions already present in `V`
+/// (no `V×V` candidate applications). Trace witness rows are merged separately.
 fn build_ops(
     segment: &StraightSegment,
     vocab: &Vocab,
     canon: &mut Canonizer,
-    rules: &[egg::Rewrite<ValueLang, ()>],
+    _rules: &[egg::Rewrite<ValueLang, ()>],
     r: usize,
     deadline: Instant,
 ) -> Option<Vec<SatOp>> {
     if Instant::now() >= deadline {
         return None;
     }
-    let n = vocab.n();
     let mut ops = vec![SatOp::Nop];
     let types = types_in_segment_and_vocab(segment, vocab);
     let sat_binops = sat_binop_kinds_for(segment, vocab);
@@ -911,84 +943,23 @@ fn build_ops(
     }
     ops.push(SatOp::Drop);
 
-    // One e-graph holding every real value and every candidate application.
-    let mut runner = Runner::default()
-        .with_iter_limit(TABLE_ITER_LIMIT)
-        .with_node_limit(TABLE_NODE_LIMIT);
-    let real_ids: Vec<Id> = vocab
-        .reals
-        .iter()
-        .map(|e| runner.egraph.add_expr(e))
-        .collect();
-
-    let mut uni_ids: Vec<Vec<Id>> = Vec::with_capacity(sat_unops.len());
-    for &kind in &sat_unops {
-        let mut col = Vec::with_capacity(n);
-        for a in 0..n {
-            col.push(runner.egraph.add_expr(&unop_expr(kind, &vocab.reals[a])));
-        }
-        uni_ids.push(col);
-    }
-    let mut bin_ids: Vec<Vec<Id>> = Vec::with_capacity(sat_binops.len());
-    for &kind in &sat_binops {
-        let mut col = Vec::with_capacity(n * n);
-        for a1 in 0..n {
-            for a0 in 0..n {
-                col.push(runner.egraph.add_expr(&binop_expr(
-                    kind,
-                    &vocab.reals[a1],
-                    &vocab.reals[a0],
-                )));
-            }
-        }
-        bin_ids.push(col);
-    }
+    let sat_binop_set: HashSet<InstKind> = sat_binops.into_iter().collect();
+    let sat_unop_set: HashSet<InstKind> = sat_unops.into_iter().collect();
+    let (binop_edges, unop_edges) =
+        extract_pure_edges_from_vocab(vocab, canon, &sat_binop_set, &sat_unop_set);
 
     if Instant::now() >= deadline {
         return None;
     }
-    let runner = runner.run(rules);
-    if Instant::now() >= deadline {
-        return None;
-    }
-    let mut class_to_reals: HashMap<Id, Vec<usize>> = HashMap::new();
-    for (i, id) in real_ids.iter().enumerate() {
-        class_to_reals
-            .entry(runner.egraph.find(*id))
-            .or_default()
-            .push(i);
-    }
-    let lookup_all = |id: Id| -> &[usize] {
-        class_to_reals
-            .get(&runner.egraph.find(id))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    };
 
-    for (ki, &kind) in sat_unops.iter().enumerate() {
-        let mut edges = Vec::new();
-        for a in 0..n {
-            let reps = lookup_all(uni_ids[ki][a]);
-            for &res in reps {
-                edges.push((a, res));
-            }
-        }
-        if !edges.is_empty() {
-            ops.push(SatOp::Unop { kind, edges });
-        }
-    }
-    for (ki, &kind) in sat_binops.iter().enumerate() {
-        let mut edges = Vec::new();
-        for a1 in 0..n {
-            for a0 in 0..n {
-                let reps = lookup_all(bin_ids[ki][a1 * n + a0]);
-                for &res in reps {
-                    edges.push((a1, a0, res));
-                }
-            }
-        }
+    for (kind, edges) in binop_edges {
         if !edges.is_empty() {
             ops.push(SatOp::Binop { kind, edges });
+        }
+    }
+    for (kind, edges) in unop_edges {
+        if !edges.is_empty() {
+            ops.push(SatOp::Unop { kind, edges });
         }
     }
 
@@ -1021,17 +992,6 @@ fn build_ops(
     }
 
     Some(ops)
-}
-
-/// Relative indices in `V` that are ≡_R-equivalent to `req` (for opaque operand pins).
-fn equiv_reals(vocab: &Vocab, req: usize) -> Vec<usize> {
-    let target = vocab.equiv_class[req];
-    vocab
-        .equiv_class
-        .iter()
-        .enumerate()
-        .filter_map(|(i, &ec)| (ec == target).then_some(i))
-        .collect()
 }
 
 fn pin_stack_equiv(cnf: &mut Cnf, dims: &Dims, vocab: &Vocab, i: usize, j: usize, req: usize) {
@@ -1284,6 +1244,7 @@ fn encode(
                 }
                 SatOp::Unop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
+                    cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
                     let mut by_arg: HashMap<usize, Vec<usize>> = HashMap::new();
                     for &(a, res) in edges {
                         by_arg.entry(a).or_default().push(res);
@@ -1295,13 +1256,11 @@ fn encode(
                         }
                         cnf.add(clause);
                     }
-                    let mut domain = vec![-xio];
-                    for &a in by_arg.keys() {
-                        domain.push(dims.y(i - 1, 0, a));
+                    for a in 0..n {
+                        if !by_arg.contains_key(&a) {
+                            cnf.add(vec![-xio, -dims.y(i - 1, 0, a)]);
+                        }
                     }
-                    // Domain miss or ⊤ operand → result is ⊤ (out-of-vocab sink).
-                    domain.push(dims.y(i, 0, top));
-                    cnf.add(domain);
                     // Top changes; deeper cells unchanged.
                     for j in 1..h {
                         for v in 0..sd {
@@ -1313,12 +1272,13 @@ fn encode(
                 SatOp::Binop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 1, bot)]);
-                    // Total relation: positive real→one real result + per-a1 domain with ⊤ fallback.
+                    cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
+                    cnf.add(vec![-xio, -dims.y(i - 1, 1, top)]);
                     let mut by_pair: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
-                    let mut by_a1: HashMap<usize, Vec<usize>> = HashMap::new();
+                    let mut by_a1: HashSet<usize> = HashSet::new();
                     for &(a1, a0, res) in edges {
                         by_pair.entry((a1, a0)).or_default().push(res);
-                        by_a1.entry(a1).or_default().push(a0);
+                        by_a1.insert(a1);
                     }
                     for (&(a1, a0), results) in &by_pair {
                         let mut clause = vec![-xio, -dims.y(i - 1, 1, a1), -dims.y(i - 1, 0, a0)];
@@ -1328,17 +1288,17 @@ fn encode(
                         cnf.add(clause);
                     }
                     for a1 in 0..n {
-                        let mut clause = vec![-xio, -dims.y(i - 1, 1, a1)];
-                        if let Some(a0s) = by_a1.get(&a1) {
-                            for &a0 in a0s {
-                                clause.push(dims.y(i - 1, 0, a0));
+                        if !by_a1.contains(&a1) {
+                            cnf.add(vec![-xio, -dims.y(i - 1, 1, a1)]);
+                        }
+                    }
+                    for a1 in 0..n {
+                        for a0 in 0..n {
+                            if !by_pair.contains_key(&(a1, a0)) {
+                                cnf.add(vec![-xio, -dims.y(i - 1, 1, a1), -dims.y(i - 1, 0, a0)]);
                             }
                         }
-                        clause.push(dims.y(i, 0, top));
-                        cnf.add(clause);
                     }
-                    // Absorbing: ⊤ operand → ⊤ result.
-                    cnf.add(vec![-xio, -dims.y(i - 1, 1, top), dims.y(i, 0, top)]);
                     stack_pop_shift(&mut cnf, dims, i, xio, 1);
                     locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
@@ -1537,6 +1497,23 @@ fn reconstruct(solver: &Solver, dims: &Dims, ops: &[SatOp]) -> Vec<SemOp> {
         }
     }
     seq
+}
+
+fn block_current_op_model(solver: &mut Solver, dims: &Dims) -> bool {
+    let mut clause = Vec::with_capacity(dims.l);
+    for i in 1..=dims.l {
+        for o in 0..dims.n_ops {
+            if solver.value(dims.x(i, o)) == Some(true) {
+                clause.push(-dims.x(i, o));
+                break;
+            }
+        }
+    }
+    if clause.is_empty() {
+        return false;
+    }
+    solver.add_clause(clause.iter().copied());
+    true
 }
 
 fn forward_valid(ops: &[SemOp], segment: &StraightSegment, canon: &mut Canonizer) -> bool {
@@ -1809,32 +1786,44 @@ pub fn diagnose_sat(
     let mut ell = l_orig as isize - 1;
     let mut timed_out = false;
     let mut proven_optimal = false;
-    while ell >= 0 {
-        let now = Instant::now();
-        if now >= deadline {
-            timed_out = true;
-            break;
-        }
-        solver.set_callbacks(Some(Timeout::new(remaining(now).max(0.0))));
-        let assumption = dims.x((ell as usize) + 1, nop);
-        match solver.solve_with([assumption]) {
-            Some(true) => {
-                let seq = reconstruct(&solver, &dims, &ops);
-                if forward_valid(&seq, segment, &mut canon) {
-                    best_len = best_len.min(seq.len());
-                }
-                ell -= 1;
-            }
-            Some(false) => {
-                proven_optimal = true;
-                break;
-            }
-            None => {
+    let mut saw_invalid_model = false;
+    let encoding_complete = vocab.complete;
+    'lengths: while ell >= 0 {
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
                 timed_out = true;
-                break;
+                break 'lengths;
+            }
+            solver.set_callbacks(Some(Timeout::new(remaining(now).max(0.0))));
+            let assumption = dims.x((ell as usize) + 1, nop);
+            match solver.solve_with([assumption]) {
+                Some(true) => {
+                    let seq = reconstruct(&solver, &dims, &ops);
+                    if forward_valid(&seq, segment, &mut canon) {
+                        best_len = best_len.min(seq.len());
+                        ell -= 1;
+                        break;
+                    }
+                    saw_invalid_model = true;
+                    if !block_current_op_model(&mut solver, &dims) {
+                        timed_out = true;
+                        break 'lengths;
+                    }
+                }
+                Some(false) => {
+                    proven_optimal = true;
+                    break 'lengths;
+                }
+                None => {
+                    timed_out = true;
+                    break 'lengths;
+                }
             }
         }
     }
+
+    proven_optimal = proven_optimal && encoding_complete && !saw_invalid_model && !timed_out;
 
     SatDiagnosis::Solved {
         best_len,
@@ -2062,33 +2051,45 @@ pub fn solve_sat(
 
     let mut timed_out = false;
     let mut proven_optimal = false;
+    let mut saw_invalid_model = false;
+    let encoding_complete = vocab.complete;
     let mut ell = l_orig as isize - 1;
-    while ell >= 0 {
-        let now = Instant::now();
-        if now >= deadline {
-            timed_out = true;
-            break;
-        }
-        solver.set_callbacks(Some(Timeout::new(remaining(now).max(0.0))));
-        let assumption = dims.x((ell as usize) + 1, nop);
-        match solver.solve_with([assumption]) {
-            Some(true) => {
-                let seq = reconstruct(&solver, &dims, &ops);
-                if forward_valid(&seq, segment, &mut canon) {
-                    best = Some(seq);
-                }
-                ell -= 1;
-            }
-            Some(false) => {
-                proven_optimal = true;
-                break;
-            }
-            None => {
+    'lengths: while ell >= 0 {
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
                 timed_out = true;
-                break;
+                break 'lengths;
+            }
+            solver.set_callbacks(Some(Timeout::new(remaining(now).max(0.0))));
+            let assumption = dims.x((ell as usize) + 1, nop);
+            match solver.solve_with([assumption]) {
+                Some(true) => {
+                    let seq = reconstruct(&solver, &dims, &ops);
+                    if forward_valid(&seq, segment, &mut canon) {
+                        best = Some(seq);
+                        ell -= 1;
+                        break;
+                    }
+                    saw_invalid_model = true;
+                    if !block_current_op_model(&mut solver, &dims) {
+                        timed_out = true;
+                        break 'lengths;
+                    }
+                }
+                Some(false) => {
+                    proven_optimal = true;
+                    break 'lengths;
+                }
+                None => {
+                    timed_out = true;
+                    break 'lengths;
+                }
             }
         }
     }
+
+    proven_optimal = proven_optimal && encoding_complete && !saw_invalid_model && !timed_out;
 
     SearchResult {
         ops: best,
@@ -2122,32 +2123,57 @@ pub(crate) fn solve_at_length_minus_one_with_h(
         solver.add_clause(clause.iter().copied());
     }
     let remaining = |now: Instant| deadline.saturating_duration_since(now).as_secs_f32();
-    solver.set_callbacks(Some(Timeout::new(remaining(Instant::now()).max(0.0))));
     let nop = NOP_INDEX;
     let assumption = dims.x(l_orig, nop);
-    match solver.solve_with([assumption]) {
-        Some(true) => {
-            let seq = reconstruct(&solver, &dims, &ops);
-            let valid = forward_valid(&seq, segment, &mut canon);
-            Some(SolveAtLengthResult {
-                sat: true,
-                valid,
-                seq: if valid { Some(seq) } else { None },
-                timed_out: false,
-            })
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Some(SolveAtLengthResult {
+                sat: false,
+                valid: false,
+                seq: None,
+                timed_out: true,
+            });
         }
-        Some(false) => Some(SolveAtLengthResult {
-            sat: false,
-            valid: false,
-            seq: None,
-            timed_out: false,
-        }),
-        None => Some(SolveAtLengthResult {
-            sat: false,
-            valid: false,
-            seq: None,
-            timed_out: true,
-        }),
+        solver.set_callbacks(Some(Timeout::new(remaining(now).max(0.0))));
+        match solver.solve_with([assumption]) {
+            Some(true) => {
+                let seq = reconstruct(&solver, &dims, &ops);
+                let valid = forward_valid(&seq, segment, &mut canon);
+                if valid {
+                    return Some(SolveAtLengthResult {
+                        sat: true,
+                        valid: true,
+                        seq: Some(seq),
+                        timed_out: false,
+                    });
+                }
+                if !block_current_op_model(&mut solver, &dims) {
+                    return Some(SolveAtLengthResult {
+                        sat: true,
+                        valid: false,
+                        seq: None,
+                        timed_out: true,
+                    });
+                }
+            }
+            Some(false) => {
+                return Some(SolveAtLengthResult {
+                    sat: false,
+                    valid: false,
+                    seq: None,
+                    timed_out: false,
+                });
+            }
+            None => {
+                return Some(SolveAtLengthResult {
+                    sat: false,
+                    valid: false,
+                    seq: None,
+                    timed_out: true,
+                });
+            }
+        }
     }
 }
 
@@ -2246,6 +2272,7 @@ mod tests {
             canon_ids: vec![10, 11],
             equiv_class: vec![0, 0],
             index_of_canon: [(10, 0), (11, 1)].into_iter().collect(),
+            complete: true,
         };
         assert_eq!(equiv_reals(&vocab, 0), vec![0, 1]);
         assert_eq!(equiv_reals(&vocab, 1), vec![0, 1]);
@@ -2905,5 +2932,62 @@ mod tests {
             ops.len() <= seg.original_len(),
             "function_14_block_0_0: should not lengthen the segment"
         );
+    }
+
+    #[test]
+    fn gap_probe_csv_blocks() {
+        use crate::optimize::search::{Backend, SearchConfig};
+        use crate::optimize::statistics::block_id;
+        use crate::optimize::sat::{solve_at_length_minus_one_with_h, stack_height_bound};
+        use crate::optimize::canon::Canonizer;
+        use crate::wasm::{parse_wasm_file, materialize_segments, split_raw_segments};
+        use std::time::Instant;
+
+        let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
+        if !path.is_file() {
+            return;
+        }
+        let info = parse_wasm_file(path).expect("parse");
+        let segments = materialize_segments(&split_raw_segments(&info.segments, 12), 1);
+        let rules = rules();
+        let cfg = SearchConfig {
+            backend: Backend::Sat,
+            max_sat_len: 12,
+            fixed_segment_timeout: Some(60),
+            scratch_locals: 1,
+            ..SearchConfig::default()
+        };
+        let probes = [
+            ("function_14_block_0_13", 11),
+            ("function_25_block_0_10", 11),
+            ("function_24_block_0_75", 9),
+            ("function_24_block_0_3", 9),
+            ("function_13_block_0_10", 11),
+            ("function_23_block_0_12", 11),
+            ("function_24_block_0_101", 11),
+        ];
+        let deadline = Instant::now() + std::time::Duration::from_secs(180);
+        for (bid, ss_len) in probes {
+            let seg = segments
+                .iter()
+                .find(|s| block_id(s) == bid)
+                .unwrap_or_else(|| panic!("{bid}"));
+            let scfg = cfg.for_segment(seg);
+            let res = solve_sat(seg, &rules, &scfg);
+            let mut canon = Canonizer::new(rules.clone());
+            let (vocab, max_h) = build_vocab(seg, &mut canon, deadline).expect("vocab");
+            let h = stack_height_bound(max_h, seg, 1);
+            let probe = solve_at_length_minus_one_with_h(seg, &rules, &scfg, h, deadline);
+            eprintln!(
+                "{bid}: orig={} ss={ss_len} solve={:?} proven={} probe_L-1 sat={} valid={} H={} |V|={}",
+                seg.original_len(),
+                res.ops.as_ref().map(|o| o.len()),
+                res.proven_optimal,
+                probe.as_ref().map(|p| p.sat).unwrap_or(false),
+                probe.as_ref().map(|p| p.valid).unwrap_or(false),
+                h,
+                vocab.n(),
+            );
+        }
     }
 }

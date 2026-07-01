@@ -170,6 +170,30 @@ impl Canonizer {
     ///
     /// Returns one class id per expression (parallel to `exprs`). Used to close opaque
     /// operand pins over the full equivalence class, not just per-call `canon()` ids.
+    /// Joint equality saturation over `exprs`, returning originals plus one
+    /// materialized representative per reachable e-class.
+    pub fn joint_saturate_materialize(&self, exprs: &[ValueExpr]) -> Vec<ValueExpr> {
+        if exprs.is_empty() {
+            return Vec::new();
+        }
+        let mut runner = Runner::default()
+            .with_iter_limit(EQSAT_ITER_LIMIT)
+            .with_node_limit(EQSAT_NODE_LIMIT);
+        let ids: Vec<Id> = exprs.iter().map(|e| runner.egraph.add_expr(e)).collect();
+        let runner = runner.run(&self.rules);
+        let mut out: Vec<ValueExpr> = exprs.to_vec();
+        let mut seen = HashSet::new();
+        for id in ids {
+            let ec = runner.egraph.find(id);
+            if seen.insert(ec) {
+                out.push(runner.egraph.id_to_expr(ec));
+            }
+        }
+        let mut deduped = HashSet::new();
+        out.retain(|e| deduped.insert(e.to_string()));
+        out
+    }
+
     pub fn equiv_partition(&self, exprs: &[ValueExpr]) -> Vec<usize> {
         if exprs.is_empty() {
             return Vec::new();
