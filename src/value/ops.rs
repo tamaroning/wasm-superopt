@@ -390,34 +390,6 @@ impl ValueOp {
             .filter(move |op| op.push() == ty)
     }
 
-    pub fn is_commutative(self) -> bool {
-        matches!(
-            self,
-            ValueOp::I32Add
-                | ValueOp::I32Mul
-                | ValueOp::I32And
-                | ValueOp::I32Or
-                | ValueOp::I32Xor
-                | ValueOp::I32Eq
-                | ValueOp::I32Ne
-                | ValueOp::I64Add
-                | ValueOp::I64Mul
-                | ValueOp::I64And
-                | ValueOp::I64Or
-                | ValueOp::I64Xor
-                | ValueOp::I64Eq
-                | ValueOp::I64Ne
-                | ValueOp::F32Add
-                | ValueOp::F32Mul
-                | ValueOp::F32Eq
-                | ValueOp::F32Ne
-                | ValueOp::F64Add
-                | ValueOp::F64Mul
-                | ValueOp::F64Eq
-                | ValueOp::F64Ne
-        )
-    }
-
     pub fn to_enode(self, args: &[Id]) -> ValueLang {
         use ValueOp::*;
         match (self, args) {

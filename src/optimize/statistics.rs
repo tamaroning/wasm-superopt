@@ -1,7 +1,9 @@
 //! SuperStack-compatible `statistics.csv` rows for benchmark analysis.
 
 use super::SegmentOptResult;
-use super::search::validate_solution_ops;
+use super::canon::Canonizer;
+use super::search::solution_valid;
+use crate::lang::ValueLang;
 use crate::wasm::StraightSegment;
 use crate::wasm::format_ops_superstack_csv;
 use serde::Serialize;
@@ -33,7 +35,7 @@ pub struct StatisticsRow {
     pub used_bound: usize,
     /// Instructions saved: `initial_length - optimized_length`.
     pub saved_length: usize,
-    /// Whether the optimized sequence passes semantic validation (`validate_solution_ops`).
+    /// Whether the optimized sequence passes semantic validation (`solution_valid`).
     pub checker: bool,
     /// Which solution was kept: `astar`, `original`, or SuperStack-style tags when applicable.
     pub final_solution_tag: String,
@@ -109,7 +111,11 @@ pub fn block_id(segment: &StraightSegment) -> String {
     id
 }
 
-fn classify_outcome(result: &SegmentOptResult, initial_len: usize) -> (String, bool, bool, String) {
+fn classify_outcome(
+    result: &SegmentOptResult,
+    initial_len: usize,
+    checker: bool,
+) -> (String, bool, bool, String) {
     let Some(ops) = &result.optimized else {
         return (
             if result.timed_out {
@@ -124,7 +130,6 @@ fn classify_outcome(result: &SegmentOptResult, initial_len: usize) -> (String, b
     };
 
     let opt_len = ops.len();
-    let checker = validate_solution_ops(ops, &result.segment);
     let improved = opt_len < initial_len;
 
     if result.timed_out {
@@ -132,7 +137,7 @@ fn classify_outcome(result: &SegmentOptResult, initial_len: usize) -> (String, b
             "non_optimal".to_string(),
             true,
             false,
-            if improved {
+            if improved && checker {
                 "astar".to_string()
             } else {
                 "original".to_string()
@@ -140,7 +145,7 @@ fn classify_outcome(result: &SegmentOptResult, initial_len: usize) -> (String, b
         );
     }
 
-    if improved {
+    if improved && checker {
         return ("optimal".to_string(), true, true, "astar".to_string());
     }
 
@@ -156,26 +161,36 @@ fn classify_outcome(result: &SegmentOptResult, initial_len: usize) -> (String, b
     )
 }
 
-pub fn statistics_row(result: &SegmentOptResult) -> StatisticsRow {
+pub fn statistics_row(result: &SegmentOptResult, canon: &mut Canonizer) -> StatisticsRow {
     let segment = &result.segment;
     let initial_len = segment.original_len();
     let timeout = result.timeout_secs;
-    let (outcome, model_found, shown_optimal, final_solution_tag) =
-        classify_outcome(result, initial_len);
 
-    let (solution_found, optimized_n_instrs, optimized_length, used_bound, saved_length, checker) =
+    let checker = result
+        .optimized
+        .as_ref()
+        .is_some_and(|ops| solution_valid(ops, segment, canon));
+
+    let (outcome, model_found, shown_optimal, final_solution_tag) =
+        classify_outcome(result, initial_len, checker);
+
+    let (solution_found, optimized_n_instrs, optimized_length, used_bound, saved_length) =
         if let Some(ops) = &result.optimized {
             let opt_len = ops.len();
+            let saved = if checker {
+                initial_len.saturating_sub(opt_len)
+            } else {
+                0
+            };
             (
                 format_ops_superstack_csv(ops, &result.segment.disasm_by_id),
-                opt_len,
-                opt_len,
-                opt_len,
-                initial_len.saturating_sub(opt_len),
-                validate_solution_ops(ops, segment),
+                if checker { opt_len } else { initial_len },
+                if checker { opt_len } else { initial_len },
+                if checker { opt_len } else { initial_len },
+                saved,
             )
         } else {
-            (String::new(), 0, 0, initial_len, 0, false)
+            (String::new(), 0, 0, initial_len, 0)
         };
 
     StatisticsRow {
@@ -199,8 +214,15 @@ pub fn statistics_row(result: &SegmentOptResult) -> StatisticsRow {
     }
 }
 
-pub fn statistics_rows(results: &[SegmentOptResult]) -> Vec<StatisticsRow> {
-    results.iter().map(statistics_row).collect()
+pub fn statistics_rows(
+    results: &[SegmentOptResult],
+    rules: &[egg::Rewrite<ValueLang, ()>],
+) -> Vec<StatisticsRow> {
+    let mut canon = Canonizer::new(rules.to_vec());
+    results
+        .iter()
+        .map(|r| statistics_row(r, &mut canon))
+        .collect()
 }
 
 pub fn write_statistics_csv(path: &Path, rows: &[StatisticsRow]) -> io::Result<()> {
@@ -244,13 +266,18 @@ mod tests {
 
     #[test]
     fn csv_header_matches_superstack() {
-        let rows = vec![statistics_row(&SegmentOptResult {
-            segment: empty_segment(vec![SemOp::I32Add, SemOp::I32Mul]),
-            optimized: Some(vec![SemOp::I32Add]),
-            timed_out: false,
-            solver_time_secs: 0.059,
-            timeout_secs: 10,
-        })];
+        use crate::synthesis::test_synthesis_rewrites;
+        let mut canon = Canonizer::new(test_synthesis_rewrites());
+        let rows = vec![statistics_row(
+            &SegmentOptResult {
+                segment: empty_segment(vec![SemOp::I32Add, SemOp::I32Mul]),
+                optimized: Some(vec![SemOp::I32Add]),
+                timed_out: false,
+                solver_time_secs: 0.059,
+                timeout_secs: 10,
+            },
+            &mut canon,
+        )];
         let path = std::env::temp_dir().join("ewasm-statistics-test.csv");
         write_statistics_csv(&path, &rows).unwrap();
         let contents = std::fs::read_to_string(&path).unwrap();

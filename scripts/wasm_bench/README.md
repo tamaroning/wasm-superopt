@@ -63,7 +63,8 @@ Note: superstack only supports the following r3 benchmarks:
 | `bench-results/<suite>/raw/*.csv` | Per-benchmark, per-tool statistics |
 | `bench-results/<suite>/combined_blocks.csv` | All block rows (with `tool`, `benchmark` columns) |
 | `bench-results/<suite>/run_summary.csv` | Success/failure, wall-clock time, block count |
-| `bench-results/<suite>/plots/*.png` | Solver time vs length; improvement (saved instructions) scatter, binned means, improvement rate, and per-tool summary |
+| `bench-results/<suite>/plots/*.png` | Solver time vs length; improvement (saved instructions) scatter, binned means, improvement rate, per-tool summary, and per-program instruction reduction (%) |
+| `bench-results/<suite>/plots/summary_by_benchmark.csv` | Per-benchmark total instruction reduction (%) and block stats by tool |
 
 ## Caveats (comparison limits)
 

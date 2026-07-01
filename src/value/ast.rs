@@ -106,9 +106,6 @@ pub fn is_ast_rewrite_pair(sig: &RuleSignature, lhs: &ValueAst, rhs: &ValueAst) 
     if lhs == rhs {
         return false;
     }
-    if is_commutative_swap(lhs, rhs) {
-        return false;
-    }
     lhs.uses_each_symbol_once(sig) && valid_rewrite_rhs(sig, rhs)
 }
 
@@ -121,24 +118,6 @@ fn valid_rewrite_rhs(sig: &RuleSignature, rhs: &ValueAst) -> bool {
     let mut counts = vec![0usize; sig.inputs.len()];
     rhs.collect_symbol_counts(&mut counts);
     counts.iter().all(|&c| c <= 1)
-}
-
-fn is_commutative_swap(lhs: &ValueAst, rhs: &ValueAst) -> bool {
-    match (lhs, rhs) {
-        (
-            ValueAst::App {
-                op: lop,
-                args: largs,
-            },
-            ValueAst::App {
-                op: rop,
-                args: rargs,
-            },
-        ) if lop.is_commutative() && lop == rop && largs.len() == 2 && rargs.len() == 2 => {
-            largs[0] == rargs[1] && largs[1] == rargs[0]
-        }
-        _ => false,
-    }
 }
 
 pub fn synthesis_symbol(i: usize) -> Symbol {

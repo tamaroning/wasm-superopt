@@ -300,6 +300,76 @@ def plot_improvement_rate_binned(df: pd.DataFrame, out: Path, bucket_width: int)
     plt.close(fig)
 
 
+def benchmark_reduction_stats(df: pd.DataFrame) -> pd.DataFrame:
+    grouped = (
+        df.groupby(["benchmark", "tool"])
+        .agg(
+            blocks=("initial_length", "count"),
+            total_initial=("initial_length", "sum"),
+            total_saved=("saved_length", "sum"),
+            blocks_improved=("improved", "sum"),
+        )
+        .reset_index()
+    )
+    grouped["reduction_pct"] = np.where(
+        grouped["total_initial"] > 0,
+        100.0 * grouped["total_saved"] / grouped["total_initial"],
+        0.0,
+    )
+    grouped["blocks_improved_pct"] = np.where(
+        grouped["blocks"] > 0,
+        100.0 * grouped["blocks_improved"] / grouped["blocks"],
+        0.0,
+    )
+    return grouped
+
+
+def plot_reduction_by_benchmark(df: pd.DataFrame, out: Path, suite_label: str) -> None:
+    grouped = benchmark_reduction_stats(df)
+    benchmarks = sorted(grouped["benchmark"].unique())
+    tools = sorted(grouped["tool"].unique())
+    y = np.arange(len(benchmarks))
+    bar_height = 0.8 / max(len(tools), 1)
+    fig_height = max(5.0, len(benchmarks) * 0.32 + 1.5)
+
+    fig, ax = plt.subplots(figsize=(10, fig_height))
+    for i, tool in enumerate(tools):
+        sub = grouped[grouped["tool"] == tool].set_index("benchmark").reindex(benchmarks)
+        rates = sub["reduction_pct"].fillna(0).to_numpy()
+        offset = (i - (len(tools) - 1) / 2) * bar_height
+        bars = ax.barh(
+            y + offset,
+            rates,
+            bar_height,
+            label=tool,
+            color=tool_color(tool, i),
+            alpha=0.85,
+        )
+        for bar, rate in zip(bars, rates):
+            if rate <= 0:
+                continue
+            ax.text(
+                bar.get_width(),
+                bar.get_y() + bar.get_height() / 2,
+                f"{rate:.1f}%",
+                ha="left",
+                va="center",
+                fontsize=7,
+                clip_on=False,
+            )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(benchmarks)
+    ax.set_xlabel("Instructions reduced (%)")
+    ax.set_ylabel("Benchmark")
+    ax.set_title(f"Instruction reduction by program ({suite_label})")
+    ax.grid(True, axis="x", alpha=0.25)
+    ax.legend(loc="lower right")
+    fig.tight_layout()
+    fig.savefig(out, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
+
 def plot_improvement_summary(df: pd.DataFrame, out: Path, suite_label: str) -> None:
     tools = sorted(df["tool"].unique())
     totals = [df.loc[df["tool"] == tool, "saved_length"].sum() for tool in tools]
@@ -355,6 +425,10 @@ def plot_improvement_summary(df: pd.DataFrame, out: Path, suite_label: str) -> N
     fig.tight_layout()
     fig.savefig(out, dpi=160)
     plt.close(fig)
+
+
+def write_benchmark_summary_table(df: pd.DataFrame, out: Path) -> None:
+    benchmark_reduction_stats(df).to_csv(out, index=False)
 
 
 def write_summary_table(df: pd.DataFrame, out: Path) -> None:
@@ -457,7 +531,9 @@ def main() -> int:
     plot_saved_binned(df, out_dir_path / "length_vs_saved_binned.png", args.bucket_width)
     plot_improvement_rate_binned(df, out_dir_path / "improvement_rate_binned.png", args.bucket_width)
     plot_improvement_summary(df, out_dir_path / "improvement_summary.png", suite.label)
+    plot_reduction_by_benchmark(df, out_dir_path / "reduction_by_benchmark.png", suite.label)
     write_summary_table(df, out_dir_path / "summary_by_tool.csv")
+    write_benchmark_summary_table(df, out_dir_path / "summary_by_benchmark.csv")
 
     print(f"rows: {len(df)}")
     print(f"tools: {sorted(df['tool'].unique())}")

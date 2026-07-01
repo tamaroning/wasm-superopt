@@ -15,8 +15,9 @@ use crate::semantics::SemOp;
 use crate::wasm::StraightSegment;
 use egg::Rewrite;
 pub use sat::{
-    classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv,
+    classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv, profile_sat,
 };
+pub use statistics::block_id;
 use search::solve_astar_traced;
 pub use search::{
     Backend, DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,

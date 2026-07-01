@@ -2,7 +2,8 @@
 //!
 //! Implements the descending Pure-SAT iteration described in
 //! `wasm_superopt_sat_encoding.md`: a finite value vocabulary `V` and operation
-//! result tables are built up front, the synthesis problem is encoded into CNF
+//! result tables are built up front (as sparse valid-edge lists from equality
+//! saturation), the synthesis problem is encoded into CNF
 //! with an instruction-length upper bound `L = L_orig`, and the optimal length is
 //! found by repeatedly assuming NOP-propagation (`x_{ell+1,NOP} = 1`) and
 //! descending `ell` until the solver returns UNSAT.
@@ -16,7 +17,7 @@
 //! fallback: if a segment cannot be encoded/improved, the original is kept.
 
 use super::canon::{CanonId, Canonizer};
-use super::search::{SearchConfig, SearchResult, is_grounded, validate_solution_ops};
+use super::search::{SearchConfig, SearchResult, solution_valid};
 use crate::lang::ValueLang;
 use crate::semantics::{
     const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op, sat_pure_ops, sem_from_inst_kind,
@@ -36,6 +37,8 @@ const MAX_SAT_LEN: usize = 40;
 /// Max value-vocabulary size `|V|`; larger problems fall back to A*.
 /// mux1_1 gap blocks need at most 53 base values (measured); 64 leaves headroom.
 const MAX_VOCAB: usize = 64;
+/// Abort CNF generation beyond this many clauses (heavy sign_test blocks exceed ~1M).
+const MAX_CNF_CLAUSES: usize = 1_500_000;
 /// Equivalence-saturation rounds for vocabulary expansion (`k_sat`).
 const K_SAT: usize = 2;
 /// Equality-saturation limits for the batched operation-result-table build.
@@ -101,6 +104,8 @@ fn sat_unop_kinds_for(segment: &StraightSegment, vocab: &Vocab) -> Vec<InstKind>
 struct Vocab {
     /// Representative expression per real value index.
     reals: Vec<ValueExpr>,
+    /// `≡_R` class id per real (parallel to `reals`; avoids re-saturating during encode).
+    canon_ids: Vec<CanonId>,
     /// Canon id → real index.
     index_of_canon: HashMap<CanonId, usize>,
 }
@@ -129,11 +134,13 @@ enum SatOp {
     Drop,
     Unop {
         kind: InstKind,
-        table: Vec<Option<usize>>,
+        /// Valid `(operand, result)` transitions from equality saturation (`T_∘`).
+        edges: Vec<(usize, usize)>,
     },
     Binop {
         kind: InstKind,
-        table: Vec<Vec<Option<usize>>>,
+        /// Valid `(arg1, arg0, result)` transitions from equality saturation (`T_⊕`).
+        edges: Vec<(usize, usize, usize)>,
     },
     /// Uninterpreted side-effecting op (memory/global/call/opaque), SuperStack-style.
     Opaque {
@@ -239,27 +246,36 @@ impl Dims {
 /// Accumulates CNF clauses and feeds them to the solver.
 struct Cnf {
     clauses: Vec<Vec<i32>>,
+    over_limit: bool,
 }
 
 impl Cnf {
     fn new() -> Self {
         Self {
             clauses: Vec::new(),
+            over_limit: false,
         }
     }
 
     fn add(&mut self, clause: Vec<i32>) {
+        if self.over_limit {
+            return;
+        }
+        if self.clauses.len() >= MAX_CNF_CLAUSES {
+            self.over_limit = true;
+            return;
+        }
         self.clauses.push(clause);
     }
 
     fn unit(&mut self, lit: i32) {
-        self.clauses.push(vec![lit]);
+        self.add(vec![lit]);
     }
 
     /// `x → (a ↔ b)`.
     fn imply_iff(&mut self, x: i32, a: i32, b: i32) {
-        self.clauses.push(vec![-x, -a, b]);
-        self.clauses.push(vec![-x, a, -b]);
+        self.add(vec![-x, -a, b]);
+        self.add(vec![-x, a, -b]);
     }
 
     /// At-most-one over `lits` using a sequential (Sinz) encoding.
@@ -269,12 +285,12 @@ impl Cnf {
             return;
         }
         let s: Vec<i32> = (0..n - 1).map(|_| dims.fresh()).collect();
-        self.clauses.push(vec![-lits[0], s[0]]);
-        self.clauses.push(vec![-lits[n - 1], -s[n - 2]]);
+        self.add(vec![-lits[0], s[0]]);
+        self.add(vec![-lits[n - 1], -s[n - 2]]);
         for i in 1..n - 1 {
-            self.clauses.push(vec![-lits[i], s[i]]);
-            self.clauses.push(vec![-s[i - 1], s[i]]);
-            self.clauses.push(vec![-lits[i], -s[i - 1]]);
+            self.add(vec![-lits[i], s[i]]);
+            self.add(vec![-s[i - 1], s[i]]);
+            self.add(vec![-lits[i], -s[i - 1]]);
         }
     }
 
@@ -282,21 +298,21 @@ impl Cnf {
     fn exactly_one(&mut self, lits: &[i32], dims: &mut Dims) {
         if lits.is_empty() {
             // Forces UNSAT; should not occur for well-formed dimensions.
-            self.clauses.push(vec![]);
+            self.add(vec![]);
             return;
         }
-        self.clauses.push(lits.to_vec());
+        self.add(lits.to_vec());
         if lits.len() == 1 {
             return;
         }
         let n = lits.len();
         let s: Vec<i32> = (0..n - 1).map(|_| dims.fresh()).collect();
-        self.clauses.push(vec![-lits[0], s[0]]);
-        self.clauses.push(vec![-lits[n - 1], -s[n - 2]]);
+        self.add(vec![-lits[0], s[0]]);
+        self.add(vec![-lits[n - 1], -s[n - 2]]);
         for i in 1..n - 1 {
-            self.clauses.push(vec![-lits[i], s[i]]);
-            self.clauses.push(vec![-s[i - 1], s[i]]);
-            self.clauses.push(vec![-lits[i], -s[i - 1]]);
+            self.add(vec![-lits[i], s[i]]);
+            self.add(vec![-s[i - 1], s[i]]);
+            self.add(vec![-lits[i], -s[i - 1]]);
         }
     }
 }
@@ -417,21 +433,26 @@ fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
     (seeds, max_height)
 }
 
-fn build_vocab(segment: &StraightSegment, canon: &mut Canonizer) -> Option<(Vocab, usize)> {
-    build_vocab_with_limit(segment, canon, MAX_VOCAB)
+fn build_vocab(segment: &StraightSegment, canon: &mut Canonizer, deadline: Instant) -> Option<(Vocab, usize)> {
+    build_vocab_with_limit(segment, canon, MAX_VOCAB, deadline)
 }
 
 fn build_vocab_with_limit(
     segment: &StraightSegment,
     canon: &mut Canonizer,
     max_vocab: usize,
+    deadline: Instant,
 ) -> Option<(Vocab, usize)> {
+    if Instant::now() >= deadline {
+        return None;
+    }
     let (seeds, max_height) = collect_seed_exprs(segment);
 
     let mut index_of_canon: HashMap<CanonId, usize> = HashMap::new();
     let mut reals: Vec<ValueExpr> = Vec::new();
+    let mut canon_ids: Vec<CanonId> = Vec::new();
 
-    // Base vocabulary: every subexpression of init/fin and all original intermediate
+    // Base vocabulary:
     // values, plus the synthesis constants. These MUST all fit so that the original
     // sequence is representable (the first descending solve is then trivially SAT).
     let mut base: Vec<ValueExpr> = Vec::new();
@@ -446,12 +467,16 @@ fn build_vocab_with_limit(
     dedup_by_string(&mut base);
 
     for e in &base {
+        if Instant::now() >= deadline {
+            return None;
+        }
         let id = canon.canon(e);
         if let std::collections::hash_map::Entry::Vacant(slot) = index_of_canon.entry(id) {
             if reals.len() >= max_vocab {
                 return None; // base alone too large; let the caller fall back to A*
             }
             slot.insert(reals.len());
+            canon_ids.push(id);
             reals.push(e.clone());
         }
     }
@@ -461,8 +486,14 @@ fn build_vocab_with_limit(
     // pick a shorter form. Capped so the encoding stays tractable.
     let mut frontier: Vec<ValueExpr> = reals.clone();
     'rounds: for _ in 0..K_SAT {
+        if Instant::now() >= deadline {
+            return None;
+        }
         let mut next: Vec<ValueExpr> = Vec::new();
         for e in &frontier {
+            if Instant::now() >= deadline {
+                return None;
+            }
             for (_, e1, e2) in canon.binop_decompositions(e) {
                 for cand in all_subtree_exprs(&e1)
                     .into_iter()
@@ -476,6 +507,7 @@ fn build_vocab_with_limit(
                             break 'rounds;
                         }
                         slot.insert(reals.len());
+                        canon_ids.push(id);
                         reals.push(cand.clone());
                         next.push(cand);
                     }
@@ -495,6 +527,7 @@ fn build_vocab_with_limit(
     Some((
         Vocab {
             reals,
+            canon_ids,
             index_of_canon,
         },
         max_height,
@@ -513,7 +546,11 @@ fn build_ops(
     canon: &mut Canonizer,
     rules: &[egg::Rewrite<ValueLang, ()>],
     r: usize,
+    deadline: Instant,
 ) -> Option<Vec<SatOp>> {
+    if Instant::now() >= deadline {
+        return None;
+    }
     let n = vocab.n();
     let mut ops = vec![SatOp::Nop];
     let types = types_in_segment_and_vocab(segment, vocab);
@@ -583,7 +620,13 @@ fn build_ops(
         bin_ids.push(col);
     }
 
+    if Instant::now() >= deadline {
+        return None;
+    }
     let runner = runner.run(rules);
+    if Instant::now() >= deadline {
+        return None;
+    }
     let mut class_to_real: HashMap<Id, usize> = HashMap::new();
     for (i, id) in real_ids.iter().enumerate() {
         class_to_real.entry(runner.egraph.find(*id)).or_insert(i);
@@ -591,31 +634,27 @@ fn build_ops(
     let lookup = |id: Id| class_to_real.get(&runner.egraph.find(id)).copied();
 
     for (ki, &kind) in sat_unops.iter().enumerate() {
-        let mut table = vec![None; n];
-        let mut any = false;
+        let mut edges = Vec::new();
         for a in 0..n {
-            if let Some(idx) = lookup(uni_ids[ki][a]) {
-                table[a] = Some(idx);
-                any = true;
+            if let Some(res) = lookup(uni_ids[ki][a]) {
+                edges.push((a, res));
             }
         }
-        if any {
-            ops.push(SatOp::Unop { kind, table });
+        if !edges.is_empty() {
+            ops.push(SatOp::Unop { kind, edges });
         }
     }
     for (ki, &kind) in sat_binops.iter().enumerate() {
-        let mut table = vec![vec![None; n]; n];
-        let mut any = false;
+        let mut edges = Vec::new();
         for a1 in 0..n {
             for a0 in 0..n {
-                if let Some(idx) = lookup(bin_ids[ki][a1 * n + a0]) {
-                    table[a1][a0] = Some(idx);
-                    any = true;
+                if let Some(res) = lookup(bin_ids[ki][a1 * n + a0]) {
+                    edges.push((a1, a0, res));
                 }
             }
         }
-        if any {
-            ops.push(SatOp::Binop { kind, table });
+        if !edges.is_empty() {
+            ops.push(SatOp::Binop { kind, edges });
         }
     }
 
@@ -649,10 +688,13 @@ fn build_ops(
 }
 
 /// Relative indices in `V` that are ≡_R-equivalent to `req` (for opaque operand pins).
-fn equiv_reals(vocab: &Vocab, canon: &mut Canonizer, req: usize) -> Vec<usize> {
-    let target = canon.canon(&vocab.reals[req]);
-    (0..vocab.n())
-        .filter(|&v| canon.canon(&vocab.reals[v]) == target)
+fn equiv_reals(vocab: &Vocab, req: usize) -> Vec<usize> {
+    let target = vocab.canon_ids[req];
+    vocab
+        .canon_ids
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &id)| (id == target).then_some(i))
         .collect()
 }
 
@@ -708,12 +750,17 @@ fn original_witness_assumptions(
     ops: &[SatOp],
     dims: &Dims,
 ) -> Option<Vec<i32>> {
-    let mut assumptions = Vec::with_capacity(segment.ops.len());
-    for (step, sem) in segment.ops.iter().enumerate() {
-        let o = sat_op_index_for_orig(ops, sem)?;
-        assumptions.push(dims.x(step + 1, o));
-    }
-    Some(assumptions)
+    Some(
+        segment
+            .ops
+            .iter()
+            .map(|sem| sat_op_index_for_orig(ops, sem))
+            .collect::<Option<Vec<_>>>()?
+            .into_iter()
+            .enumerate()
+            .map(|(step, o)| dims.x(step + 1, o))
+            .collect(),
+    )
 }
 
 /// NOP is always the first entry of the instruction alphabet.
@@ -736,6 +783,7 @@ fn encode(
     ops: &[SatOp],
     dims: &mut Dims,
     canon: &mut Canonizer,
+    deadline: Instant,
 ) -> Option<Cnf> {
     let mut cnf = Cnf::new();
     let l = dims.l;
@@ -747,14 +795,21 @@ fn encode(
     let bot = dims.bot();
     let star = dims.star();
     let nop = NOP_INDEX;
+    let past = |cnf: &Cnf| Instant::now() >= deadline || cnf.over_limit;
 
     // §5.1 instruction uniqueness.
     for i in 1..=l {
+        if past(&cnf) {
+            return None;
+        }
         let lits: Vec<i32> = (0..dims.n_ops).map(|o| dims.x(i, o)).collect();
         cnf.exactly_one(&lits, dims);
     }
     // §5.1 stack/local value uniqueness.
     for i in 0..=l {
+        if past(&cnf) {
+            return None;
+        }
         for j in 0..h {
             let lits: Vec<i32> = (0..sd).map(|v| dims.y(i, j, v)).collect();
             cnf.exactly_one(&lits, dims);
@@ -820,6 +875,9 @@ fn encode(
 
     // §5.3 semantics.
     for i in 1..=l {
+        if past(&cnf) {
+            return None;
+        }
         for (o, op) in ops.iter().enumerate() {
             let xio = dims.x(i, o);
             match op {
@@ -866,16 +924,14 @@ fn encode(
                     stack_pop_shift(&mut cnf, dims, i, xio, 0);
                     locals_unchanged(&mut cnf, dims, i, xio);
                 }
-                SatOp::Unop { table, .. } => {
+                SatOp::Unop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
-                    for a in 0..n {
-                        match table[a] {
-                            Some(res) => {
-                                cnf.add(vec![-xio, -dims.y(i - 1, 0, a), dims.y(i, 0, res)])
-                            }
-                            None => cnf.add(vec![-xio, -dims.y(i - 1, 0, a)]),
-                        }
+                    let mut domain = vec![-xio];
+                    for &(a, res) in edges {
+                        domain.push(dims.y(i - 1, 0, a));
+                        cnf.add(vec![-xio, -dims.y(i - 1, 0, a), dims.y(i, 0, res)]);
                     }
+                    cnf.add(domain);
                     // Top changes; deeper cells unchanged.
                     for j in 1..h {
                         for v in 0..sd {
@@ -884,23 +940,24 @@ fn encode(
                     }
                     locals_unchanged(&mut cnf, dims, i, xio);
                 }
-                SatOp::Binop { table, .. } => {
+                SatOp::Binop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 1, bot)]);
-                    // Domain restriction (avoids O(n^2) forbid clauses): for each first
-                    // operand, require a defined second operand, and pin the result.
-                    for a1 in 0..n {
+                    // E-graph valid edges only: positive transitions + per-arg1 domain.
+                    let mut by_a1: HashMap<usize, Vec<usize>> = HashMap::new();
+                    for &(a1, a0, res) in edges {
+                        by_a1.entry(a1).or_default().push(a0);
+                        cnf.add(vec![
+                            -xio,
+                            -dims.y(i - 1, 1, a1),
+                            -dims.y(i - 1, 0, a0),
+                            dims.y(i, 0, res),
+                        ]);
+                    }
+                    for (a1, a0s) in by_a1 {
                         let mut clause = vec![-xio, -dims.y(i - 1, 1, a1)];
-                        for a0 in 0..n {
-                            if let Some(res) = table[a1][a0] {
-                                clause.push(dims.y(i - 1, 0, a0));
-                                cnf.add(vec![
-                                    -xio,
-                                    -dims.y(i - 1, 1, a1),
-                                    -dims.y(i - 1, 0, a0),
-                                    dims.y(i, 0, res),
-                                ]);
-                            }
+                        for a0 in a0s {
+                            clause.push(dims.y(i - 1, 0, a0));
                         }
                         cnf.add(clause);
                     }
@@ -912,7 +969,7 @@ fn encode(
                     out_reals,
                     ..
                 } => {
-                    encode_opaque(&mut cnf, dims, i, xio, vocab, canon, in_reals, out_reals);
+                    encode_opaque(&mut cnf, dims, i, xio, vocab, in_reals, out_reals);
                 }
             }
         }
@@ -940,6 +997,9 @@ fn encode(
     // Relative-order constraints: for each `(before, after)`, forbid `after` at a step
     // earlier-or-equal to `before` (i.e. `step(before) < step(after)`).
     for &(before, after) in &segment.dependencies {
+        if past(&cnf) {
+            return None;
+        }
         if let (Some(&ob), Some(&oa)) = (op_index_of_id.get(&before), op_index_of_id.get(&after)) {
             for ib in 1..=l {
                 for ia in 1..=ib {
@@ -950,6 +1010,9 @@ fn encode(
         }
     }
 
+    if past(&cnf) {
+        return None;
+    }
     Some(cnf)
 }
 
@@ -961,7 +1024,6 @@ fn encode_opaque(
     i: usize,
     xio: i32,
     vocab: &Vocab,
-    canon: &mut Canonizer,
     in_reals: &[usize],
     out_reals: &[usize],
 ) {
@@ -974,14 +1036,15 @@ fn encode_opaque(
 
     // Operands: any real value ≡_R to the required symbol (e.g. ?L6 for 0*40+x).
     for (k, &req) in in_reals.iter().enumerate() {
-        let equiv = equiv_reals(vocab, canon, req);
+        let equiv = equiv_reals(vocab, req);
+        let equiv_set: HashSet<usize> = equiv.iter().copied().collect();
         let mut clause = vec![-xio];
         for &v in &equiv {
             clause.push(dims.y(i - 1, k, v));
         }
         cnf.add(clause);
         for v in 0..n {
-            if !equiv.contains(&v) {
+            if !equiv_set.contains(&v) {
                 cnf.add(vec![-xio, -dims.y(i - 1, k, v)]);
             }
         }
@@ -1077,15 +1140,190 @@ fn reconstruct(solver: &Solver, dims: &Dims, ops: &[SatOp]) -> Vec<SemOp> {
 }
 
 fn forward_valid(ops: &[SemOp], segment: &StraightSegment, canon: &mut Canonizer) -> bool {
-    let bounds = &segment.bounds;
-    let mut m =
-        SymMachine::from_segment_entry(segment.num_params, bounds, &segment.init, bounds.max_stack);
-    for op in ops {
-        if m.exec(op).is_err() {
-            return false;
-        }
+    solution_valid(ops, segment, canon)
+}
+
+/// CNF scale and timing breakdown for one segment (debug / benchmark analysis).
+#[derive(Clone, Debug)]
+pub struct SatCnfProfile {
+    pub l: usize,
+    pub h: usize,
+    pub r: usize,
+    pub vocab: usize,
+    pub n_ops: usize,
+    pub n_binop_ops: usize,
+    pub n_binop_edges: usize,
+    pub n_unop_edges: usize,
+    pub n_opaque_ops: usize,
+    pub n_vars: usize,
+    pub n_clauses: usize,
+    pub max_clause_len: usize,
+    pub vocab_ms: f64,
+    pub ops_ms: f64,
+    pub encode_ms: f64,
+    pub add_clauses_ms: f64,
+    pub witness_ms: f64,
+    pub diagnosis: SatDiagnosis,
+}
+
+impl SatCnfProfile {
+    pub fn print(&self, block_id: &str) {
+        eprintln!("=== SAT profile: {block_id} ===");
+        eprintln!(
+            "  dims: L={} H={} R={} |V|={} |OP|={} (binop ops={} edges={} unop edges={} opaque={})",
+            self.l,
+            self.h,
+            self.r,
+            self.vocab,
+            self.n_ops,
+            self.n_binop_ops,
+            self.n_binop_edges,
+            self.n_unop_edges,
+            self.n_opaque_ops
+        );
+        eprintln!(
+            "  CNF: {} vars, {} clauses (max width {})",
+            self.n_vars, self.n_clauses, self.max_clause_len
+        );
+        eprintln!(
+            "  time: vocab={:.1}ms ops={:.1}ms encode={:.1}ms add_clauses={:.1}ms witness={:.1}ms",
+            self.vocab_ms,
+            self.ops_ms,
+            self.encode_ms,
+            self.add_clauses_ms,
+            self.witness_ms
+        );
+        eprintln!("  diagnosis: {:?}", self.diagnosis);
     }
-    is_grounded(&m.to_fin_state(), &segment.fin, bounds, canon)
+}
+
+/// Build CNF and run witness SAT; return scale/timing without the descending loop.
+pub fn profile_sat(
+    segment: &StraightSegment,
+    rules: &[egg::Rewrite<crate::lang::ValueLang, ()>],
+    cfg: &SearchConfig,
+) -> Result<SatCnfProfile, &'static str> {
+    let l_orig = segment.ops.len();
+    if l_orig == 0 || l_orig > MAX_SAT_LEN {
+        return Err("too_long");
+    }
+
+    let timeout = cfg
+        .timeout_secs
+        .unwrap_or(super::search::DEFAULT_TIMEOUT_BASE_SECS);
+    let deadline = Instant::now() + std::time::Duration::from_secs(timeout);
+
+    let t0 = Instant::now();
+    let mut canon = Canonizer::new(rules.to_vec());
+    let (vocab, max_height) = build_vocab(segment, &mut canon, deadline).ok_or("vocab")?;
+    let vocab_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+    let t1 = Instant::now();
+    let r = (segment.bounds.max_local as usize) + 1;
+    let ops = build_ops(segment, &vocab, &mut canon, rules, r, deadline).ok_or("ops")?;
+    let ops_ms = t1.elapsed().as_secs_f64() * 1000.0;
+    let n_binop_ops = ops
+        .iter()
+        .filter(|op| matches!(op, SatOp::Binop { .. }))
+        .count();
+    let n_binop_edges = ops
+        .iter()
+        .filter_map(|op| match op {
+            SatOp::Binop { edges, .. } => Some(edges.len()),
+            _ => None,
+        })
+        .sum();
+    let n_unop_edges = ops
+        .iter()
+        .filter_map(|op| match op {
+            SatOp::Unop { edges, .. } => Some(edges.len()),
+            _ => None,
+        })
+        .sum();
+    let n_opaque_ops = ops
+        .iter()
+        .filter(|op| matches!(op, SatOp::Opaque { .. }))
+        .count();
+
+    let h = (max_height + 1)
+        .max(segment.init.stack.len())
+        .max(segment.fin.stack.len())
+        .max(1)
+        .min(segment.bounds.max_stack);
+
+    let t2 = Instant::now();
+    let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
+    let cnf = encode(
+        segment,
+        &vocab,
+        &ops,
+        &mut dims,
+        &mut canon,
+        deadline,
+    )
+    .ok_or("encode")?;
+    let encode_ms = t2.elapsed().as_secs_f64() * 1000.0;
+    let n_vars = (dims.next_var - 1) as usize;
+    let n_clauses = cnf.clauses.len();
+    let max_clause_len = cnf.clauses.iter().map(|c| c.len()).max().unwrap_or(0);
+
+    let t3 = Instant::now();
+    let mut solver: Solver = Solver::new();
+    for clause in &cnf.clauses {
+        solver.add_clause(clause.iter().copied());
+    }
+    let add_clauses_ms = t3.elapsed().as_secs_f64() * 1000.0;
+
+    let remaining = |now: Instant| deadline.saturating_duration_since(now).as_secs_f32();
+    let witness = original_witness_assumptions(segment, &ops, &dims);
+    let t4 = Instant::now();
+    let diagnosis = if witness.is_none() {
+        SatDiagnosis::OriginalUnsat
+    } else {
+        solver.set_callbacks(Some(Timeout::new(remaining(Instant::now()).max(0.0))));
+        match solver.solve_with(witness.unwrap().iter().copied()) {
+            Some(true) => {
+                let seq = reconstruct(&solver, &dims, &ops);
+                if forward_valid(&seq, segment, &mut canon) {
+                    SatDiagnosis::Solved {
+                        best_len: l_orig,
+                        proven_optimal: false,
+                        timed_out: false,
+                    }
+                } else {
+                    SatDiagnosis::OriginalModelInvalid
+                }
+            }
+            Some(false) => SatDiagnosis::OriginalUnsat,
+            None => SatDiagnosis::Solved {
+                best_len: l_orig,
+                proven_optimal: false,
+                timed_out: true,
+            },
+        }
+    };
+    let witness_ms = t4.elapsed().as_secs_f64() * 1000.0;
+
+    Ok(SatCnfProfile {
+        l: l_orig,
+        h,
+        r,
+        vocab: vocab.n(),
+        n_ops: ops.len(),
+        n_binop_ops,
+        n_binop_edges,
+        n_unop_edges,
+        n_opaque_ops,
+        n_vars,
+        n_clauses,
+        max_clause_len,
+        vocab_ms,
+        ops_ms,
+        encode_ms,
+        add_clauses_ms,
+        witness_ms,
+        diagnosis,
+    })
 }
 
 /// Where `solve_sat` stopped (for debugging benchmark gaps vs SuperStack).
@@ -1126,13 +1364,18 @@ pub fn diagnose_sat(
         };
     }
 
+    let timeout = cfg
+        .timeout_secs
+        .unwrap_or(super::search::DEFAULT_TIMEOUT_BASE_SECS);
+    let deadline = Instant::now() + std::time::Duration::from_secs(timeout);
+
     let mut canon = Canonizer::new(rules.to_vec());
-    let Some((vocab, max_height)) = build_vocab(segment, &mut canon) else {
+    let Some((vocab, max_height)) = build_vocab(segment, &mut canon, deadline) else {
         return SatDiagnosis::VocabBuildFailed;
     };
 
     let r = (segment.bounds.max_local as usize) + 1;
-    let Some(ops) = build_ops(segment, &vocab, &mut canon, rules, r) else {
+    let Some(ops) = build_ops(segment, &vocab, &mut canon, rules, r, deadline) else {
         return SatDiagnosis::OpsBuildFailed;
     };
 
@@ -1143,7 +1386,7 @@ pub fn diagnose_sat(
         .min(segment.bounds.max_stack);
 
     let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
-    let Some(cnf) = encode(segment, &vocab, &ops, &mut dims, &mut canon) else {
+    let Some(cnf) = encode(segment, &vocab, &ops, &mut dims, &mut canon, deadline) else {
         return SatDiagnosis::EncodeFailed {
             vocab: vocab.n(),
             n_ops: ops.len(),
@@ -1152,14 +1395,10 @@ pub fn diagnose_sat(
         };
     };
 
-    let timeout = cfg
-        .timeout_secs
-        .unwrap_or(super::search::DEFAULT_TIMEOUT_BASE_SECS);
     let mut solver: Solver = Solver::new();
     for clause in &cnf.clauses {
         solver.add_clause(clause.iter().copied());
     }
-    let deadline = Instant::now() + std::time::Duration::from_secs(timeout);
     let remaining = |now: Instant| deadline.saturating_duration_since(now).as_secs_f32();
     let Some(witness) = original_witness_assumptions(segment, &ops, &dims) else {
         return SatDiagnosis::OriginalUnsat;
@@ -1178,7 +1417,7 @@ pub fn diagnose_sat(
     }
 
     let seq = reconstruct(&solver, &dims, &ops);
-    if !forward_valid(&seq, segment, &mut canon) || !validate_solution_ops(&seq, segment) {
+    if !forward_valid(&seq, segment, &mut canon) {
         return SatDiagnosis::OriginalModelInvalid;
     }
 
@@ -1198,8 +1437,7 @@ pub fn diagnose_sat(
         match solver.solve_with([assumption]) {
             Some(true) => {
                 let seq = reconstruct(&solver, &dims, &ops);
-                if forward_valid(&seq, segment, &mut canon) && validate_solution_ops(&seq, segment)
-                {
+                if forward_valid(&seq, segment, &mut canon) {
                     best_len = best_len.min(seq.len());
                 }
                 ell -= 1;
@@ -1344,6 +1582,13 @@ pub fn solve_sat(
     let timeout = cfg
         .timeout_secs
         .unwrap_or(super::search::DEFAULT_TIMEOUT_BASE_SECS);
+    let deadline = started + std::time::Duration::from_secs(timeout);
+    let timed_out_now = || Instant::now() >= deadline;
+    let timeout_result = || SearchResult {
+        ops: None,
+        timed_out: true,
+        solver_time_secs: started.elapsed().as_secs_f64(),
+    };
 
     let l_orig = segment.ops.len();
     let fail = || SearchResult {
@@ -1357,14 +1602,26 @@ pub fn solve_sat(
     }
 
     let mut canon = Canonizer::new(rules.to_vec());
-    let Some((vocab, max_height)) = build_vocab(segment, &mut canon) else {
+    let Some((vocab, max_height)) = build_vocab(segment, &mut canon, deadline) else {
+        if timed_out_now() {
+            return timeout_result();
+        }
         return fail();
     };
+    if timed_out_now() {
+        return timeout_result();
+    }
 
     let r = (segment.bounds.max_local as usize) + 1;
-    let Some(ops) = build_ops(segment, &vocab, &mut canon, rules, r) else {
+    let Some(ops) = build_ops(segment, &vocab, &mut canon, rules, r, deadline) else {
+        if timed_out_now() {
+            return timeout_result();
+        }
         return fail();
     };
+    if timed_out_now() {
+        return timeout_result();
+    }
 
     // Stack-height bound: original max height (+1 slack), capped by segment bounds.
     let h = (max_height + 1)
@@ -1374,23 +1631,31 @@ pub fn solve_sat(
         .min(segment.bounds.max_stack);
 
     let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
-    let Some(cnf) = encode(segment, &vocab, &ops, &mut dims, &mut canon) else {
+    let Some(cnf) = encode(segment, &vocab, &ops, &mut dims, &mut canon, deadline) else {
+        if timed_out_now() {
+            return timeout_result();
+        }
         return fail();
     };
+    if timed_out_now() {
+        return timeout_result();
+    }
 
     let mut solver: Solver = Solver::new();
     for clause in &cnf.clauses {
+        if timed_out_now() {
+            return timeout_result();
+        }
         solver.add_clause(clause.iter().copied());
     }
 
     let nop = NOP_INDEX;
-    // Budget the solving phase by `timeout`; e-graph preprocessing above is not counted
-    // against it (but is included in the reported `solver_time_secs`).
-    let deadline = Instant::now() + std::time::Duration::from_secs(timeout);
     let remaining = |now: Instant| deadline.saturating_duration_since(now).as_secs_f32();
 
     // Step 1: the original program must be a model (witness at L_orig).
-    let Some(witness) = original_witness_assumptions(segment, &ops, &dims) else {
+    let Some(witness) =
+        original_witness_assumptions(segment, &ops, &dims)
+    else {
         return fail();
     };
     solver.set_callbacks(Some(Timeout::new(remaining(Instant::now()).max(0.0))));
@@ -1408,7 +1673,7 @@ pub fn solve_sat(
 
     let mut best: Option<Vec<SemOp>> = {
         let seq = reconstruct(&solver, &dims, &ops);
-        if forward_valid(&seq, segment, &mut canon) && validate_solution_ops(&seq, segment) {
+        if forward_valid(&seq, segment, &mut canon) {
             Some(seq)
         } else {
             return fail();
@@ -1428,8 +1693,7 @@ pub fn solve_sat(
         match solver.solve_with([assumption]) {
             Some(true) => {
                 let seq = reconstruct(&solver, &dims, &ops);
-                if forward_valid(&seq, segment, &mut canon) && validate_solution_ops(&seq, segment)
-                {
+                if forward_valid(&seq, segment, &mut canon) {
                     best = Some(seq);
                 }
                 ell -= 1;
@@ -1469,4 +1733,5 @@ mod tests {
             "0*40+x should canon to ?L6 via builtin rewrite rules"
         );
     }
+
 }

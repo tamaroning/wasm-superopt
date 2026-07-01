@@ -6,12 +6,13 @@ use super::inverse::{PeelAction, SearchState, applicable_peels};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::sym::{LocalReq, SymMachine, SymState};
+use crate::value::parse_value_expr;
 use crate::wasm::{
-    SegmentBounds, StraightSegment, ops_respect_dependencies, storage_ops_preserved,
+    OpaqueMeta, SegmentBounds, StraightSegment, ops_respect_dependencies, storage_ops_preserved,
 };
 use egg::Rewrite;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 pub const DEFAULT_MAX_DEPTH: usize = 16;
 /// Default per-segment timeout (seconds), matching SuperStack's base `10 * (1 + storage)`.
@@ -108,16 +109,92 @@ pub fn validate_solution_ops(ops: &[SemOp], segment: &StraightSegment) -> bool {
     storage_ops_preserved(&segment.ops, ops) && ops_respect_dependencies(ops, &segment.dependencies)
 }
 
+/// Whether each opaque op in `ops` consumes operands ≡_R to the original segment.
+pub fn opaque_inputs_equivalent(
+    ops: &[SemOp],
+    segment: &StraightSegment,
+    canon: &mut Canonizer,
+) -> bool {
+    let expected: HashMap<u32, &OpaqueMeta> = segment
+        .opaque_meta
+        .iter()
+        .map(|m| (m.id, m))
+        .collect();
+
+    let mut m = SymMachine::from_segment_entry(
+        segment.num_params,
+        &segment.bounds,
+        &segment.init,
+        segment.bounds.max_stack,
+    );
+
+    for op in ops {
+        let Some(id) = op.opaque_id() else {
+            if m.exec(op).is_err() {
+                return false;
+            }
+            continue;
+        };
+        let Some(exp) = expected.get(&id) else {
+            return false;
+        };
+        match m.exec_with_meta(op) {
+            Ok(Some(actual)) => {
+                if actual.input_symbols.len() != exp.input_symbols.len() {
+                    return false;
+                }
+                for (got, want) in actual.input_symbols.iter().zip(exp.input_symbols.iter()) {
+                    let got_expr = parse_value_expr(got);
+                    let want_expr = parse_value_expr(want);
+                    if !canon.values_equivalent(&got_expr, &want_expr) {
+                        return false;
+                    }
+                }
+            }
+            Ok(None) => return false,
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+/// Full candidate validation: structural checks, opaque operand equivalence, and `fin` grounding.
+pub fn solution_valid(
+    ops: &[SemOp],
+    segment: &StraightSegment,
+    canon: &mut Canonizer,
+) -> bool {
+    validate_solution_ops(ops, segment)
+        && opaque_inputs_equivalent(ops, segment, canon)
+        && solution_forward_valid(ops, segment, &segment.bounds, canon)
+}
+
+fn solution_forward_valid(
+    ops: &[SemOp],
+    segment: &StraightSegment,
+    bounds: &SegmentBounds,
+    canon: &mut Canonizer,
+) -> bool {
+    let mut m =
+        SymMachine::from_segment_entry(segment.num_params, bounds, &segment.init, bounds.max_stack);
+    for op in ops {
+        if m.exec(op).is_err() {
+            return false;
+        }
+    }
+    let got = m.to_fin_state();
+    is_grounded(&got, &segment.fin, bounds, canon)
+}
+
 /// Solver backend for length minimization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Backend {
     /// Backward shortest-path A* search (idea.md).
-    #[default]
     Astar,
     /// Descending Pure-SAT iteration (wasm_superopt_sat_encoding.md).
     ///
-    /// Only segments without side effects/opaque ops are SAT-encoded; others fall
-    /// back to [`Backend::Astar`].
+    /// Encodes side effects directly (SuperStack-style); there is no A* fallback.
+    #[default]
     Sat,
 }
 
@@ -139,7 +216,7 @@ pub struct SearchConfig {
     pub direct_timeout: bool,
     /// Fixed per-segment timeout; overrides `direct_timeout` and storage-based defaults.
     pub fixed_segment_timeout: Option<u64>,
-    /// Solver backend (A* by default).
+    /// Solver backend (SAT by default).
     pub backend: Backend,
 }
 
@@ -199,38 +276,19 @@ fn memo_record(memo: &mut HashSet<MemoKey>, state: &SearchState, canon: &mut Can
     memo.insert(memo_key(state, canon));
 }
 
-fn solution_forward_valid(
-    ops: &[SemOp],
-    segment: &StraightSegment,
-    bounds: &SegmentBounds,
-    canon: &mut Canonizer,
-) -> bool {
-    let mut m =
-        SymMachine::from_segment_entry(segment.num_params, bounds, &segment.init, bounds.max_stack);
-    for op in ops {
-        if m.exec(op).is_err() {
-            return false;
-        }
-    }
-    let got = m.to_fin_state();
-    is_grounded(&got, &segment.fin, bounds, canon)
-}
-
 fn accept_solution(
     path: &[SemOp],
     segment: &StraightSegment,
     _init: &SymState,
-    bounds: &SegmentBounds,
+    _bounds: &SegmentBounds,
     canon: &mut Canonizer,
 ) -> Option<Vec<SemOp>> {
     let ops = reverse_ops(path);
-    if !validate_solution_ops(&ops, segment) {
-        return None;
+    if solution_valid(&ops, segment, canon) {
+        Some(ops)
+    } else {
+        None
     }
-    if !solution_forward_valid(&ops, segment, bounds, canon) {
-        return None;
-    }
-    Some(ops)
 }
 
 #[derive(Eq, PartialEq)]
@@ -377,6 +435,7 @@ pub fn format_ops(ops: &[SemOp]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{opaque_inputs_equivalent, solution_valid};
     use crate::optimize::canon::Canonizer;
     use crate::semantics::InstKind;
     use crate::sym::{LocalReq, SymState};
@@ -421,6 +480,57 @@ mod tests {
         assert_eq!(
             canon.normalize_state(&after_mul),
             canon.normalize_state(&after_shl)
+        );
+    }
+
+    #[test]
+    fn unsound_rotl_store_rejected_by_opaque_input_check() {
+        use crate::semantics::SemOp;
+        use crate::wasm::{materialize_segments, parse_wasm_bytes};
+        use std::fs;
+
+        let wasm = fs::read("benchmarks/wsouper/sign_test.wasm").expect("sign_test.wasm");
+        let info = parse_wasm_bytes(&wasm).unwrap();
+        let raw: Vec<_> = info
+            .segments
+            .into_iter()
+            .filter(|s| s.func_index == 69 && s.segment_index == 0)
+            .collect();
+        let seg = materialize_segments(&raw, 1).into_iter().next().unwrap();
+        let unsound = vec![
+            SemOp::LocalGet(0),
+            SemOp::I64Const(4611686018427387903),
+            SemOp::I64Const(0),
+            SemOp::Pure(ValueOp::I64Rotl),
+            SemOp::Opaque {
+                id: 1,
+                pops: 2,
+                pushes: 0,
+                storage: true,
+            },
+            SemOp::I32Const(608),
+            SemOp::LocalGet(0),
+            SemOp::Pure(ValueOp::I64Rotr),
+            SemOp::I32Const(608),
+            SemOp::Call {
+                id: 2,
+                func_index: 10,
+                pops: 2,
+                pushes: 1,
+            },
+        ];
+        let mut canon = Canonizer::new(test_rules());
+        assert!(
+            !opaque_inputs_equivalent(&unsound, &seg, &mut canon),
+            "store/call operands must match original opaque inputs"
+        );
+        assert!(
+            !solution_valid(&unsound, &seg, &mut canon),
+            "unsound rewrite must fail full solution validation"
+        );
+        assert!(
+            solution_valid(&seg.ops, &seg, &mut canon),
+            "original segment must remain valid"
         );
     }
 }

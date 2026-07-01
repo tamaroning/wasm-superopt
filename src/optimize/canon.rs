@@ -155,6 +155,7 @@ impl Canonizer {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::synthesis::test_synthesis_rewrites;
     use crate::value::parse_value_expr;

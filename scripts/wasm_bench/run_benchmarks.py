@@ -69,7 +69,7 @@ def run_ewasm(
     jobs: int,
     timeout: int,
     segment_timeout: int | None,
-    solver: str = "astar",
+    solver: str = "sat",
     *,
     ui: BenchmarkRunnerUI | None = None,
     cwd: Path | None = None,
@@ -196,8 +196,8 @@ def main() -> int:
     parser.add_argument(
         "--ewasm-solver",
         choices=["astar", "sat"],
-        default="astar",
-        help="ewasm solver backend: astar (default) or sat (descending Pure-SAT)",
+        default="sat",
+        help="ewasm solver backend: sat (default, descending Pure-SAT) or astar",
     )
     parser.add_argument("--superstack", type=Path, default=DEFAULT_SUPERSTACK)
     parser.add_argument(

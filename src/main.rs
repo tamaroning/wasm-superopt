@@ -81,13 +81,22 @@ struct Cli {
     jobs: usize,
 
     /// Solver backend: `astar` (backward A*) or `sat` (descending Pure-SAT).
-    #[arg(long, value_enum, default_value_t = SolverArg::Astar)]
+    #[arg(long, value_enum, default_value_t = SolverArg::Sat)]
     solver: SolverArg,
 
     /// Classify SAT failure modes for blocks where SuperStack improved but ewasm did not
     /// (reads `combined_blocks.csv` from wasm-bench; requires WASM input for segment lookup).
     #[arg(long, value_name = "CSV", conflicts_with_all = ["synthesize_only", "segments_only", "print_semantics"])]
     classify_sat_gaps: Option<std::path::PathBuf>,
+
+    /// Print CNF scale / timing profile for the given block id(s) (`function_N_block_M[_part]`).
+    #[arg(
+        long = "sat-profile",
+        value_name = "BLOCK_ID",
+        num_args = 1..,
+        conflicts_with_all = ["synthesize_only", "segments_only", "print_semantics", "classify_sat_gaps"]
+    )]
+    sat_profile: Vec<String>,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -126,6 +135,11 @@ fn main() {
 
     if let Some(csv_path) = &cli.classify_sat_gaps {
         run_classify_sat_gaps(&path, csv_path, &cli);
+        return;
+    }
+
+    if !cli.sat_profile.is_empty() {
+        run_sat_profile(&path, &cli);
         return;
     }
 
@@ -188,7 +202,7 @@ fn main() {
         improved
     );
     if let Some(csv_path) = &cli.csv {
-        let rows = optimize::statistics_rows(&results);
+        let rows = optimize::statistics_rows(&results, &rules);
         optimize::write_statistics_csv(csv_path, &rows).unwrap_or_else(|e| {
             eprintln!("error writing {}: {e}", csv_path.display());
             std::process::exit(1);
@@ -196,6 +210,45 @@ fn main() {
         eprintln!("wrote statistics to {}", csv_path.display());
     }
     let _ = io::stdout().flush();
+}
+
+fn run_sat_profile(path: &std::path::Path, cli: &Cli) {
+    use optimize::{SearchConfig, block_id, profile_sat};
+    use std::collections::HashMap;
+    use wasm::{materialize_segments, split_raw_segments};
+
+    let info = parse_wasm_file(path).unwrap_or_else(|e| {
+        eprintln!("error parsing {}: {e}", path.display());
+        std::process::exit(1);
+    });
+    let max_ast = cli.max_ast_size.clamp(1, 8);
+    let max_arity = cli.max_arity.clamp(1, 3);
+    let syn = load_or_synthesize_rules(max_ast, max_arity, cli.random_tests, cli.jobs);
+    let rules = synthesized_to_rewrites(&syn);
+
+    let raw = split_raw_segments(&info.segments, cli.split);
+    let segments = materialize_segments(&raw, cli.jobs);
+    let by_id: HashMap<String, _> = segments.iter().map(|s| (block_id(s), s)).collect();
+
+    let cfg = SearchConfig {
+        max_depth: cli.window,
+        timeout_secs: None,
+        direct_timeout: cli.direct_timeout && cli.segment_timeout.is_none(),
+        fixed_segment_timeout: cli.segment_timeout,
+        backend: cli.solver.into(),
+    };
+
+    for want in &cli.sat_profile {
+        let Some(seg) = by_id.get(want) else {
+            eprintln!("block not found: {want} (split={})", cli.split);
+            continue;
+        };
+        let seg_cfg = cfg.for_segment(seg);
+        match profile_sat(seg, &rules, &seg_cfg) {
+            Ok(p) => p.print(want),
+            Err(stage) => eprintln!("profile failed at {stage}: {want}"),
+        }
+    }
 }
 
 fn run_classify_sat_gaps(path: &std::path::Path, csv_path: &std::path::Path, cli: &Cli) {

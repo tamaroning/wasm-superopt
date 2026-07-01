@@ -26,7 +26,7 @@ from rich.table import Table
 from rich.text import Text
 
 OPTIMIZING_TOTAL_RE = re.compile(r"=== Optimizing (\d+) segment")
-MATERIALIZE_START_RE = re.compile(r"materializing (\d+) raw segment")
+MATERIALIZE_START_RE = re.compile(r"materializing (\d+) (?:raw )?segment|materializing (\d+) chunk")
 MATERIALIZE_DONE_RE = re.compile(r"materialized (\d+) segment")
 PARALLEL_START_RE = re.compile(r"optimizing (\d+) segment\(s\) with (\d+) threads")
 SEGMENT_STEP_RE = re.compile(r"\[(\d+)/(\d+)\]")
@@ -35,6 +35,10 @@ FUNC_SEGMENT_RE = re.compile(r"^func \d+ segment ")
 FUNC_IMPROVED_RE = re.compile(r"->\s*\d+\s*\(saved ")
 FUNC_TIMEOUT_RE = re.compile(r"\(timeout\)\s*$")
 TOTAL_SUMMARY_RE = re.compile(r"Total: .+ across (\d+) segment")
+# SuperStack (pywasm) progress lines
+SUPERSTACK_FUNC_RE = re.compile(r"^(\d+) function_type\(")
+SUPERSTACK_ANALYZING_RE = re.compile(r"^Analyzing (\S+)")
+SUPERSTACK_DONE_RE = re.compile(r"^Initial length cost:")
 
 
 @dataclass
@@ -178,10 +182,17 @@ class BenchmarkRunnerUI:
                 if state is None or not state.segments.parallel_phase:
                     continue
                 seg = state.segments
+                state.elapsed_sec += 0.5
                 if seg.total is None:
+                    if seg.done > 0:
+                        self._reset_segment_task(
+                            f"Optimizing blocks: {seg.done} ({state.elapsed_sec:.0f}s)",
+                            total=None,
+                            completed=0,
+                        )
+                        self._refresh()
                     continue
                 jobs = seg.parallel_jobs or 1
-                state.elapsed_sec += 0.5
                 self._reset_segment_task(
                     f"Parallel optimization: {seg.total} segments / {jobs} threads ({state.elapsed_sec:.0f}s)",
                     total=None,
@@ -209,7 +220,7 @@ class BenchmarkRunnerUI:
 
         match = MATERIALIZE_START_RE.search(stripped)
         if match:
-            total = int(match.group(1))
+            total = int(match.group(1) or match.group(2))
             self._reset_segment_task(
                 f"Materializing: {total} raw segments",
                 total=total,
@@ -321,6 +332,42 @@ class BenchmarkRunnerUI:
             state.segments.parallel_phase = False
             self._stop_ticker()
             self._reset_segment_task(f"Optimization complete: {total} segments", total=total, completed=total)
+            self._refresh()
+            return
+
+        match = SUPERSTACK_FUNC_RE.match(stripped)
+        if match:
+            func_num = int(match.group(1)) + 1
+            state.segments.parallel_phase = False
+            self._stop_ticker()
+            self._reset_segment_task(f"Scanning functions: {func_num}", total=None, completed=0)
+            self._refresh()
+            return
+
+        match = SUPERSTACK_ANALYZING_RE.match(stripped)
+        if match:
+            seg = state.segments
+            seg.done += 1
+            block_name = match.group(1)
+            if seg.total is None:
+                seg.parallel_phase = True
+                state.elapsed_sec = 0.0
+                self._start_ticker()
+            self._reset_segment_task(
+                f"Optimizing blocks: {seg.done} (latest: {block_name})",
+                total=None,
+                completed=0,
+            )
+            self._refresh()
+            return
+
+        if SUPERSTACK_DONE_RE.match(stripped):
+            seg = state.segments
+            total = max(seg.done, 1)
+            seg.total = total
+            seg.parallel_phase = False
+            self._stop_ticker()
+            self._reset_segment_task(f"Optimization complete: {total} blocks", total=total, completed=total)
             self._refresh()
 
 
