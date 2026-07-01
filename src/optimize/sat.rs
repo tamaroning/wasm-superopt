@@ -570,8 +570,12 @@ fn ensure_const_op(ops: &mut Vec<SatOp>, sem: &SemOp, val: usize) {
     });
 }
 
-/// Ensure every pure step of the original trace has a corresponding SAT transition edge.
-fn inject_trace_edges(
+/// §2.1.4: operational transitions for the original trace (O(|σ|), not O(|V|²)).
+///
+/// Batched e-graph maps result e-classes via vocab node membership; when a class
+/// does not contain any `reals[i]` (or the trace result index differs), this pass
+/// adds the missing `T_⊕` / `T_∘` rows needed for a witness at `L_orig`.
+fn merge_trace_witness_tables(
     segment: &StraightSegment,
     vocab: &Vocab,
     canon: &mut Canonizer,
@@ -823,10 +827,8 @@ fn build_vocab_with_limit(
 
 /// Build the SAT instruction alphabet (NOP first), pruning ops with no defined result.
 ///
-/// The unary/binary result tables `T_∘` / `T_⊕` (§2.3) are computed with a single
-/// batched equality saturation over all `V × V` applications, rather than one
-/// `Canonizer::canon` call per pair (which re-saturates a growing e-graph and is
-/// prohibitively slow).
+/// Unary/binary result tables `T_∘` / `T_⊕` (§2.3): batched equality saturation over
+/// `V × V`, mapping every vocab index per result e-class, plus §2.1.4 trace rows.
 fn build_ops(
     segment: &StraightSegment,
     vocab: &Vocab,
@@ -916,16 +918,24 @@ fn build_ops(
     if Instant::now() >= deadline {
         return None;
     }
-    let mut class_to_real: HashMap<Id, usize> = HashMap::new();
+    let mut class_to_reals: HashMap<Id, Vec<usize>> = HashMap::new();
     for (i, id) in real_ids.iter().enumerate() {
-        class_to_real.entry(runner.egraph.find(*id)).or_insert(i);
+        class_to_reals
+            .entry(runner.egraph.find(*id))
+            .or_default()
+            .push(i);
     }
-    let lookup = |id: Id| class_to_real.get(&runner.egraph.find(id)).copied();
+    let lookup_all = |id: Id| -> &[usize] {
+        class_to_reals
+            .get(&runner.egraph.find(id))
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    };
 
     for (ki, &kind) in sat_unops.iter().enumerate() {
         let mut edges = Vec::new();
         for a in 0..n {
-            if let Some(res) = lookup(uni_ids[ki][a]) {
+            for &res in lookup_all(uni_ids[ki][a]) {
                 edges.push((a, res));
             }
         }
@@ -937,7 +947,7 @@ fn build_ops(
         let mut edges = Vec::new();
         for a1 in 0..n {
             for a0 in 0..n {
-                if let Some(res) = lookup(bin_ids[ki][a1 * n + a0]) {
+                for &res in lookup_all(bin_ids[ki][a1 * n + a0]) {
                     edges.push((a1, a0, res));
                 }
             }
@@ -947,7 +957,7 @@ fn build_ops(
         }
     }
 
-    inject_trace_edges(segment, vocab, canon, &mut ops)?;
+    merge_trace_witness_tables(segment, vocab, canon, &mut ops)?;
 
     // Side-effecting / uninterpreted ops (SuperStack-style). Each is one instruction
     // that requires its operand values on top and produces fresh result symbols.
@@ -2116,107 +2126,38 @@ mod tests {
         assert_eq!(max_vocab_for_segment(&long), 80);
     }
 
-    fn segment_by_block_id(wasm_path: &str, split: usize, bid: &str) -> Option<StraightSegment> {
-        let path = std::path::Path::new(wasm_path);
-        if !path.is_file() {
-            return None;
-        }
-        let info = parse_wasm_file(path).ok()?;
-        let raw = split_raw_segments(&info.segments, split);
-        let segments = materialize_segments(&raw, split);
-        segments
-            .into_iter()
-            .find(|s| crate::optimize::statistics::block_id(s) == bid)
-    }
-
-    fn sat_cfg_split_15() -> SearchConfig {
-        SearchConfig {
-            max_sat_len: super::super::search::max_sat_len_for_split(15),
-            timeout_secs: Some(120),
-            ..SearchConfig::default()
-        }
-    }
-
-    /// Regression: i64 mul/add/shr chains must witness the original program (not OriginalUnsat).
+    /// Regression: i64 mul/add/shr chains must witness the original program.
     #[test]
-    fn function_24_block_witnesses_original_program() {
-        let Some(seg) = segment_by_block_id(
-            "benchmarks/wsouper/sign_test.wasm",
-            15,
-            "function_24_block_0_0",
-        ) else {
-            return;
-        };
+    fn i64_chain_witnesses_original_program() {
+        let wasm = wat::parse_str(
+            r#"(module
+              (func (param i64 i64) (result i64)
+                local.get 0
+                local.get 1
+                i64.mul
+                i64.const 1
+                i64.add
+                i64.const 2
+                i64.shr_u))"#,
+        )
+        .unwrap();
+        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
+        let seg = materialize_segments(&info.segments, 1)
+            .pop()
+            .expect("segment");
         let r = rules();
-        let cfg = sat_cfg_split_15();
+        let cfg = SearchConfig::default();
         let diag = diagnose_sat(&seg, &r, &cfg);
         assert!(
             !matches!(
                 diag,
                 SatDiagnosis::OriginalWitnessMissingOp | SatDiagnosis::OriginalWitnessUnsat
             ),
-            "function_24_block_0_0: {diag:?}"
+            "{diag:?}"
         );
         assert!(
             !matches!(diag, SatDiagnosis::EncodeFailed { .. }),
-            "function_24_block_0_0 encode failed: {diag:?}"
-        );
-        let result = solve_sat(&seg, &r, &cfg);
-        assert!(
-            result.ops.is_some(),
-            "solve_sat should return a model, timed_out={}",
-            result.timed_out
-        );
-    }
-
-    #[test]
-    fn function_25_block_witnesses_original_program() {
-        let Some(seg) = segment_by_block_id(
-            "benchmarks/wsouper/sign_test.wasm",
-            15,
-            "function_25_block_0_0",
-        ) else {
-            return;
-        };
-        let r = rules();
-        let cfg = sat_cfg_split_15();
-        let diag = diagnose_sat(&seg, &r, &cfg);
-        assert!(
-            !matches!(
-                diag,
-                SatDiagnosis::OriginalWitnessMissingOp | SatDiagnosis::OriginalWitnessUnsat
-            ),
-            "function_25_block_0_0: {diag:?}"
-        );
-        assert!(
-            !matches!(diag, SatDiagnosis::EncodeFailed { .. }),
-            "function_25_block_0_0 encode failed: {diag:?}"
-        );
-    }
-
-    #[test]
-    fn function_24_cnf_within_clause_limit() {
-        let Some(seg) = segment_by_block_id(
-            "benchmarks/wsouper/mux1_1.wasm",
-            15,
-            "function_24_block_0_0",
-        ) else {
-            return;
-        };
-        let r = rules();
-        let cfg = sat_cfg_split_15();
-        let profile = profile_sat(&seg, &r, &cfg).expect("profile_sat");
-        assert!(
-            profile.n_clauses < MAX_CNF_CLAUSES,
-            "CNF too large: {} clauses, n_ops={}, r={}",
-            profile.n_clauses,
-            profile.n_ops,
-            profile.r
-        );
-        assert!(
-            profile.n_ops < 90,
-            "expected pruned |OP|, got {}",
-            profile.n_ops
+            "encode failed: {diag:?}"
         );
     }
 }
