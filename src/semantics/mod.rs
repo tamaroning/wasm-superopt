@@ -5,8 +5,9 @@ mod types;
 
 pub use pure_ops::{
     classify_pure_operator, const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op,
-    sat_pure_ops, sem_from_inst_kind, sem_to_value_op, value_op_from_inst_kind, value_op_is_binop,
-    value_op_is_unop, value_op_to_sem,
+    inst_kind_is_commutative_binop, sat_pure_ops, sem_from_inst_kind, sem_to_value_op,
+    value_op_from_inst_kind, value_op_is_binop, value_op_is_commutative_binop, value_op_is_unop,
+    value_op_to_sem,
 };
 pub use types::{InstKind, InstSpec, SemOp, StackTy};
 

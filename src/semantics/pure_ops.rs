@@ -188,9 +188,44 @@ pub fn value_op_is_unop(op: ValueOp) -> bool {
     op.pops().len() == 1
 }
 
+/// Wasm binops whose stack operand order is semantically irrelevant.
+pub fn value_op_is_commutative_binop(op: ValueOp) -> bool {
+    matches!(
+        op,
+        ValueOp::I32Add
+            | ValueOp::I64Add
+            | ValueOp::I32Mul
+            | ValueOp::I64Mul
+            | ValueOp::I32And
+            | ValueOp::I64And
+            | ValueOp::I32Or
+            | ValueOp::I64Or
+            | ValueOp::I32Xor
+            | ValueOp::I64Xor
+            | ValueOp::F32Add
+            | ValueOp::F64Add
+            | ValueOp::F32Mul
+            | ValueOp::F64Mul
+    )
+}
+
+pub fn inst_kind_is_commutative_binop(kind: InstKind) -> bool {
+    matches!(kind, InstKind::Pure(op) if value_op_is_commutative_binop(op))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commutative_binop_i64_add() {
+        use crate::semantics::{inst_kind_is_commutative_binop, value_op_is_commutative_binop};
+        use crate::value::ValueOp;
+
+        assert!(value_op_is_commutative_binop(ValueOp::I64Add));
+        assert!(!value_op_is_commutative_binop(ValueOp::I64ShrU));
+        assert!(inst_kind_is_commutative_binop(InstKind::Pure(ValueOp::I64Add)));
+    }
 
     #[test]
     fn i64_shr_s_not_opaque() {

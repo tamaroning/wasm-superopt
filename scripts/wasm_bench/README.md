@@ -35,7 +35,7 @@ From the repository root:
 # 1) Run benchmarks (SuperStack SAT + ewasm)
 #  - sequence timeout: 300s
 #  - timeout for each program: 3600s
-uv run --project scripts wasm-bench-run --suite wsouper --only mux1_1,sign_test -j 20 --split 15 --segment-timeout 10 --timeout 3600
+uv run --project scripts wasm-bench-run --suite wsouper -j 25 --split 12 --segment-timeout 10 --timeout 1200 --only mux1_1,sign_test
 
 # 2) Re-merge raw CSVs (optional; plot also auto-merges if combined_blocks.csv is missing)
 uv run --project scripts wasm-bench-merge --suite wsouper

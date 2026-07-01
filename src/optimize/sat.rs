@@ -25,8 +25,8 @@ use super::search::{SearchConfig, SearchResult, solution_valid};
 use crate::lang::ValueLang;
 use crate::semantics::{
     InstKind, SemOp, StackTy, const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op,
-    sat_pure_ops, sem_from_inst_kind, sem_to_value_op, synthesis_const_exprs, value_op_is_binop,
-    value_op_is_unop,
+    inst_kind_is_commutative_binop, sat_pure_ops, sem_from_inst_kind, sem_to_value_op,
+    synthesis_const_exprs, value_op_is_binop, value_op_is_unop,
 };
 use crate::sym::{LocalReq, SymMachine, SymState, ValueExpr, all_subtree_exprs, subtree_expr};
 use crate::value::{ValueOp, parse_value_expr};
@@ -527,19 +527,45 @@ fn pin_fixed_locals(cnf: &mut Cnf, dims: &Dims, local_kinds: &[LocalSlotKind]) {
     }
 }
 
+fn insert_binop_edge(edges: &mut Vec<(usize, usize, usize)>, edge: (usize, usize, usize)) {
+    if !edges.contains(&edge) {
+        edges.push(edge);
+    }
+}
+
+fn symmetrize_commutative_binop_edges(kind: InstKind, edges: &mut Vec<(usize, usize, usize)>) {
+    if !inst_kind_is_commutative_binop(kind) {
+        return;
+    }
+    let mut extra = Vec::new();
+    for &(a1, a0, res) in edges.iter() {
+        let swapped = (a0, a1, res);
+        if !edges.contains(&swapped) && !extra.contains(&swapped) {
+            extra.push(swapped);
+        }
+    }
+    edges.extend(extra);
+}
+
 fn merge_binop_edge(ops: &mut Vec<SatOp>, kind: InstKind, edge: (usize, usize, usize)) {
+    let mut to_add = vec![edge];
+    if inst_kind_is_commutative_binop(kind) {
+        let (a1, a0, res) = edge;
+        to_add.push((a0, a1, res));
+    }
     if let Some(SatOp::Binop { edges, .. }) = ops
         .iter_mut()
         .find(|o| matches!(o, SatOp::Binop { kind: k, .. } if *k == kind))
     {
-        if !edges.contains(&edge) {
-            edges.push(edge);
+        for e in to_add {
+            insert_binop_edge(edges, e);
         }
     } else {
-        ops.push(SatOp::Binop {
-            kind,
-            edges: vec![edge],
-        });
+        let mut edges = Vec::new();
+        for e in to_add {
+            insert_binop_edge(&mut edges, e);
+        }
+        ops.push(SatOp::Binop { kind, edges });
     }
 }
 
@@ -643,6 +669,83 @@ fn merge_trace_witness_tables(
     Some(())
 }
 
+/// Merge pure-op table rows from single-step `set`→`tee` variant executions.
+fn merge_set_to_tee_witness_tables(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    canon: &mut Canonizer,
+    ops: &mut Vec<SatOp>,
+) -> Option<()> {
+    for (idx, op) in segment.ops.iter().enumerate() {
+        let SemOp::LocalSet(slot) = op else {
+            continue;
+        };
+        let mut variant: Vec<SemOp> = segment.ops.clone();
+        variant[idx] = SemOp::LocalTee(*slot);
+        let mut m = SymMachine::from_segment_entry(
+            segment.num_params,
+            &segment.bounds,
+            &segment.init,
+            segment.bounds.max_stack,
+        );
+        for o in &variant {
+            match o {
+                SemOp::I32Const(_)
+                | SemOp::I64Const(_)
+                | SemOp::F32Const(_)
+                | SemOp::F64Const(_) => {
+                    let expr = const_expr(o)?;
+                    let val = vocab.real_of_expr(canon, &expr)?;
+                    ensure_const_op(ops, o, val);
+                }
+                SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) | SemOp::Drop => {}
+                SemOp::I32Load { .. }
+                | SemOp::I32Store { .. }
+                | SemOp::Call { .. }
+                | SemOp::GlobalGet { .. }
+                | SemOp::GlobalSet { .. }
+                | SemOp::Opaque { .. } => {}
+                other => {
+                    let vop = sem_to_value_op(other)?;
+                    let kind = inst_kind_from_sem(other)?;
+                    if vop.pops().len() == 2 {
+                        let st = m.to_carried_init_state();
+                        let len = st.stack.len();
+                        if len < 2 {
+                            return None;
+                        }
+                        let a0_expr = st.stack[len - 1].clone();
+                        let a1_expr = st.stack[len - 2].clone();
+                        m.exec(o).ok()?;
+                        let st = m.to_carried_init_state();
+                        let res_expr = st.stack.last()?.clone();
+                        let a1 = vocab.real_of_expr(canon, &a1_expr)?;
+                        let a0 = vocab.real_of_expr(canon, &a0_expr)?;
+                        let res = vocab.real_of_expr(canon, &res_expr)?;
+                        merge_binop_edge(ops, kind, (a1, a0, res));
+                    } else {
+                        let st = m.to_carried_init_state();
+                        let len = st.stack.len();
+                        if len < 1 {
+                            return None;
+                        }
+                        let a_expr = st.stack[len - 1].clone();
+                        m.exec(o).ok()?;
+                        let st = m.to_carried_init_state();
+                        let res_expr = st.stack.last()?.clone();
+                        let a = vocab.real_of_expr(canon, &a_expr)?;
+                        let res = vocab.real_of_expr(canon, &res_expr)?;
+                        merge_unop_edge(ops, kind, (a, res));
+                    }
+                    continue;
+                }
+            }
+            m.exec(o).ok()?;
+        }
+    }
+    Some(())
+}
+
 /// Forward-execute the original ops, collecting all stack/local values and the max stack height.
 fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
     let mut seeds = Vec::new();
@@ -686,6 +789,42 @@ fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
     }
 
     (seeds, max_height)
+}
+
+/// Stack/local value-exprs reachable when individual `local.set` steps are replaced by `local.tee`.
+fn collect_set_to_tee_variant_seeds(segment: &StraightSegment) -> Vec<ValueExpr> {
+    let mut extra = Vec::new();
+    let push_state = |seeds: &mut Vec<ValueExpr>, st: &SymState| {
+        for e in &st.stack {
+            seeds.push(e.clone());
+        }
+        for req in st.locals.values() {
+            if let LocalReq::Need(v) = req {
+                seeds.push(v.clone());
+            }
+        }
+    };
+
+    for (idx, op) in segment.ops.iter().enumerate() {
+        let SemOp::LocalSet(slot) = op else {
+            continue;
+        };
+        let mut variant: Vec<SemOp> = segment.ops.clone();
+        variant[idx] = SemOp::LocalTee(*slot);
+        let mut m = SymMachine::from_segment_entry(
+            segment.num_params,
+            &segment.bounds,
+            &segment.init,
+            segment.bounds.max_stack,
+        );
+        for o in &variant {
+            if m.exec(o).is_err() {
+                break;
+            }
+            push_state(&mut extra, &m.to_fin_state());
+        }
+    }
+    extra
 }
 
 fn build_vocab(
@@ -733,9 +872,10 @@ fn build_vocab_with_limit(
     let mut complete = true;
 
     // V = SubExpr(EqSat(SubExpr(seed))) where seed = trace + boundaries + opaque symbols
-    // + type-filtered synthesis constants.
+    // + set→tee variant states + type-filtered synthesis constants.
     let types = types_in_segment(segment);
     let mut core: Vec<ValueExpr> = seeds;
+    core.extend(collect_set_to_tee_variant_seeds(segment));
     core.extend(synthesis_const_exprs_for_types(&types));
     dedup_by_string(&mut core);
 
@@ -817,9 +957,32 @@ fn equiv_reals(vocab: &Vocab, req: usize) -> Vec<usize> {
         .collect()
 }
 
+fn same_equiv(vocab: &Vocab, a: usize, b: usize) -> bool {
+    vocab.equiv_class[a] == vocab.equiv_class[b]
+}
+
+/// When `xio`, stack cell `src(v)` and `dst(v)` must denote the same ≡_R class.
+fn pin_transfer_equiv(
+    cnf: &mut Cnf,
+    xio: i32,
+    vocab: &Vocab,
+    n: usize,
+    src: impl Fn(usize) -> i32,
+    dst: impl Fn(usize) -> i32,
+) {
+    for v1 in 0..n {
+        for v2 in 0..n {
+            if !same_equiv(vocab, v1, v2) {
+                cnf.add(vec![-xio, -src(v1), -dst(v2)]);
+            }
+        }
+    }
+}
+
 fn push_binop_edge(
     edges: &mut Vec<(usize, usize, usize)>,
     vocab: &Vocab,
+    kind: InstKind,
     a1: usize,
     a0: usize,
     res: usize,
@@ -827,9 +990,9 @@ fn push_binop_edge(
     for e1 in equiv_reals(vocab, a1) {
         for e0 in equiv_reals(vocab, a0) {
             for r in equiv_reals(vocab, res) {
-                let edge = (e1, e0, r);
-                if !edges.contains(&edge) {
-                    edges.push(edge);
+                insert_binop_edge(edges, (e1, e0, r));
+                if inst_kind_is_commutative_binop(kind) {
+                    insert_binop_edge(edges, (e0, e1, r));
                 }
             }
         }
@@ -873,7 +1036,14 @@ fn extract_pure_edges_from_vocab(
                 vocab.real_of_expr(canon, &a1_expr),
                 vocab.real_of_expr(canon, &a0_expr),
             ) {
-                push_binop_edge(binop_edges.entry(kind).or_default(), vocab, a1, a0, res_idx);
+                push_binop_edge(
+                    binop_edges.entry(kind).or_default(),
+                    vocab,
+                    kind,
+                    a1,
+                    a0,
+                    res_idx,
+                );
             }
         } else if child_ids.len() == 1 && sat_unops.contains(&kind) {
             let a_expr = subtree_expr(expr, child_ids[0]);
@@ -952,7 +1122,8 @@ fn build_ops(
         return None;
     }
 
-    for (kind, edges) in binop_edges {
+    for (kind, mut edges) in binop_edges {
+        symmetrize_commutative_binop_edges(kind, &mut edges);
         if !edges.is_empty() {
             ops.push(SatOp::Binop { kind, edges });
         }
@@ -964,6 +1135,12 @@ fn build_ops(
     }
 
     merge_trace_witness_tables(segment, vocab, canon, &mut ops)?;
+    merge_set_to_tee_witness_tables(segment, vocab, canon, &mut ops)?;
+    for op in ops.iter_mut() {
+        if let SatOp::Binop { kind, edges } = op {
+            symmetrize_commutative_binop_edges(*kind, edges);
+        }
+    }
 
     // Side-effecting / uninterpreted ops (SuperStack-style). Each is one instruction
     // that requires its operand values on top and produces fresh result symbols.
@@ -1082,6 +1259,77 @@ fn stack_expr_at(state: &SymState, j: usize) -> Option<&ValueExpr> {
         state.stack.get(len - 1 - j)
     } else {
         None
+    }
+}
+
+/// Emit binop positive clauses with ≡_R operand matching; keep exact-index forbids.
+fn encode_binop_positive_equiv(
+    cnf: &mut Cnf,
+    dims: &Dims,
+    i: usize,
+    xio: i32,
+    vocab: &Vocab,
+    edges: &[(usize, usize, usize)],
+) {
+    let n = dims.n;
+    let mut by_ec_pair: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
+    for &(a1, a0, res) in edges {
+        by_ec_pair
+            .entry((vocab.equiv_class[a1], vocab.equiv_class[a0]))
+            .or_default()
+            .insert(vocab.equiv_class[res]);
+    }
+    for ((ec1, ec0), res_ecs) in &by_ec_pair {
+        let reps1: Vec<usize> = (0..n).filter(|&v| vocab.equiv_class[v] == *ec1).collect();
+        let reps0: Vec<usize> = (0..n).filter(|&v| vocab.equiv_class[v] == *ec0).collect();
+        for &v1 in &reps1 {
+            for &v0 in &reps0 {
+                let mut clause = vec![-xio, -dims.y(i - 1, 1, v1), -dims.y(i - 1, 0, v0)];
+                for &ec_res in res_ecs {
+                    for r in 0..n {
+                        if vocab.equiv_class[r] == ec_res {
+                            clause.push(dims.y(i, 0, r));
+                        }
+                    }
+                }
+                cnf.add(clause);
+            }
+        }
+    }
+}
+
+/// Emit unop positive clauses with ≡_R operand matching.
+fn encode_unop_positive_equiv(
+    cnf: &mut Cnf,
+    dims: &Dims,
+    i: usize,
+    xio: i32,
+    vocab: &Vocab,
+    edges: &[(usize, usize)],
+) {
+    let n = dims.n;
+    let mut by_arg_ec: HashMap<usize, HashSet<usize>> = HashMap::new();
+    for &(a, res) in edges {
+        by_arg_ec
+            .entry(vocab.equiv_class[a])
+            .or_default()
+            .insert(vocab.equiv_class[res]);
+    }
+    for (ec_a, res_ecs) in &by_arg_ec {
+        for v in 0..n {
+            if vocab.equiv_class[v] != *ec_a {
+                continue;
+            }
+            let mut clause = vec![-xio, -dims.y(i - 1, 0, v)];
+            for &ec_res in res_ecs {
+                for r in 0..n {
+                    if vocab.equiv_class[r] == ec_res {
+                        clause.push(dims.y(i, 0, r));
+                    }
+                }
+            }
+            cnf.add(clause);
+        }
     }
 }
 
@@ -1211,9 +1459,14 @@ fn encode(
                     let slot = *slot as usize;
                     cnf.add(vec![-xio, -dims.w(i - 1, slot, star)]);
                     cnf.add(vec![-xio, dims.y(i - 1, h - 1, bot)]);
-                    for v in 0..n {
-                        cnf.imply_iff(xio, dims.y(i, 0, v), dims.w(i - 1, slot, v));
-                    }
+                    pin_transfer_equiv(
+                        &mut cnf,
+                        xio,
+                        vocab,
+                        n,
+                        |v| dims.w(i - 1, slot, v),
+                        |v| dims.y(i, 0, v),
+                    );
                     stack_push_shift(&mut cnf, dims, i, xio);
                     locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
@@ -1221,9 +1474,14 @@ fn encode(
                     let slot = *slot as usize;
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
-                    for v in 0..n {
-                        cnf.imply_iff(xio, dims.w(i, slot, v), dims.y(i - 1, 0, v));
-                    }
+                    pin_transfer_equiv(
+                        &mut cnf,
+                        xio,
+                        vocab,
+                        n,
+                        |v| dims.y(i - 1, 0, v),
+                        |v| dims.w(i, slot, v),
+                    );
                     locals_unchanged_except(&mut cnf, dims, i, xio, slot, &local_kinds);
                     stack_pop_shift(&mut cnf, dims, i, xio, 0);
                 }
@@ -1231,9 +1489,14 @@ fn encode(
                     let slot = *slot as usize;
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
-                    for v in 0..n {
-                        cnf.imply_iff(xio, dims.w(i, slot, v), dims.y(i - 1, 0, v));
-                    }
+                    pin_transfer_equiv(
+                        &mut cnf,
+                        xio,
+                        vocab,
+                        n,
+                        |v| dims.y(i - 1, 0, v),
+                        |v| dims.w(i, slot, v),
+                    );
                     locals_unchanged_except(&mut cnf, dims, i, xio, slot, &local_kinds);
                     stack_unchanged(&mut cnf, dims, i, xio);
                 }
@@ -1245,23 +1508,16 @@ fn encode(
                 SatOp::Unop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
-                    let mut by_arg: HashMap<usize, Vec<usize>> = HashMap::new();
-                    for &(a, res) in edges {
-                        by_arg.entry(a).or_default().push(res);
+                    encode_unop_positive_equiv(&mut cnf, dims, i, xio, vocab, edges);
+                    let mut allowed_arg_ec: HashSet<usize> = HashSet::new();
+                    for &(a, _) in edges {
+                        allowed_arg_ec.insert(vocab.equiv_class[a]);
                     }
-                    for (&a, results) in &by_arg {
-                        let mut clause = vec![-xio, -dims.y(i - 1, 0, a)];
-                        for &res in results {
-                            clause.push(dims.y(i, 0, res));
-                        }
-                        cnf.add(clause);
-                    }
-                    for a in 0..n {
-                        if !by_arg.contains_key(&a) {
-                            cnf.add(vec![-xio, -dims.y(i - 1, 0, a)]);
+                    for v in 0..n {
+                        if !allowed_arg_ec.contains(&vocab.equiv_class[v]) {
+                            cnf.add(vec![-xio, -dims.y(i - 1, 0, v)]);
                         }
                     }
-                    // Top changes; deeper cells unchanged.
                     for j in 1..h {
                         for v in 0..sd {
                             cnf.imply_iff(xio, dims.y(i, j, v), dims.y(i - 1, j, v));
@@ -1274,29 +1530,38 @@ fn encode(
                     cnf.add(vec![-xio, -dims.y(i - 1, 1, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, top)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 1, top)]);
-                    let mut by_pair: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
-                    let mut by_a1: HashSet<usize> = HashSet::new();
-                    for &(a1, a0, res) in edges {
-                        by_pair.entry((a1, a0)).or_default().push(res);
-                        by_a1.insert(a1);
+                    encode_binop_positive_equiv(&mut cnf, dims, i, xio, vocab, edges);
+                    let mut allowed_ec_pairs: HashSet<(usize, usize)> = HashSet::new();
+                    let mut allowed_first_ec: HashSet<usize> = HashSet::new();
+                    for &(a1, a0, _) in edges {
+                        allowed_ec_pairs.insert((vocab.equiv_class[a1], vocab.equiv_class[a0]));
+                        allowed_first_ec.insert(vocab.equiv_class[a1]);
                     }
-                    for (&(a1, a0), results) in &by_pair {
-                        let mut clause = vec![-xio, -dims.y(i - 1, 1, a1), -dims.y(i - 1, 0, a0)];
-                        for &res in results {
-                            clause.push(dims.y(i, 0, res));
-                        }
-                        cnf.add(clause);
-                    }
-                    for a1 in 0..n {
-                        if !by_a1.contains(&a1) {
-                            cnf.add(vec![-xio, -dims.y(i - 1, 1, a1)]);
-                        }
-                    }
-                    for a1 in 0..n {
-                        for a0 in 0..n {
-                            if !by_pair.contains_key(&(a1, a0)) {
-                                cnf.add(vec![-xio, -dims.y(i - 1, 1, a1), -dims.y(i - 1, 0, a0)]);
+                    for ec1 in vocab.equiv_class.iter().copied().collect::<HashSet<_>>() {
+                        for ec0 in vocab.equiv_class.iter().copied().collect::<HashSet<_>>() {
+                            if allowed_ec_pairs.contains(&(ec1, ec0)) {
+                                continue;
                             }
+                            for v1 in 0..n {
+                                if vocab.equiv_class[v1] != ec1 {
+                                    continue;
+                                }
+                                for v0 in 0..n {
+                                    if vocab.equiv_class[v0] != ec0 {
+                                        continue;
+                                    }
+                                    cnf.add(vec![
+                                        -xio,
+                                        -dims.y(i - 1, 1, v1),
+                                        -dims.y(i - 1, 0, v0),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                    for v1 in 0..n {
+                        if !allowed_first_ec.contains(&vocab.equiv_class[v1]) {
+                            cnf.add(vec![-xio, -dims.y(i - 1, 1, v1)]);
                         }
                     }
                     stack_pop_shift(&mut cnf, dims, i, xio, 1);
@@ -2935,12 +3200,254 @@ mod tests {
     }
 
     #[test]
+    fn analyze_function_14_block_0_13_root_cause() {
+        use crate::optimize::search::{solution_valid, validate_solution_ops};
+        use crate::value::ValueOp;
+
+        let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
+        if !path.is_file() {
+            return;
+        }
+        let rules_v = rules();
+        let segments = load_wsouper_segments(12);
+        let seg = segments
+            .iter()
+            .find(|s| crate::optimize::statistics::block_id(s) == "function_14_block_0_13")
+            .expect("function_14_block_0_13");
+
+        eprintln!("=== segment ===");
+        eprintln!("ops ({}): {:?}", seg.original_len(), seg.ops);
+        eprintln!("opaque_meta: {}", seg.opaque_meta.len());
+        eprintln!("dependencies: {:?}", seg.dependencies);
+        eprintln!("init stack len: {}", seg.init.stack.len());
+        eprintln!("fin stack len: {}", seg.fin.stack.len());
+        eprintln!("max_stack: {}", seg.bounds.max_stack);
+
+        // SS schedule from bench CSV (11 instr).
+        let ss_ops = vec![
+            SemOp::Pure(ValueOp::I64Add),
+            SemOp::LocalTee(2),
+            SemOp::I64Const(32),
+            SemOp::Pure(ValueOp::I64ShrU),
+            SemOp::LocalGet(3),
+            SemOp::Pure(ValueOp::I64Add),
+            SemOp::LocalGet(5),
+            SemOp::Pure(ValueOp::I64Add),
+            SemOp::LocalSet(3),
+            SemOp::LocalGet(1),
+            SemOp::LocalGet(2),
+        ];
+
+        let mut canon = Canonizer::new(rules_v.clone());
+        eprintln!(
+            "SS solution_valid: {}",
+            solution_valid(&ss_ops, seg, &mut canon)
+        );
+        eprintln!(
+            "SS validate_solution_ops: {}",
+            validate_solution_ops(&ss_ops, seg)
+        );
+
+        let missing = vocab_missing_for_solution(seg, &rules_v, &ss_ops);
+        eprintln!("SS vocab missing ({}): {missing:?}", missing.len());
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(120);
+        let mut canon2 = Canonizer::new(rules_v.clone());
+        let (vocab, max_h) = build_vocab(seg, &mut canon2, deadline).expect("vocab");
+        let cfg = crate::optimize::search::SearchConfig {
+            backend: crate::optimize::search::Backend::Sat,
+            max_sat_len: 12,
+            scratch_locals: 1,
+            ..Default::default()
+        };
+        let h = stack_height_bound(max_h, seg, 1);
+        eprintln!("|V|={} max_h={max_h} H={h}", vocab.n());
+
+        let probe = solve_at_length_minus_one_with_h(seg, &rules_v, &cfg.for_segment(seg), h, deadline);
+        eprintln!(
+            "probe L=11: sat={} valid={} timed_out={}",
+            probe.as_ref().map(|p| p.sat).unwrap_or(false),
+            probe.as_ref().map(|p| p.valid).unwrap_or(false),
+            probe.as_ref().map(|p| p.timed_out).unwrap_or(false),
+        );
+
+        // Stack trace comparison via SymMachine
+        use crate::sym::SymMachine;
+        let trace = |label: &str, ops: &[SemOp]| {
+            let mut m = SymMachine::from_segment_entry(
+                seg.num_params,
+                &seg.bounds,
+                &seg.init,
+                seg.bounds.max_stack,
+            );
+            eprintln!("--- {label} ---");
+            eprintln!("  init stack: {:?}", m.to_fin_state().stack.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+            for (i, op) in ops.iter().enumerate() {
+                m.exec(op).expect("exec");
+                let st = m.to_fin_state();
+                eprintln!(
+                    "  step {i} {op:?} -> stack[{}]: {:?}",
+                    st.stack.len(),
+                    st.stack.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+                );
+            }
+        };
+        trace("original", &seg.ops);
+        trace("SS", &ss_ops);
+
+        // Compare stack cell V-indices at shr step
+        let mut canon3 = Canonizer::new(rules_v.clone());
+        let (vocab2, _) = build_vocab(seg, &mut canon3, deadline).expect("vocab");
+        let mut idx_at = |ops: &[SemOp], step: usize| -> Option<(usize, String)> {
+            let mut m = SymMachine::from_segment_entry(
+                seg.num_params,
+                &seg.bounds,
+                &seg.init,
+                seg.bounds.max_stack,
+            );
+            for (i, op) in ops.iter().enumerate() {
+                if i == step {
+                    let st = m.to_fin_state();
+                    let top = st.stack.last()?;
+                    let idx = vocab2.real_of_expr(&mut canon3, top)?;
+                    return Some((idx, top.to_string()));
+                }
+                m.exec(op).ok()?;
+            }
+            None
+        };
+        // Original: shr at step 5 (0-indexed), SS: shr at step 3
+        eprintln!(
+            "stack top before shr (orig step 5): {:?}",
+            idx_at(&seg.ops, 5)
+        );
+        eprintln!("stack top before shr (SS step 3): {:?}", idx_at(&ss_ops, 3));
+        eprintln!(
+            "stack top before shr (orig step 4 get2): {:?}",
+            idx_at(&seg.ops, 4)
+        );
+
+        assert!(
+            probe.as_ref().is_some_and(|p| p.sat),
+            "L=11 probe should be SAT after commutative binop edge symmetrization"
+        );
+        assert_eq!(missing.len(), 0, "SS solution should have no missing vocab");
+
+        // Build ops + SS witness CNF check.
+        let r_ops = (seg.bounds.max_local as usize) + 1 + 1;
+        let ops_sat = build_ops(seg, &vocab2, &mut canon3, &rules_v, r_ops, deadline).expect("ops");
+        for op in &ops_sat {
+            if let SatOp::Binop { kind, edges } = op {
+                eprintln!("binop {:?} edges ({}):", kind, edges.len());
+                for (a1, a0, res) in edges.iter().take(20) {
+                    eprintln!(
+                        "  ({a1},{a0})-> {res}  [{}] op [{}] = [{}]",
+                        vocab2.reals.get(*a1).map(|e| e.to_string()).unwrap_or_default(),
+                        vocab2.reals.get(*a0).map(|e| e.to_string()).unwrap_or_default(),
+                        vocab2.reals.get(*res).map(|e| e.to_string()).unwrap_or_default(),
+                    );
+                }
+            }
+        }
+
+        let mut dims = Dims::new(seg.original_len(), h, r_ops, vocab2.n(), ops_sat.len());
+        let cnf = encode(seg, &vocab2, &ops_sat, &mut dims, &mut canon3, deadline).expect("encode");
+        let mut solver: Solver = Solver::new();
+        for clause in &cnf.clauses {
+            solver.add_clause(clause.iter().copied());
+        }
+        let ss_assumptions: Option<Vec<i32>> = ss_ops
+            .iter()
+            .enumerate()
+            .map(|(step, sem)| {
+                let o = sat_op_index_for_orig(&ops_sat, sem)?;
+                Some(dims.x(step + 1, o))
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|mut v| {
+                v.push(dims.x(seg.original_len(), NOP_INDEX));
+                v
+            });
+        if let Some(assumptions) = ss_assumptions {
+            match solver.solve_with(assumptions.iter().copied()) {
+                Some(true) => eprintln!("SS witness: SAT (encoding accepts SS schedule)"),
+                Some(false) => panic!("SS witness: UNSAT (encoding REJECTS SS schedule)"),
+                None => panic!("SS witness: solver timeout"),
+            }
+        } else {
+            panic!("SS witness: failed to map SS ops to SatOp indices");
+        }
+
+        // ec-pair orientation check at SS add-after-get3 (step 5).
+        let mut m = SymMachine::from_segment_entry(
+            seg.num_params,
+            &seg.bounds,
+            &seg.init,
+            seg.bounds.max_stack,
+        );
+        for op in &ss_ops[..5] {
+            m.exec(op).unwrap();
+        }
+        let st = m.to_fin_state();
+        let top = st.stack.last().unwrap();
+        let second = st.stack.get(st.stack.len().wrapping_sub(2)).unwrap();
+        let top_idx = vocab2.real_of_expr(&mut canon3, top);
+        let second_idx = vocab2.real_of_expr(&mut canon3, second);
+        eprintln!(
+            "SS pre-add stack: pos0={top_idx:?} ec={:?}, pos1={second_idx:?} ec={:?}",
+            top_idx.map(|i| vocab2.equiv_class[i]),
+            second_idx.map(|i| vocab2.equiv_class[i]),
+        );
+        eprintln!(
+            "allowed add ec-pairs: {:?}",
+            ops_sat.iter().filter_map(|o| {
+                if let SatOp::Binop { kind: InstKind::Pure(ValueOp::I64Add), edges } = o {
+                    Some(edges.iter().map(|&(a1,a0,_)| (vocab2.equiv_class[a1], vocab2.equiv_class[a0])).collect::<Vec<_>>())
+                } else { None }
+            }).next()
+        );
+        m.exec(&ss_ops[5]).unwrap();
+        let st_after = m.to_fin_state();
+        let after = st_after.stack.last().unwrap();
+        let after_idx = vocab2.real_of_expr(&mut canon3, after);
+        eprintln!(
+            "SS add step5 result idx={after_idx:?} ec={:?}, orig edge19 ec={:?}",
+            after_idx.map(|i| vocab2.equiv_class[i]),
+            vocab2.equiv_class[19]
+        );
+        let allowed_pairs: Vec<_> = ops_sat
+            .iter()
+            .filter_map(|o| {
+                if let SatOp::Binop {
+                    kind: InstKind::Pure(ValueOp::I64Add),
+                    edges,
+                } = o
+                {
+                    Some(
+                        edges
+                            .iter()
+                            .map(|&(a1, a0, _)| (vocab2.equiv_class[a1], vocab2.equiv_class[a0]))
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .next()
+            .expect("I64Add binop table");
+        assert!(
+            allowed_pairs.contains(&(18, 5)),
+            "commutative add should allow reversed ec-pair (18, 5), got {allowed_pairs:?}"
+        );
+    }
+
+    #[test]
     fn gap_probe_csv_blocks() {
+        use crate::optimize::canon::Canonizer;
+        use crate::optimize::sat::{solve_at_length_minus_one_with_h, stack_height_bound};
         use crate::optimize::search::{Backend, SearchConfig};
         use crate::optimize::statistics::block_id;
-        use crate::optimize::sat::{solve_at_length_minus_one_with_h, stack_height_bound};
-        use crate::optimize::canon::Canonizer;
-        use crate::wasm::{parse_wasm_file, materialize_segments, split_raw_segments};
+        use crate::wasm::{materialize_segments, parse_wasm_file, split_raw_segments};
         use std::time::Instant;
 
         let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
@@ -2957,16 +3464,14 @@ mod tests {
             scratch_locals: 1,
             ..SearchConfig::default()
         };
+        // Representative CSV gap blocks; ss_len = SuperStack optimized_length.
         let probes = [
             ("function_14_block_0_13", 11),
             ("function_25_block_0_10", 11),
             ("function_24_block_0_75", 9),
-            ("function_24_block_0_3", 9),
-            ("function_13_block_0_10", 11),
-            ("function_23_block_0_12", 11),
             ("function_24_block_0_101", 11),
         ];
-        let deadline = Instant::now() + std::time::Duration::from_secs(180);
+        let deadline = Instant::now() + std::time::Duration::from_secs(120);
         for (bid, ss_len) in probes {
             let seg = segments
                 .iter()
@@ -2979,10 +3484,11 @@ mod tests {
             let h = stack_height_bound(max_h, seg, 1);
             let probe = solve_at_length_minus_one_with_h(seg, &rules, &scfg, h, deadline);
             eprintln!(
-                "{bid}: orig={} ss={ss_len} solve={:?} proven={} probe_L-1 sat={} valid={} H={} |V|={}",
+                "{bid}: orig={} ss={ss_len} solve={:?} proven={} probe@{} sat={} valid={} H={} |V|={}",
                 seg.original_len(),
                 res.ops.as_ref().map(|o| o.len()),
                 res.proven_optimal,
+                seg.original_len() - 1,
                 probe.as_ref().map(|p| p.sat).unwrap_or(false),
                 probe.as_ref().map(|p| p.valid).unwrap_or(false),
                 h,

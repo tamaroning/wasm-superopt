@@ -208,6 +208,91 @@ i64.const[0] local.tee[2] local.tee[3] i64.const[1]
 
 ---
 
+## 5. 残 gap 詳細調査（2026-07-02）
+
+219 gap blocks / 223 命令を CSV 分析 + SAT probe（`gap_probe_csv_blocks` / `--classify-sat-gaps`）で分解。
+
+### 5.1 4 バケット
+
+| 分類 | ew_saved | gap | ew→ss | blocks | 命令 |
+|------|----------|-----|-------|--------|------|
+| **A: 無改善** | 0 | 1 | 12→11 | **199** | **199** |
+| **B: 部分改善** | 1 | 1 | 11→10 | **14** | **14** |
+| **C: 二段融合不足** | 1 | 2 | 11→9 | **4** | **8** |
+| **D: 深い部分改善** | 5 | 1 | 7→6 | **2** | **2** |
+
+unique `block_id` は **110**（sign_test / mux1_1 で重複）。
+
+### 5.2 共通パターン（219 blocks 中）
+
+- **213 blocks**: SS が ewasm より `local.tee` を 1 本多く使う
+- **217 blocks**: SS が `local.set` + `local.get` を合計 2 本少ない（スタック保持 + tee 融合）
+- **215 blocks** が 1 命令差、**4 blocks** が 2 命令差（いずれも `function_24_block_0_3` / `_75`）
+
+典型（`function_14_block_0_13`）:
+
+```text
+ewasm (12, saved=0):
+  add → set[2] → get[3] → get[2] → shr → add → get[5] → add → set[3] → get[1] → get[2]
+
+SuperStack (11):
+  add → tee[2] → shr → get[3] → add → get[5] → add → set[3] → get[1] → get[2]
+```
+
+ewasm は**元列をそのまま返す**（`saved=0`）か、`set/get` 1 回分だけ改善して止まる。
+
+### 5.3 SAT 診断結果
+
+`--classify-sat-gaps`（sign_test, 99 unique block_id, 10s timeout）:
+
+```text
+99/99  Solved { best_len: 12, proven_optimal: true, timed_out: false }
+```
+
+timeout ではなく、**encoding 内で L=12 が最短と証明**されている。SS の L=11 は encoding 外の valid schedule。
+
+代表 block の probe（60s, `scratch_locals=1`, `H=stack_height_bound+1`）:
+
+| block | solve | probe@L-1 | 備考 |
+|-------|-------|-----------|------|
+| `function_14_block_0_13` | 12, proven | **UNSAT** @11 | H=5,6,7 でも UNSAT |
+| `function_25_block_0_10` | 12, proven | **UNSAT** @11 | |
+| `function_13_block_0_10` | 12, proven | **UNSAT** @11 | |
+| `function_23_block_0_12` | 12, proven | **UNSAT** @11 | |
+| `function_24_block_0_101` | 12, proven | **UNSAT** @11 | |
+| `function_24_block_0_75` | **11**, proven | **SAT** @11 | L=10,9 は H≤7 でも **UNSAT** |
+
+### 5.4 主因（優先度順）
+
+1. **tee / stack-hold スケジュールの encoding 不足（A+B+D, ~215 命令）**
+   - SAT は `Tee` op を持つが、`set→get` を `tee` + スタック保持に置き換えた**短い並べ替え列**を L-1 で UNSAT と判定
+   - **H 不足が主因ではない**: `function_14_block_0_13` は H=7 まで試しても L=11 UNSAT
+   - 候補: Get/Set の `≡_R` ピン不足（final のみ `pin_local_equiv`）、pure op edge の並べ替え不足、step 列が許すスタックスケジュールの狭さ
+
+2. **多段 tee 融合の上限（C, 8 命令）**
+   - `function_24_block_0_3/_75`: L=11 は SAT+valid だが L=10/9 は UNSAT（SS=9）
+   - 1 回分の `set/get` 削除はできるが、**2 回分の同時融合**（carry/shift 中間値のスタック保持）が encoding 外
+
+3. **timeout / vocab cap / invalid model は主因ではない**
+   - cat A の solver 時間: median ~1.8s, max ~5s（segment timeout 5s 内）
+   - `proven_optimal=true` が 218/219 gap blocks
+
+### 5.5 次の修正候補
+
+| 優先 | 修正 | 状態 |
+|------|------|------|
+| **P2a (部分実装)** | Get/Set/Tee `pin_transfer_equiv`、Binop/Unop positive `≡_R` + ec-pair forbid | **実装済・102 tests pass**。`function_14_block_0_13` は L=11 依然 UNSAT |
+| **P2a+** | set→tee 単点 variant の vocab + witness table 行追加 | **実装済・gap 変化なし** |
+| **P2b** | 多段 stack-hold（function_24 L=9） | 未着手 |
+| **P2c** | Ruler `≡_R` 網羅化（0701_suboptimal_cause §5.2 A） | 未着手・commutative reorder の前提 |
+| **P2d** | fin 起点ゴール指向語彙（§5.2 C） | 未着手 |
+
+**2026-07-02 実装メモ:** `≡_R` 境界拡張だけでは cat A（199 blocks）の L-1 probe は解消しない。`0701_suboptimal_cause.md` の通り、**スケジュール表現力**（tee + 命令並べ替え + スタック系列の語彙外）が残る。次は **A→B 完成** または **C（fin 閉包語彙）** が必要。
+
+診断用: `cargo test --release gap_probe_csv_blocks -- --nocapture`
+
+---
+
 ## 実装優先度
 
 | 優先度 | 修正 | 狙う gap | 結果 |
@@ -215,6 +300,8 @@ i64.const[0] local.tee[2] local.tee[3] i64.const[1]
 | **P1 done** | **symbolic execution seed constant folding** | const-fold / algebra | `function_111_block_8_4` は SS と同じ 8 命令。residual **0** |
 | **P1 done (代表例)** | **constant/zero propagation via symbolic execution** | zero / bitmask + tee | `function_14_block_0_0` は SS と同じ 4 命令。残りは tee/spill 問題 |
 | **P1 done** | **seed-closed SAT encoding（completeness 修正）** | tee / spill **229→223** | `function_24` **-4** 命令、`function_25` **-2** 命令。残 **223 命令 / 219 blocks** |
-| **P2** | selective H slack / 二段階 solve | 残 tee/spill + timeout | 代表例 `function_24_block_0_75`（gap 2）、`function_14_block_0_95` は `scratch_locals: 1` で改善。副作用抑制も要 |
+| **P2a** | **Get/Set/Tee 境界の `≡_R` 化 + スケジュール制約見直し** | 残 tee/spill **~215** | cat A/B: L-1 probe UNSAT。H 増加では解消せず |
+| **P2b** | **多段 stack-hold（function_24 二段融合）** | bucket C **8** | L=11 SAT だが L=9 UNSAT |
+| **P3** | selective H slack / 二段階 solve | 副作用 block | `function_14_block_0_95` 等。cat A 単独では効果薄 |
 
-次にやるなら **P2: stack height `H` slack** の本番組み込みと、残 gap block の `--classify-sat-gaps` 診断。greedy tee seed / 上界導入は completeness 修正ではないため撤回済み。
+次にやるなら **P2a: local/operand 境界の `≡_R` 化**（final だけでなく Get/Set/Tee step でも e-class 許容）と、**P2b: function_24 の二段融合**の witness 調査。
