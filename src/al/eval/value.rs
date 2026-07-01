@@ -1,8 +1,6 @@
 //! Runtime values for the AL interpreter.
 
-use crate::al::ast::{
-    NumType, Sign, ValType, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp,
-};
+use crate::al::ast::{NumType, Sign, ValType, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp};
 
 /// Rational number for AL `rat` sort.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,13 +81,6 @@ impl AlValue {
         }
     }
 
-    pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            Self::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-
     pub fn as_list(&self) -> Option<&[AlValue]> {
         match self {
             Self::List(v) => Some(v),
@@ -124,22 +115,6 @@ impl AlValue {
 pub struct ValueAstResult {
     pub value: i64,
     pub trap: bool,
-}
-
-pub fn i32_to_nat(v: i32) -> u64 {
-    v as u32 as u64
-}
-
-pub fn nat_to_i32(n: u64) -> i32 {
-    n as u32 as i32
-}
-
-pub fn i64_to_nat(v: i64) -> u64 {
-    v as u64
-}
-
-pub fn nat_to_i64(n: u64) -> i64 {
-    n as i64
 }
 
 pub fn value_to_nat(v: i64, bits: u32) -> u64 {

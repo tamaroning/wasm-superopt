@@ -1,5 +1,6 @@
 //! Loop/jump-free WebAssembly basic blocks → backward goal search + e-graph rules.
 
+
 mod al;
 mod lang;
 mod optimize;
@@ -15,7 +16,7 @@ use al::DEFAULT_RANDOM_TESTS;
 use clap::Parser;
 use std::io::{self, Write};
 use synthesis::{load_or_synthesize_rules, synthesized_to_rewrites};
-use wasm::{parse_wasm_file, print_input_summary};
+use wasm::{materialize_segments, parse_wasm_file, print_input_summary, split_raw_segments};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -138,11 +139,6 @@ fn main() {
     }
     let _ = io::stdout().flush();
 
-    let max_ast = cli.max_ast_size.clamp(1, 8);
-    let max_arity = cli.max_arity.clamp(1, 3);
-    let syn = load_or_synthesize_rules(max_ast, max_arity, cli.random_tests, cli.jobs);
-    let rules = synthesized_to_rewrites(&syn);
-
     if cli.segments_only {
         use optimize::format_ops;
         for seg in &info.segments {
@@ -158,6 +154,18 @@ fn main() {
         return;
     }
 
+    let max_ast = cli.max_ast_size.clamp(1, 8);
+    let max_arity = cli.max_arity.clamp(1, 3);
+    let syn = load_or_synthesize_rules(max_ast, max_arity, cli.random_tests, cli.jobs);
+    let rules = synthesized_to_rewrites(&syn);
+
+    let raw = split_raw_segments(&info.segments, cli.split);
+    eprintln!("materializing {} chunk(s) …", raw.len());
+    let _ = io::stderr().flush();
+    let segments = materialize_segments(&raw, cli.jobs);
+    eprintln!("materialized {} segment(s)", segments.len());
+    let _ = io::stderr().flush();
+
     let cfg = optimize::SearchConfig {
         max_depth: cli.window,
         timeout_secs: None,
@@ -166,10 +174,10 @@ fn main() {
         backend: cli.solver.into(),
     };
     let results = optimize::optimize_and_print_segments(
-        &info.segments,
+        &segments,
         &rules,
         &cfg,
-        cli.split,
+        0,
         cli.jobs,
         cli.dump_search.as_deref(),
     );
@@ -191,14 +199,17 @@ fn main() {
 }
 
 fn run_classify_sat_gaps(path: &std::path::Path, csv_path: &std::path::Path, cli: &Cli) {
-    use optimize::{classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv, SearchConfig};
-    use wasm::split_segments;
+    use optimize::{
+        SearchConfig, classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv,
+    };
+    use wasm::{materialize_segments, split_raw_segments};
 
     let info = parse_wasm_file(path).unwrap_or_else(|e| {
         eprintln!("error parsing {}: {e}", path.display());
         std::process::exit(1);
     });
-    let segments = split_segments(&info.segments, cli.split);
+    let raw = split_raw_segments(&info.segments, cli.split);
+    let segments = materialize_segments(&raw, cli.jobs);
     let problem_ids = problem_blocks_from_csv(csv_path).unwrap_or_else(|e| {
         eprintln!("error reading {}: {e}", csv_path.display());
         std::process::exit(1);

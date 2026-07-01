@@ -2,16 +2,16 @@
 
 mod value_ast;
 
-pub use value_ast::{
-    concrete_valid_rewrite, eval_value_ast_concrete, eval_value_ast_concrete_sig,
-};
+#[cfg(test)]
+pub use value_ast::eval_value_ast_concrete;
+pub use value_ast::eval_value_ast_concrete_sig;
 
 use super::env::Env;
 use super::error::EvalError;
 use super::value::{AlValue, Rat};
 use crate::al::ast::{
-    Arg, BinOpCase, Expr, FuncA, Instr, InstrCond, LetLhs, NumType, Path, Pred, RelOpCase,
-    Sign, UnOpCase, ValType, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp,
+    Arg, BinOpCase, Expr, FuncA, Instr, InstrCond, LetLhs, Pred, RelOpCase,
+    UnOpCase, WasmBinOp, WasmRelOp, WasmUnOp,
 };
 use crate::al::defs::lookup_func;
 
@@ -100,8 +100,12 @@ fn float_binop_builtin(name: &str, args: &[AlValue]) -> Option<AlValue> {
         (32, "fsub_") => (f32::from_bits(a as u32) - f32::from_bits(b as u32)).to_bits() as u64,
         (32, "fmul_") => (f32::from_bits(a as u32) * f32::from_bits(b as u32)).to_bits() as u64,
         (32, "fdiv_") => (f32::from_bits(a as u32) / f32::from_bits(b as u32)).to_bits() as u64,
-        (32, "fmin_") => f32::from_bits(a as u32).min(f32::from_bits(b as u32)).to_bits() as u64,
-        (32, "fmax_") => f32::from_bits(a as u32).max(f32::from_bits(b as u32)).to_bits() as u64,
+        (32, "fmin_") => f32::from_bits(a as u32)
+            .min(f32::from_bits(b as u32))
+            .to_bits() as u64,
+        (32, "fmax_") => f32::from_bits(a as u32)
+            .max(f32::from_bits(b as u32))
+            .to_bits() as u64,
         (32, "fcopysign_") => f32::from_bits(a as u32)
             .copysign(f32::from_bits(b as u32))
             .to_bits() as u64,
@@ -412,10 +416,7 @@ fn values_equal(a: &AlValue, b: &AlValue) -> bool {
 
 pub fn eval_expr(expr: &Expr, env: &mut Env) -> EvalResult<AlValue> {
     match expr {
-        Expr::VarE(name) => env
-            .get(name)
-            .cloned()
-            .ok_or(EvalError::UnknownVar(name)),
+        Expr::VarE(name) => env.get(name).cloned().ok_or(EvalError::UnknownVar(name)),
         Expr::NatLit(n) => Ok(AlValue::Nat(*n as u64)),
         Expr::IntLit(n) => Ok(AlValue::Int(*n as i64)),
         Expr::BoolLit(b) => Ok(AlValue::Bool(*b)),
@@ -464,10 +465,7 @@ pub fn eval_expr(expr: &Expr, env: &mut Env) -> EvalResult<AlValue> {
         Expr::Div(a, b) => {
             let ar = rat_of(&eval_expr(a, env)?)?;
             let br = rat_of(&eval_expr(b, env)?)?;
-            Ok(AlValue::Rat(Rat::new(
-                ar.num * br.den,
-                ar.den * br.num,
-            )))
+            Ok(AlValue::Rat(Rat::new(ar.num * br.den, ar.den * br.num)))
         }
         Expr::Mod(a, b) => {
             let an = nat_of(&eval_expr(a, env)?)?;
@@ -528,10 +526,9 @@ pub fn eval_expr(expr: &Expr, env: &mut Env) -> EvalResult<AlValue> {
             };
             Ok(AlValue::Sign(s))
         }
-        Expr::TopValue(_)
-        | Expr::TopValueAny
-        | Expr::CaseE(_, _)
-        | Expr::AccE(_, _) => Err(EvalError::Unimplemented("stack expr")),
+        Expr::TopValue(_) | Expr::TopValueAny | Expr::CaseE(_, _) | Expr::AccE(_, _) => {
+            Err(EvalError::Unimplemented("stack expr"))
+        }
     }
 }
 
@@ -543,10 +540,7 @@ fn eval_arg(arg: &Arg, env: &mut Env) -> EvalResult<AlValue> {
         Arg::RelOp(r) => Ok(AlValue::RelOp(*r)),
         Arg::TestOp(t) => Ok(AlValue::TestOp(*t)),
         Arg::UnOp(u) => Ok(AlValue::UnOp(*u)),
-        Arg::Var(name) => env
-            .get(name)
-            .cloned()
-            .ok_or(EvalError::UnknownVar(name)),
+        Arg::Var(name) => env.get(name).cloned().ok_or(EvalError::UnknownVar(name)),
         Arg::Nat(n) => Ok(AlValue::Nat(*n as u64)),
         Arg::Sign(s) => Ok(AlValue::Sign(*s)),
         Arg::ExpA(expr) => eval_expr(expr, env),
@@ -596,6 +590,7 @@ fn rat_coerce_value(v: &AlValue) -> EvalResult<AlValue> {
 mod tests {
     use super::*;
     use crate::al::ast::WasmBinOp;
+    use crate::al::{NumType, Sign};
 
     #[test]
     fn signed_min_div_neg_one_is_empty() {

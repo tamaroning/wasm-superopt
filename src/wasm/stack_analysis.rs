@@ -32,10 +32,7 @@ pub fn stack_bounds_ops(ops: &[SemOp]) -> (usize, usize) {
     (init, max)
 }
 
-pub fn stack_bounds_operators(
-    ops: &[Operator<'_>],
-    types: ModuleStackTypes<'_>,
-) -> (usize, usize) {
+pub fn stack_bounds_operators(ops: &[Operator<'_>], types: ModuleStackTypes<'_>) -> (usize, usize) {
     let mut current = 0usize;
     let mut init = 0usize;
     let mut max = 0usize;
@@ -56,12 +53,29 @@ pub fn stack_bounds_operators(
 }
 
 pub fn semop_stack_effect(op: &SemOp) -> (usize, usize) {
+    if let Some(v) = crate::semantics::sem_to_value_op(op) {
+        return (v.pops().len(), 1);
+    }
     match op {
-        SemOp::I32Const(_) => (0, 1),
-        SemOp::I32Add
+        SemOp::I32Const(_)
+        | SemOp::I64Const(_)
+        | SemOp::F32Const(_)
+        | SemOp::F64Const(_) => (0, 1),
+        SemOp::LocalGet(_) => (0, 1),
+        SemOp::LocalSet(_) => (1, 0),
+        SemOp::LocalTee(_) => (1, 1),
+        SemOp::Drop => (1, 0),
+        SemOp::I32Load { .. } => (1, 1),
+        SemOp::I32Store { .. } => (2, 0),
+        SemOp::Call { pops, pushes, .. } => (*pops as usize, *pushes as usize),
+        SemOp::GlobalGet { .. } => (0, 1),
+        SemOp::GlobalSet { .. } => (1, 0),
+        SemOp::Opaque { pops, pushes, .. } => (*pops as usize, *pushes as usize),
+        SemOp::Pure(_)
+        | SemOp::I32Add
         | SemOp::I32Sub
         | SemOp::I32Mul
-        |         SemOp::I32DivU
+        | SemOp::I32DivU
         | SemOp::I32DivS
         | SemOp::I32RemU
         | SemOp::I32RemS
@@ -77,19 +91,11 @@ pub fn semop_stack_effect(op: &SemOp) -> (usize, usize) {
         | SemOp::I32Ne
         | SemOp::I32LtS
         | SemOp::I32LeS
-        | SemOp::I32GtS => (2, 1),
-        SemOp::I32Eqz => (1, 1),
-        SemOp::I32Clz | SemOp::I32Ctz | SemOp::I32Popcnt => (1, 1),
-        SemOp::LocalGet(_) => (0, 1),
-        SemOp::LocalSet(_) => (1, 0),
-        SemOp::LocalTee(_) => (1, 1),
-        SemOp::Drop => (1, 0),
-        SemOp::I32Load { .. } => (1, 1),
-        SemOp::I32Store { .. } => (2, 0),
-        SemOp::Call { pops, pushes, .. } => (*pops as usize, *pushes as usize),
-        SemOp::GlobalGet { .. } => (0, 1),
-        SemOp::GlobalSet { .. } => (1, 0),
-        SemOp::Opaque { pops, pushes, .. } => (*pops as usize, *pushes as usize),
+        | SemOp::I32GtS
+        | SemOp::I32Eqz
+        | SemOp::I32Clz
+        | SemOp::I32Ctz
+        | SemOp::I32Popcnt => unreachable!("handled above"),
     }
 }
 
@@ -148,7 +154,7 @@ pub fn operator_stack_effect(op: &Operator<'_>) -> Option<(usize, usize)> {
         | Operator::I32Rotr
         | Operator::I32Eq
         | Operator::I32Ne
-        |         Operator::I32LtS
+        | Operator::I32LtS
         | Operator::I32LtU
         | Operator::I32LeS
         | Operator::I32LeU
@@ -313,10 +319,7 @@ mod tests {
             type_section: &module_func_types,
         };
         let op = Operator::Call { function_index: 0 };
-        assert_eq!(
-            operator_stack_effect_with_types(&op, types),
-            Some((5, 0))
-        );
+        assert_eq!(operator_stack_effect_with_types(&op, types), Some((5, 0)));
     }
 
     #[test]
@@ -330,10 +333,7 @@ mod tests {
             type_index: 0,
             table_index: 0,
         };
-        assert_eq!(
-            operator_stack_effect_with_types(&op, types),
-            Some((3, 1))
-        );
+        assert_eq!(operator_stack_effect_with_types(&op, types), Some((3, 1)));
     }
 
     #[test]

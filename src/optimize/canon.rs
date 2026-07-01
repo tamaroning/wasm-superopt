@@ -1,7 +1,8 @@
 //! Value canonicalization via equality saturation.
 
 use crate::lang::ValueLang;
-use crate::semantics::InstKind;
+use crate::semantics::{inst_kind_from_value_op, InstKind};
+use crate::value::ValueOp;
 use egg::{AstSize, Extractor, Id, RecExpr, Rewrite, Runner};
 use std::collections::{HashMap, HashSet};
 
@@ -117,24 +118,12 @@ impl Canonizer {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         for node in eclass.iter() {
-            let parsed = match node {
-                ValueLang::I32Add([a, b]) => Some((InstKind::I32Add, *a, *b)),
-                ValueLang::I32Sub([a, b]) => Some((InstKind::I32Sub, *a, *b)),
-                ValueLang::I32Mul([a, b]) => Some((InstKind::I32Mul, *a, *b)),
-                ValueLang::I32Shl([a, b]) => Some((InstKind::I32Shl, *a, *b)),
-                ValueLang::I32DivU([a, b]) => Some((InstKind::I32DivU, *a, *b)),
-                ValueLang::I32DivS([a, b]) => Some((InstKind::I32DivS, *a, *b)),
-                ValueLang::I32RemU([a, b]) => Some((InstKind::I32RemU, *a, *b)),
-                ValueLang::I32RemS([a, b]) => Some((InstKind::I32RemS, *a, *b)),
-                ValueLang::I32And([a, b]) => Some((InstKind::I32And, *a, *b)),
-                ValueLang::I32Or([a, b]) => Some((InstKind::I32Or, *a, *b)),
-                ValueLang::I32Xor([a, b]) => Some((InstKind::I32Xor, *a, *b)),
-                ValueLang::I32ShrU([a, b]) => Some((InstKind::I32ShrU, *a, *b)),
-                ValueLang::I32ShrS([a, b]) => Some((InstKind::I32ShrS, *a, *b)),
-                ValueLang::I32Rotl([a, b]) => Some((InstKind::I32Rotl, *a, *b)),
-                ValueLang::I32Rotr([a, b]) => Some((InstKind::I32Rotr, *a, *b)),
-                _ => None,
-            };
+            let parsed = ValueOp::from_lang(node).and_then(|(op, args)| {
+                if args.len() != 2 {
+                    return None;
+                }
+                Some((inst_kind_from_value_op(op), args[0], args[1]))
+            });
             if let Some((kind, a, b)) = parsed {
                 let a = runner.egraph.find(a);
                 let b = runner.egraph.find(b);
@@ -175,71 +164,25 @@ mod tests {
     }
 
     #[test]
+    fn i64_binop_decompositions_nonempty() {
+        let canon = Canonizer::new(rules());
+        let top = parse_value_expr("(i64.mul ?L0 2)");
+        let decomps = canon.binop_decompositions(&top);
+        assert!(
+            decomps.iter().any(|(k, _, _)| {
+                matches!(k, InstKind::Pure(crate::value::ValueOp::I64Mul))
+            }),
+            "expected i64.mul decomposition: {decomps:?}"
+        );
+    }
+
+    #[test]
     fn distinct_shifts_get_distinct_canon_ids() {
         let mut canon = Canonizer::new(rules());
         let a = parse_value_expr("(i32.shl ?L0 3)");
         let b = parse_value_expr("(i32.shl ?L0 1)");
         assert_ne!(canon.canon(&a), canon.canon(&b));
         assert!(!canon.values_equivalent(&a, &b));
-    }
-
-    #[test]
-    fn debug_saturated_const_merge() {
-        let canon = Canonizer::new(rules());
-        let top = parse_value_expr("(i32.shl ?L0 1)");
-        let mut runner = canon.saturate(&top);
-        for c in [0i32, 1, -1, 2] {
-            let e = parse_value_expr(&format!("{c}"));
-            let id = runner.egraph.add_expr(&e);
-            let class = usize::from(runner.egraph.find(id));
-            println!("const {c} -> eclass {class}");
-        }
-        let root = runner.roots[0];
-        let class_id = runner.egraph.find(root);
-        println!("root eclass {}", usize::from(class_id));
-        println!("nodes in root eclass:");
-        for node in runner.egraph[class_id].iter() {
-            println!("  {node:?}");
-        }
-    }
-
-    #[test]
-    fn debug_const_eclass() {
-        let mut canon = Canonizer::new(rules());
-        for c in [0i32, 1, -1, 2] {
-            let e = parse_value_expr(&format!("{c}"));
-            println!("{c} -> canon id {}", canon.canon(&e));
-        }
-    }
-
-    #[test]
-    fn debug_shl2_vs_mul2_canon() {
-        let mut canon = Canonizer::new(rules());
-        let mul = parse_value_expr("(i32.mul ?L0 2)");
-        let shl2 = parse_value_expr("(i32.shl ?L0 2)");
-        let l0 = parse_value_expr("?L0");
-        println!("L0 canon {}", canon.canon(&l0));
-        let mut runner = canon.saturate(&mul);
-        let root = runner.roots[0];
-        let extractor = egg::Extractor::new(&runner.egraph, egg::AstSize);
-        let (_, best_mul) = extractor.find_best(root);
-        println!("mul best extract: {best_mul}");
-        let mut runner2 = canon.saturate(&shl2);
-        let root2 = runner2.roots[0];
-        let (_, best_shl2) = extractor.find_best(root2);
-        println!("shl2 best extract: {best_shl2}");
-        println!("mul canon {}", canon.canon(&mul));
-        println!("shl2 canon {}", canon.canon(&shl2));
-    }
-
-    #[test]
-    fn debug_shl_decomps() {
-        let mut canon = Canonizer::new(rules());
-        let top = parse_value_expr("(i32.shl ?L0 1)");
-        let decomps = canon.binop_decompositions(&top);
-        for (k, e1, e2) in &decomps {
-            println!("{k:?}: {e1} {e2}");
-        }
     }
 
     #[test]

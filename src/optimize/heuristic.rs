@@ -1,8 +1,8 @@
 //! Admissible heuristics for backward A*.
 
 use super::canon::{CanonId, Canonizer, ValueExpr};
-use crate::sym::{LocalReq, SymState, all_subtree_exprs, subtree_expr};
 use crate::lang::ValueLang;
+use crate::sym::{LocalReq, SymState, all_subtree_exprs, subtree_expr};
 use crate::wasm::SegmentBounds;
 use std::collections::HashSet;
 
@@ -16,7 +16,12 @@ pub fn h_stack(g: &SymState, init: &SymState, canon: &mut Canonizer) -> usize {
     g.stack.len().saturating_sub(k)
 }
 
-pub fn h_local(g: &SymState, init: &SymState, bounds: &SegmentBounds, canon: &mut Canonizer) -> usize {
+pub fn h_local(
+    g: &SymState,
+    init: &SymState,
+    bounds: &SegmentBounds,
+    canon: &mut Canonizer,
+) -> usize {
     let mut n = 0usize;
     for slot in 0..=bounds.max_local {
         let cur = g.locals.get(&slot);
@@ -104,7 +109,11 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         return 0;
     }
     match &expr[expr.root()] {
-        ValueLang::I32Const(_) | ValueLang::I64Const(_) | ValueLang::F32Const(_) | ValueLang::F64Const(_) | ValueLang::Symbol(_) => 1,
+        ValueLang::I32Const(_)
+        | ValueLang::I64Const(_)
+        | ValueLang::F32Const(_)
+        | ValueLang::F64Const(_)
+        | ValueLang::Symbol(_) => 1,
         ValueLang::I32Add([a, b])
         | ValueLang::I32Sub([a, b])
         | ValueLang::I32Mul([a, b])
@@ -159,9 +168,7 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
         | ValueLang::I64Popcnt([a])
         | ValueLang::I64ExtendI32S([a])
         | ValueLang::I64ExtendI32U([a])
-        |         ValueLang::I32WrapI64([a]) => {
-            1 + residual_depth(&subtree_expr(expr, *a), avail, canon)
-        }
+        | ValueLang::I32WrapI64([a]) => 1 + residual_depth(&subtree_expr(expr, *a), avail, canon),
         node => {
             if let Some((_, children)) = crate::value::ValueOp::from_lang(node) {
                 match children.as_slice() {
@@ -180,7 +187,12 @@ fn residual_depth(expr: &ValueExpr, avail: &HashSet<CanonId>, canon: &mut Canoni
     }
 }
 
-pub fn h_goal(g: &SymState, init: &SymState, bounds: &SegmentBounds, canon: &mut Canonizer) -> usize {
+pub fn h_goal(
+    g: &SymState,
+    init: &SymState,
+    bounds: &SegmentBounds,
+    canon: &mut Canonizer,
+) -> usize {
     h_stack(g, init, canon)
         .max(h_local(g, init, bounds, canon))
         .max(h_node(g, init, canon))
@@ -227,7 +239,10 @@ mod tests {
         let dep = h_dep(&g, &init, &mut canon);
         let nodes = h_node(&g, &init, &mut canon);
         assert!(dep >= 3, "nested binops depth ≥ 3, got {dep}");
-        assert!(nodes >= 1, "needs at least one residual subtree, got {nodes}");
+        assert!(
+            nodes >= 1,
+            "needs at least one residual subtree, got {nodes}"
+        );
     }
 
     use crate::wasm::SegmentBounds;

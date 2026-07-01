@@ -3,15 +3,16 @@
 mod ast;
 mod ops;
 
-pub use ast::{
-    ValueAst, enumerate_value_asts, is_ast_rewrite_pair, is_directed_ast_pair, synthesis_symbol,
-    value_ast_from_expr, value_ast_to_expr,
-};
-pub use ops::{RuleSignature, ValueOp, enumerate_signatures, f32_bits_to_i64, f64_bits_to_i64, is_reachable};
 pub use crate::semantics::StackTy;
+pub use ast::{
+    ValueAst, is_ast_rewrite_pair, is_directed_ast_pair, value_ast_from_expr, value_ast_to_expr,
+};
+pub use ops::{
+    RuleSignature, ValueOp, enumerate_signatures, f32_bits_to_i64, f64_bits_to_i64, is_reachable,
+};
 
 use crate::al::eval_value_ast_concrete_sig;
-use crate::al::{asts_valid_rewrite_z3 as al_asts_valid_rewrite_z3, eval_value_ast_concrete, ValueAstResult};
+use crate::al::asts_valid_rewrite_z3 as al_asts_valid_rewrite_z3;
 use crate::lang::ValueLang;
 use egg::RecExpr;
 
@@ -83,7 +84,12 @@ fn sig_uses_float(sig: &RuleSignature) -> bool {
     sig.inputs.iter().any(|ty| ty.is_float()) || sig.output.is_float()
 }
 
-fn asts_match_on_inputs(sig: &RuleSignature, lhs: &ValueAst, rhs: &ValueAst, inputs: &[i64]) -> bool {
+fn asts_match_on_inputs(
+    sig: &RuleSignature,
+    lhs: &ValueAst,
+    rhs: &ValueAst,
+    inputs: &[i64],
+) -> bool {
     let lhs_r = eval_ast_concrete(sig, lhs, inputs);
     let rhs_r = eval_ast_concrete(sig, rhs, inputs);
     concrete_valid_ast_rewrite(&lhs_r, &rhs_r)
@@ -231,14 +237,4 @@ impl AstEvalSignature {
 /// Parse a s-expression into a [`ValueLang`] DAG (used by symbolic forward execution).
 pub fn parse_value_expr(s: &str) -> RecExpr<ValueLang> {
     s.parse().expect("invalid ValueLang RecExpr")
-}
-
-/// Legacy i32 concrete eval for AL tests.
-pub fn eval_value_ast_concrete_i32(ast: &ValueAst, inputs: &[i32]) -> ValueAstResult {
-    let sig = RuleSignature {
-        inputs: vec![StackTy::I32; inputs.len()],
-        output: StackTy::I32,
-    };
-    let inputs64: Vec<i64> = inputs.iter().map(|&v| v as i64).collect();
-    eval_value_ast_concrete_sig(&sig, ast, &inputs64)
 }

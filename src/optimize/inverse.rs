@@ -2,9 +2,12 @@
 
 use super::canon::Canonizer;
 use crate::lang::ValueLang;
-use crate::semantics::{InstKind, SemOp};
+use crate::semantics::{
+    inst_kind_from_sem, sem_from_inst_kind, value_op_from_inst_kind,
+    value_op_to_sem, InstKind, SemOp,
+};
 use crate::sym::{LocalReq, SymState, subtree_expr};
-use crate::value::parse_value_expr;
+use crate::value::{parse_value_expr, ValueOp};
 use crate::wasm::{SegmentBounds, StraightSegment};
 use std::collections::BTreeSet;
 
@@ -76,10 +79,10 @@ pub fn applicable_peels(
     }
 
     if let Some(top) = g.top().cloned() {
-        if let ValueLang::I32Const(c) = &top[top.root()] {
+        if let Some(sem) = structural_const_peel(&top) {
             let mut next = state.clone();
             next.goal.stack.pop();
-            out.push((PeelAction::Forward(SemOp::I32Const(*c)), next));
+            out.push((PeelAction::Forward(sem), next));
         }
 
         if let Some((sem, a, b)) = structural_binop_peel(&top) {
@@ -92,14 +95,7 @@ pub fn applicable_peels(
             decomps.sort_by_key(|(k, _, _)| decomp_priority(root_kind, *k));
         }
         for (kind, e1, e2) in decomps {
-            push_binop_peel(
-                &mut out,
-                state,
-                inst_kind_to_sem(kind),
-                e1,
-                e2,
-                bounds,
-            );
+            push_binop_peel(&mut out, state, inst_kind_to_sem(kind), e1, e2, bounds);
         }
 
         if let Some((sem, a)) = structural_unop_peel(&top) {
@@ -168,7 +164,11 @@ fn symbol_at_stack(g: &SymState, idx_from_top: usize, sym: &str, canon: &mut Can
         .is_some_and(|e| canon.values_equivalent(e, &expr))
 }
 
-fn can_peel_result_op(state: &SearchState, meta: &crate::wasm::OpaqueMeta, canon: &mut Canonizer) -> bool {
+fn can_peel_result_op(
+    state: &SearchState,
+    meta: &crate::wasm::OpaqueMeta,
+    canon: &mut Canonizer,
+) -> bool {
     if meta.result_symbols.is_empty() {
         return false;
     }
@@ -180,7 +180,11 @@ fn can_peel_result_op(state: &SearchState, meta: &crate::wasm::OpaqueMeta, canon
     true
 }
 
-fn can_peel_storage(state: &SearchState, meta: &crate::wasm::OpaqueMeta, canon: &mut Canonizer) -> bool {
+fn can_peel_storage(
+    state: &SearchState,
+    meta: &crate::wasm::OpaqueMeta,
+    canon: &mut Canonizer,
+) -> bool {
     if meta.result_symbols.is_empty() {
         return true;
     }
@@ -242,7 +246,10 @@ fn push_binop_peel(
     if next.goal.stack.len() > bounds.max_stack {
         return;
     }
-    if out.iter().any(|(PeelAction::Forward(existing), s)| existing == &sem && s == &next) {
+    if out
+        .iter()
+        .any(|(PeelAction::Forward(existing), s)| existing == &sem && s == &next)
+    {
         return;
     }
     out.push((PeelAction::Forward(sem), next));
@@ -261,104 +268,57 @@ fn push_unop_peel(
     if next.goal.stack.len() > bounds.max_stack {
         return;
     }
-    if out.iter().any(|(PeelAction::Forward(existing), s)| existing == &sem && s == &next) {
+    if out
+        .iter()
+        .any(|(PeelAction::Forward(existing), s)| existing == &sem && s == &next)
+    {
         return;
     }
     out.push((PeelAction::Forward(sem), next));
+}
+
+fn structural_const_peel(top: &crate::sym::ValueExpr) -> Option<SemOp> {
+    match &top[top.root()] {
+        ValueLang::I32Const(c) => Some(SemOp::I32Const(*c)),
+        ValueLang::I64Const(c) => Some(SemOp::I64Const(*c)),
+        ValueLang::F32Const(bits) => Some(SemOp::F32Const(bits.0)),
+        ValueLang::F64Const(bits) => Some(SemOp::F64Const(bits.0)),
+        _ => None,
+    }
 }
 
 /// Peel the stack-top binop as its syntactic form.
 ///
 /// Arithmetic ops also appear in [`Canonizer::binop_decompositions`]; dedup happens in
 /// [`push_binop_peel`].
-fn structural_binop_peel(top: &crate::sym::ValueExpr) -> Option<(SemOp, crate::sym::ValueExpr, crate::sym::ValueExpr)> {
+fn structural_binop_peel(
+    top: &crate::sym::ValueExpr,
+) -> Option<(SemOp, crate::sym::ValueExpr, crate::sym::ValueExpr)> {
     let root = top.root();
-    let (a, b) = match &top[root] {
-        ValueLang::I32Add([a, b])
-        | ValueLang::I32Sub([a, b])
-        | ValueLang::I32Mul([a, b])
-        | ValueLang::I32DivU([a, b])
-        | ValueLang::I32DivS([a, b])
-        | ValueLang::I32RemU([a, b])
-        | ValueLang::I32RemS([a, b])
-        | ValueLang::I32Shl([a, b])
-        | ValueLang::I32And([a, b])
-        | ValueLang::I32Or([a, b])
-        | ValueLang::I32Xor([a, b])
-        | ValueLang::I32ShrU([a, b])
-        | ValueLang::I32ShrS([a, b])
-        | ValueLang::I32Rotl([a, b])
-        | ValueLang::I32Rotr([a, b])
-        | ValueLang::I32Eq([a, b])
-        | ValueLang::I32Ne([a, b])
-        | ValueLang::I32LtS([a, b])
-        | ValueLang::I32LeS([a, b])
-        | ValueLang::I32GtS([a, b]) => (*a, *b),
-        _ => return None,
-    };
-    let sem = match &top[root] {
-        ValueLang::I32Add(_) => SemOp::I32Add,
-        ValueLang::I32Sub(_) => SemOp::I32Sub,
-        ValueLang::I32Mul(_) => SemOp::I32Mul,
-        ValueLang::I32DivU(_) => SemOp::I32DivU,
-        ValueLang::I32DivS(_) => SemOp::I32DivS,
-        ValueLang::I32RemU(_) => SemOp::I32RemU,
-        ValueLang::I32RemS(_) => SemOp::I32RemS,
-        ValueLang::I32Shl(_) => SemOp::I32Shl,
-        ValueLang::I32And(_) => SemOp::I32And,
-        ValueLang::I32Or(_) => SemOp::I32Or,
-        ValueLang::I32Xor(_) => SemOp::I32Xor,
-        ValueLang::I32ShrU(_) => SemOp::I32ShrU,
-        ValueLang::I32ShrS(_) => SemOp::I32ShrS,
-        ValueLang::I32Rotl(_) => SemOp::I32Rotl,
-        ValueLang::I32Rotr(_) => SemOp::I32Rotr,
-        ValueLang::I32Eq(_) => SemOp::I32Eq,
-        ValueLang::I32Ne(_) => SemOp::I32Ne,
-        ValueLang::I32LtS(_) => SemOp::I32LtS,
-        ValueLang::I32LeS(_) => SemOp::I32LeS,
-        ValueLang::I32GtS(_) => SemOp::I32GtS,
-        _ => unreachable!(),
-    };
-    Some((sem, subtree_expr(top, a), subtree_expr(top, b)))
+    let (op, args) = ValueOp::from_lang(&top[root])?;
+    if args.len() != 2 {
+        return None;
+    }
+    let sem = value_op_to_sem(op);
+    Some((
+        sem,
+        subtree_expr(top, args[0]),
+        subtree_expr(top, args[1]),
+    ))
 }
 
 /// Peel the stack-top unop as its syntactic form.
 fn structural_unop_peel(top: &crate::sym::ValueExpr) -> Option<(SemOp, crate::sym::ValueExpr)> {
     let root = top.root();
-    let (sem, child) = match &top[root] {
-        ValueLang::I32Eqz([a]) => (SemOp::I32Eqz, *a),
-        ValueLang::I32Clz([a]) => (SemOp::I32Clz, *a),
-        ValueLang::I32Ctz([a]) => (SemOp::I32Ctz, *a),
-        ValueLang::I32Popcnt([a]) => (SemOp::I32Popcnt, *a),
-        _ => return None,
-    };
-    Some((sem, subtree_expr(top, child)))
+    let (op, args) = ValueOp::from_lang(&top[root])?;
+    if args.len() != 1 {
+        return None;
+    }
+    Some((value_op_to_sem(op), subtree_expr(top, args[0])))
 }
 
 fn sem_to_inst_kind(sem: SemOp) -> InstKind {
-    match sem {
-        SemOp::I32Add => InstKind::I32Add,
-        SemOp::I32Sub => InstKind::I32Sub,
-        SemOp::I32Mul => InstKind::I32Mul,
-        SemOp::I32DivU => InstKind::I32DivU,
-        SemOp::I32DivS => InstKind::I32DivS,
-        SemOp::I32RemU => InstKind::I32RemU,
-        SemOp::I32RemS => InstKind::I32RemS,
-        SemOp::I32Shl => InstKind::I32Shl,
-        SemOp::I32And => InstKind::I32And,
-        SemOp::I32Or => InstKind::I32Or,
-        SemOp::I32Xor => InstKind::I32Xor,
-        SemOp::I32ShrU => InstKind::I32ShrU,
-        SemOp::I32ShrS => InstKind::I32ShrS,
-        SemOp::I32Rotl => InstKind::I32Rotl,
-        SemOp::I32Rotr => InstKind::I32Rotr,
-        SemOp::I32Eq => InstKind::I32Eq,
-        SemOp::I32Ne => InstKind::I32Ne,
-        SemOp::I32LtS => InstKind::I32LtS,
-        SemOp::I32LeS => InstKind::I32LeS,
-        SemOp::I32GtS => InstKind::I32GtS,
-        other => panic!("not a peelable binop: {other:?}"),
-    }
+    inst_kind_from_sem(&sem).expect("not a peelable binop")
 }
 
 fn decomp_priority(root: InstKind, kind: InstKind) -> u8 {
@@ -373,46 +333,36 @@ fn decomp_priority(root: InstKind, kind: InstKind) -> u8 {
 }
 
 fn rewrite_alternative(root: InstKind, kind: InstKind) -> bool {
+    let root_op = value_op_from_inst_kind(root);
+    let kind_op = value_op_from_inst_kind(kind);
     matches!(
-        (root, kind),
-        (InstKind::I32Mul, InstKind::I32Shl)
-            | (InstKind::I32Shl, InstKind::I32Mul)
+        (root_op, kind_op),
+        (Some(ValueOp::I32Mul), Some(ValueOp::I32Shl))
+            | (Some(ValueOp::I32Shl), Some(ValueOp::I32Mul))
+            | (Some(ValueOp::I64Mul), Some(ValueOp::I64Shl))
+            | (Some(ValueOp::I64Shl), Some(ValueOp::I64Mul))
     )
 }
 
 fn inst_kind_to_sem(kind: InstKind) -> SemOp {
-    match kind {
-        InstKind::I32Add => SemOp::I32Add,
-        InstKind::I32Sub => SemOp::I32Sub,
-        InstKind::I32Mul => SemOp::I32Mul,
-        InstKind::I32Shl => SemOp::I32Shl,
-        InstKind::I32DivU => SemOp::I32DivU,
-        InstKind::I32DivS => SemOp::I32DivS,
-        InstKind::I32RemU => SemOp::I32RemU,
-        InstKind::I32RemS => SemOp::I32RemS,
-        InstKind::I32And => SemOp::I32And,
-        InstKind::I32Or => SemOp::I32Or,
-        InstKind::I32Xor => SemOp::I32Xor,
-        InstKind::I32ShrU => SemOp::I32ShrU,
-        InstKind::I32ShrS => SemOp::I32ShrS,
-        InstKind::I32Rotl => SemOp::I32Rotl,
-        InstKind::I32Rotr => SemOp::I32Rotr,
-        InstKind::I32Eq => SemOp::I32Eq,
-        InstKind::I32Ne => SemOp::I32Ne,
-        InstKind::I32LtS => SemOp::I32LtS,
-        InstKind::I32LeS => SemOp::I32LeS,
-        InstKind::I32GtS => SemOp::I32GtS,
-        other => panic!("not a peelable binop: {other:?}"),
-    }
+    sem_from_inst_kind(kind).expect("not a peelable binop")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::optimize::fixtures::{fin, init};
+    use crate::semantics::sem_to_value_op;
     use crate::synthesis::test_synthesis_rewrites;
     use crate::value::parse_value_expr;
     use crate::wasm::SegmentBounds;
+
+    fn peel_matches(expected: &SemOp, actual: &SemOp) -> bool {
+        match (sem_to_value_op(expected), sem_to_value_op(actual)) {
+            (Some(a), Some(b)) => a == b,
+            _ => expected == actual,
+        }
+    }
 
     fn applicable_peels_arithmetic_only(
         g: &SymState,
@@ -450,16 +400,25 @@ mod tests {
     #[test]
     fn structural_unop_peel_covers_all_value_lang_unops() {
         let cases = [
-            ("(i32.eqz (i32.add ?L0 1))", SemOp::I32Eqz),
-            ("(i32.clz (i32.add ?L0 1))", SemOp::I32Clz),
-            ("(i32.ctz (i32.add ?L0 1))", SemOp::I32Ctz),
-            ("(i32.popcnt (i32.add ?L0 1))", SemOp::I32Popcnt),
+            ("(i32.eqz (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Eqz)),
+            ("(i32.clz (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Clz)),
+            ("(i32.ctz (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Ctz)),
+            ("(i32.popcnt (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Popcnt)),
+            ("(i64.eqz (i64.add ?L0 1))", SemOp::Pure(ValueOp::I64Eqz)),
+            ("(f32.sqrt (f32.add ?L0 1.0))", SemOp::Pure(ValueOp::F32Sqrt)),
         ];
         for (expr, want) in cases {
             let top = parse_value_expr(expr);
             let got = structural_unop_peel(&top).map(|(s, _)| s);
             assert_eq!(got.as_ref(), Some(&want), "expr {expr}");
         }
+    }
+
+    #[test]
+    fn i64_shr_s_structural_peel() {
+        let top = parse_value_expr("(i64.shr_s ?L0 1)");
+        let got = structural_binop_peel(&top).map(|(s, _, _)| s);
+        assert_eq!(got, Some(SemOp::Pure(ValueOp::I64ShrS)));
     }
 
     #[test]
@@ -491,7 +450,12 @@ mod tests {
         let binops: Vec<_> = peels
             .iter()
             .filter_map(|(a, s)| match a {
-                PeelAction::Forward(op) if matches!(op, SemOp::I32Mul | SemOp::I32Shl | SemOp::I32Sub) => {
+                PeelAction::Forward(op)
+                    if matches!(
+                        op,
+                        SemOp::I32Mul | SemOp::I32Shl | SemOp::I32Sub | SemOp::Pure(ValueOp::I32Mul)
+                    ) =>
+                {
                     let stack: Vec<_> = s.goal.stack.iter().map(|e| e.to_string()).collect();
                     Some((op.clone(), stack))
                 }
@@ -499,11 +463,16 @@ mod tests {
             })
             .collect();
         assert!(
-            binops.iter().any(|(op, st)| *op == SemOp::I32Mul && st == &["?L0", "2"]),
+            binops
+                .iter()
+                .any(|(op, st)| matches!(op, SemOp::I32Mul | SemOp::Pure(ValueOp::I32Mul))
+                    && st == &["?L0", "2"]),
             "missing i32.mul peel: {binops:?}"
         );
         assert!(
-            binops.iter().any(|(op, _)| *op == SemOp::I32Mul),
+            binops
+                .iter()
+                .any(|(op, _)| matches!(op, SemOp::I32Mul | SemOp::Pure(ValueOp::I32Mul))),
             "i32.mul must not be deduped into i32.sub: {binops:?}"
         );
     }
@@ -511,26 +480,28 @@ mod tests {
     #[test]
     fn structural_binop_peel_covers_all_value_lang_binops() {
         let cases = [
-            ("(i32.add ?L0 1)", SemOp::I32Add),
-            ("(i32.sub ?L0 1)", SemOp::I32Sub),
-            ("(i32.mul ?L0 2)", SemOp::I32Mul),
-            ("(i32.div_u ?L0 2)", SemOp::I32DivU),
-            ("(i32.div_s ?L0 2)", SemOp::I32DivS),
-            ("(i32.rem_u ?L0 2)", SemOp::I32RemU),
-            ("(i32.rem_s ?L0 2)", SemOp::I32RemS),
-            ("(i32.shl ?L0 1)", SemOp::I32Shl),
-            ("(i32.and ?L0 1)", SemOp::I32And),
-            ("(i32.or ?L0 1)", SemOp::I32Or),
-            ("(i32.xor ?L0 1)", SemOp::I32Xor),
-            ("(i32.shr_u ?L0 1)", SemOp::I32ShrU),
-            ("(i32.shr_s ?L0 1)", SemOp::I32ShrS),
-            ("(i32.rotl ?L0 1)", SemOp::I32Rotl),
-            ("(i32.rotr ?L0 1)", SemOp::I32Rotr),
-            ("(i32.eq ?L0 1)", SemOp::I32Eq),
-            ("(i32.ne ?L0 1)", SemOp::I32Ne),
-            ("(i32.lt_s ?L0 1)", SemOp::I32LtS),
-            ("(i32.le_s ?L0 1)", SemOp::I32LeS),
-            ("(i32.gt_s ?L0 1)", SemOp::I32GtS),
+            ("(i32.add ?L0 1)", SemOp::Pure(ValueOp::I32Add)),
+            ("(i32.sub ?L0 1)", SemOp::Pure(ValueOp::I32Sub)),
+            ("(i32.mul ?L0 2)", SemOp::Pure(ValueOp::I32Mul)),
+            ("(i32.div_u ?L0 2)", SemOp::Pure(ValueOp::I32DivU)),
+            ("(i32.div_s ?L0 2)", SemOp::Pure(ValueOp::I32DivS)),
+            ("(i32.rem_u ?L0 2)", SemOp::Pure(ValueOp::I32RemU)),
+            ("(i32.rem_s ?L0 2)", SemOp::Pure(ValueOp::I32RemS)),
+            ("(i32.shl ?L0 1)", SemOp::Pure(ValueOp::I32Shl)),
+            ("(i32.and ?L0 1)", SemOp::Pure(ValueOp::I32And)),
+            ("(i32.or ?L0 1)", SemOp::Pure(ValueOp::I32Or)),
+            ("(i32.xor ?L0 1)", SemOp::Pure(ValueOp::I32Xor)),
+            ("(i32.shr_u ?L0 1)", SemOp::Pure(ValueOp::I32ShrU)),
+            ("(i32.shr_s ?L0 1)", SemOp::Pure(ValueOp::I32ShrS)),
+            ("(i32.rotl ?L0 1)", SemOp::Pure(ValueOp::I32Rotl)),
+            ("(i32.rotr ?L0 1)", SemOp::Pure(ValueOp::I32Rotr)),
+            ("(i32.eq ?L0 1)", SemOp::Pure(ValueOp::I32Eq)),
+            ("(i32.ne ?L0 1)", SemOp::Pure(ValueOp::I32Ne)),
+            ("(i32.lt_s ?L0 1)", SemOp::Pure(ValueOp::I32LtS)),
+            ("(i32.le_s ?L0 1)", SemOp::Pure(ValueOp::I32LeS)),
+            ("(i32.gt_s ?L0 1)", SemOp::Pure(ValueOp::I32GtS)),
+            ("(i64.add ?L0 1)", SemOp::Pure(ValueOp::I64Add)),
+            ("(f32.add ?L0 1.0)", SemOp::Pure(ValueOp::F32Add)),
         ];
         for (expr, want) in cases {
             let top = parse_value_expr(expr);
@@ -553,10 +524,12 @@ mod tests {
         let bounds = SegmentBounds::new(1, 4);
         let top_expr = g.stack.last().expect("top");
         let decomps = canon.binop_decompositions(top_expr);
-        assert!(decomps.iter().any(|(k, _, _)| *k == InstKind::I32Mul));
+        assert!(decomps.iter().any(|(k, _, _)| {
+            *k == InstKind::Pure(ValueOp::I32Mul)
+        }));
         let (_, e1, e2) = decomps
             .iter()
-            .find(|(k, _, _)| *k == InstKind::I32Mul)
+            .find(|(k, _, _)| *k == InstKind::Pure(ValueOp::I32Mul))
             .unwrap();
         let mut after_mul = g.clone();
         after_mul.stack.pop();
@@ -566,7 +539,7 @@ mod tests {
         let key_mul_stack: Vec<_> = after_mul.stack.iter().map(|e| canon.canon(e)).collect();
         let (_, e1s, e2s) = decomps
             .iter()
-            .find(|(k, _, _)| *k == InstKind::I32Shl)
+            .find(|(k, _, _)| *k == InstKind::Pure(ValueOp::I32Shl))
             .expect("shl decomposition");
         let mut after_shl = g.clone();
         after_shl.stack.pop();
@@ -595,25 +568,13 @@ mod tests {
             let peels = applicable_peels_arithmetic_only(&g, &bounds, &mut canon);
             let next = peels
                 .into_iter()
-                .find(|(a, _)| match (&a, &op) {
-                    (PeelAction::Forward(SemOp::I32Const(a)), SemOp::I32Const(b)) => a == b,
-                    (PeelAction::Forward(SemOp::LocalGet(a)), SemOp::LocalGet(b)) => a == b,
-                    (PeelAction::Forward(SemOp::LocalSet(a)), SemOp::LocalSet(b)) => a == b,
-                    (PeelAction::Forward(SemOp::LocalTee(a)), SemOp::LocalTee(b)) => a == b,
-                    (PeelAction::Forward(SemOp::I32Mul), SemOp::I32Mul) => true,
-                    (PeelAction::Forward(SemOp::I32Add), SemOp::I32Add) => true,
-                    (PeelAction::Forward(SemOp::I32Shl), SemOp::I32Shl) => true,
-                    _ => false,
-                })
+                .find(|(a, _)| matches!(a, PeelAction::Forward(actual) if peel_matches(&op, actual)))
                 .map(|(_, n)| n)
                 .expect("peel step");
             g = next;
         }
         assert!(crate::optimize::search::is_grounded(
-            &g,
-            &init,
-            &bounds,
-            &mut canon
+            &g, &init, &bounds, &mut canon
         ));
     }
 }

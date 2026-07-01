@@ -2,6 +2,7 @@
 
 use crate::semantics::SemOp;
 use crate::sym::SymState;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SegmentBounds {
@@ -35,6 +36,25 @@ impl OpaqueMeta {
             input_symbols: inputs,
             result_symbols: results,
         }
+    }
+}
+
+/// Block extracted during fast parse (classification only; no symbolic execution).
+#[derive(Clone, Debug)]
+pub struct RawSegment {
+    pub func_index: u32,
+    pub num_params: u32,
+    pub total_locals: u32,
+    pub segment_index: usize,
+    pub split_part: Option<(usize, usize)>,
+    pub bounds_template: SegmentBounds,
+    pub ops: Vec<SemOp>,
+    pub disasm_by_id: HashMap<u32, String>,
+}
+
+impl RawSegment {
+    pub fn original_len(&self) -> usize {
+        self.ops.len()
     }
 }
 
@@ -77,5 +97,4 @@ impl StraightSegment {
             .filter(|op| op.is_storage_boundary())
             .filter_map(|op| op.opaque_id())
     }
-
 }

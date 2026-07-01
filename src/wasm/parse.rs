@@ -1,16 +1,12 @@
 //! Wasm binary parsing via wasmparser.
 
 use crate::semantics::SemOp;
-use std::collections::BTreeMap;
-use crate::sym::{ForwardError, LocalReq, SymMachine};
-use crate::wasm::deps::compute_dependencies;
-use crate::wasm::segment::OpaqueMeta;
-use crate::wasm::superstack_disasm::operator_disasm;
-use crate::wasm::{SegmentBounds, StraightSegment};
 use crate::wasm::stack_analysis::{
-    operator_is_storage, operator_stack_effect_with_types, stack_bounds_ops, stack_bounds_operators,
-    ModuleStackTypes,
+    ModuleStackTypes, operator_is_storage, operator_stack_effect_with_types,
+    stack_bounds_operators,
 };
+use crate::wasm::superstack_disasm::operator_disasm;
+use crate::wasm::{RawSegment, SegmentBounds};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
@@ -19,7 +15,7 @@ use wasmparser::{FuncType, Operator, Parser, Payload, TypeRef, ValType};
 
 #[derive(Clone, Debug)]
 pub struct WasmModuleInfo {
-    pub segments: Vec<StraightSegment>,
+    pub segments: Vec<RawSegment>,
     pub warnings: Vec<String>,
 }
 
@@ -39,12 +35,12 @@ fn read_wasm_bytes(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
-    let mut types: Vec<FuncType> = Vec::new();
-    let mut module_func_types: Vec<FuncType> = Vec::new();
-    let mut import_func_count = 0usize;
     let mut segments = Vec::new();
     let mut warnings = Vec::new();
     let mut code_func_index = 0u32;
+    let mut import_func_count = 0usize;
+    let mut types: Vec<FuncType> = Vec::new();
+    let mut module_func_types: Vec<FuncType> = Vec::new();
 
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|e| format!("wasm parse error: {e}"))?;
@@ -61,8 +57,7 @@ pub fn parse_wasm_bytes(bytes: &[u8]) -> Result<WasmModuleInfo, String> {
                 for group in reader {
                     let group = group.map_err(|e| format!("import section: {e}"))?;
                     for import in group {
-                        let (_offset, import) =
-                            import.map_err(|e| format!("import entry: {e}"))?;
+                        let (_offset, import) = import.map_err(|e| format!("import entry: {e}"))?;
                         if let TypeRef::Func(type_idx) = import.ty {
                             let ft = types
                                 .get(type_idx as usize)
@@ -202,8 +197,8 @@ fn extract_from_body(
     total_locals: u32,
     stack_types: ModuleStackTypes<'_>,
     body: &wasmparser::FunctionBody<'_>,
-    out: &mut Vec<StraightSegment>,
-    warnings: &mut Vec<String>,
+    out: &mut Vec<RawSegment>,
+    _warnings: &mut Vec<String>,
 ) -> Result<(), String> {
     let op_reader = body
         .get_operators_reader()
@@ -224,20 +219,69 @@ fn extract_from_body(
         if optimizable.is_empty() {
             continue;
         }
-        extract_from_ops(
-            func_index,
-            num_params,
-            total_locals,
-            bounds_template,
-            stack_types,
-            &optimizable,
-            block_index,
-            out,
-            warnings,
-        );
+        for classified in classify_block_segments(stack_types, &optimizable) {
+            out.push(RawSegment {
+                func_index,
+                num_params,
+                total_locals,
+                segment_index: block_index,
+                split_part: None,
+                bounds_template,
+                ops: classified.ops,
+                disasm_by_id: classified.disasm_by_id,
+            });
+        }
     }
 
     Ok(())
+}
+
+struct ClassifiedChunk {
+    ops: Vec<SemOp>,
+    disasm_by_id: std::collections::HashMap<u32, String>,
+}
+
+fn classify_block_segments(
+    stack_types: ModuleStackTypes<'_>,
+    ops: &[Operator<'_>],
+) -> Vec<ClassifiedChunk> {
+    let mut out = Vec::new();
+    let mut collected: Vec<SemOp> = Vec::new();
+    let mut collecting = true;
+    let mut ctx = OpClassCtx {
+        stack_types,
+        next_access_id: 0,
+        disasm_by_id: std::collections::HashMap::new(),
+    };
+
+    for op in ops {
+        match classify_operator(op, &mut ctx) {
+            OpClass::Supported(sem) => {
+                if collecting {
+                    collected.push(sem);
+                }
+            }
+            OpClass::Unsupported => {
+                if !collected.is_empty() {
+                    out.push(ClassifiedChunk {
+                        ops: collected,
+                        disasm_by_id: std::mem::take(&mut ctx.disasm_by_id),
+                    });
+                    collected = Vec::new();
+                }
+                collecting = false;
+            }
+        }
+    }
+
+    if collecting && !collected.is_empty() {
+        out.push(ClassifiedChunk {
+            ops: collected,
+            disasm_by_id: ctx.disasm_by_id,
+        });
+    }
+
+    out
 }
 
 struct OpClassCtx<'a> {
@@ -253,202 +297,6 @@ impl<'a> OpClassCtx<'a> {
         self.next_access_id += 1;
         id
     }
-}
-
-fn extract_from_ops(
-    func_index: u32,
-    num_params: u32,
-    total_locals: u32,
-    bounds_template: SegmentBounds,
-    stack_types: ModuleStackTypes<'_>,
-    ops: &[Operator<'_>],
-    block_index: usize,
-    out: &mut Vec<StraightSegment>,
-    warnings: &mut Vec<String>,
-) {
-    let (init_stack, block_max_stack) = stack_bounds_operators(ops, stack_types);
-    let bounds = SegmentBounds::new(total_locals, block_max_stack.max(bounds_template.max_stack));
-    let mut machine = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
-    machine.seed_implicit_stack_inputs(init_stack);
-    machine.begin_segment();
-
-    let mut collected: Vec<SemOp> = Vec::new();
-    let mut opaque_meta: Vec<OpaqueMeta> = Vec::new();
-    let mut collecting = true;
-    let mut ctx = OpClassCtx {
-        stack_types,
-        next_access_id: 0,
-        disasm_by_id: std::collections::HashMap::new(),
-    };
-
-    for op in ops {
-        match classify_operator(op, &mut ctx) {
-            OpClass::Supported(sem) => {
-                if !collecting {
-                    continue;
-                }
-                match machine.exec_with_meta(&sem) {
-                    Ok(Some(meta)) => {
-                        opaque_meta.push(meta);
-                        collected.push(sem);
-                    }
-                    Ok(None) => collected.push(sem),
-                    Err(e) => {
-                        let msg = format!(
-                            "func {func_index} block {block_index} forward exec {sem:?}: {e:?}"
-                        );
-                        warnings.push(msg);
-                        flush_segment(
-                            func_index,
-                            num_params,
-                            total_locals,
-                            block_index,
-                            &mut collected,
-                            &mut opaque_meta,
-                            &ctx.disasm_by_id,
-                            &machine,
-                            bounds,
-                            out,
-                        );
-                        collecting = false;
-                    }
-                }
-            }
-            OpClass::Unsupported => {
-                flush_segment(
-                    func_index,
-                    num_params,
-                    total_locals,
-                    block_index,
-                    &mut collected,
-                    &mut opaque_meta,
-                    &ctx.disasm_by_id,
-                    &machine,
-                    bounds,
-                    out,
-                );
-                collecting = false;
-            }
-        }
-    }
-
-    if collecting {
-        flush_segment(
-            func_index,
-            num_params,
-            total_locals,
-            block_index,
-            &mut collected,
-            &mut opaque_meta,
-            &ctx.disasm_by_id,
-            &machine,
-            bounds,
-            out,
-        );
-    }
-}
-
-fn warn_exec(
-    func_index: u32,
-    segment_index: usize,
-    op: &str,
-    err: ForwardError,
-    warnings: &mut Vec<String>,
-) {
-    warnings.push(format!(
-        "func {func_index} segment {segment_index} {op}: {err:?}"
-    ));
-}
-
-fn segment_init_state(total_locals: u32, ops: &[SemOp]) -> crate::sym::SymState {
-    let (init_stack, _) = stack_bounds_ops(ops);
-    let mut locals = BTreeMap::new();
-    for slot in 0..total_locals {
-        locals.insert(slot, LocalReq::Need(SymMachine::local_symbol(slot)));
-    }
-    crate::sym::SymState {
-        stack: SymMachine::implicit_stack_inputs(init_stack),
-        locals,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn flush_and_stop(
-    func_index: u32,
-    block_index: usize,
-    ops: &mut Vec<SemOp>,
-    opaque_meta: &mut Vec<OpaqueMeta>,
-    disasm_by_id: &std::collections::HashMap<u32, String>,
-    machine: &mut SymMachine,
-    bounds: SegmentBounds,
-    out: &mut Vec<StraightSegment>,
-    num_params: u32,
-    total_locals: u32,
-) {
-    flush_segment(
-        func_index,
-        num_params,
-        total_locals,
-        block_index,
-        ops,
-        opaque_meta,
-        disasm_by_id,
-        machine,
-        bounds,
-        out,
-    );
-    *machine = SymMachine::function_entry(num_params, total_locals, bounds.max_stack);
-    machine.begin_segment();
-}
-
-#[allow(clippy::too_many_arguments)]
-fn flush_segment(
-    func_index: u32,
-    num_params: u32,
-    total_locals: u32,
-    block_index: usize,
-    ops: &mut Vec<SemOp>,
-    opaque_meta: &mut Vec<OpaqueMeta>,
-    disasm_by_id: &std::collections::HashMap<u32, String>,
-    machine: &SymMachine,
-    mut bounds: SegmentBounds,
-    out: &mut Vec<StraightSegment>,
-) {
-    if ops.is_empty() {
-        opaque_meta.clear();
-        return;
-    }
-    let (_, max_stack) = stack_bounds_ops(ops);
-    bounds.max_stack = bounds.max_stack.max(max_stack + 5);
-    let init = segment_init_state(total_locals, ops);
-    let fin = machine.to_fin_state();
-    if !init.validate_bounds(&bounds) || !fin.validate_bounds(&bounds) {
-        ops.clear();
-        opaque_meta.clear();
-        return;
-    }
-    let dependencies = compute_dependencies(ops, opaque_meta);
-    // Keep only the disasm entries for ops in this segment.
-    let segment_disasm: std::collections::HashMap<u32, String> = ops
-        .iter()
-        .filter_map(|op| op.opaque_id())
-        .filter_map(|id| disasm_by_id.get(&id).map(|d| (id, d.clone())))
-        .collect();
-    out.push(StraightSegment {
-        func_index,
-        num_params,
-        segment_index: block_index,
-        split_part: None,
-        ops: ops.clone(),
-        init: init.clone(),
-        fin,
-        bounds,
-        opaque_meta: opaque_meta.clone(),
-        dependencies,
-        disasm_by_id: segment_disasm,
-    });
-    ops.clear();
-    opaque_meta.clear();
 }
 
 enum OpClass {
@@ -581,8 +429,10 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
         | Operator::Select
         | Operator::CallIndirect { .. } => OpClass::Unsupported,
         _ => {
-            if let Some((pops, pushes)) = operator_stack_effect_with_types(op, ctx.stack_types)
-            {
+            if let Some(sem) = crate::semantics::classify_pure_operator(op) {
+                return OpClass::Supported(sem);
+            }
+            if let Some((pops, pushes)) = operator_stack_effect_with_types(op, ctx.stack_types) {
                 opaque_sem(ctx, op, pops, pushes, operator_is_storage(op))
             } else {
                 OpClass::Unsupported
@@ -595,9 +445,15 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
 mod tests {
     use super::*;
     use crate::optimize::format_ops;
+    use crate::wasm::materialize_segments;
+    use crate::wasm::StraightSegment;
 
     fn wat_to_wasm(wat: &str) -> Vec<u8> {
         wat::parse_str(wat).expect("wat parse")
+    }
+
+    fn materialized(wasm: &[u8]) -> Vec<StraightSegment> {
+        materialize_segments(&parse_wasm_bytes(wasm).expect("parse").segments, 1)
     }
 
     #[test]
@@ -616,6 +472,7 @@ mod tests {
         let info = parse_wasm_bytes(&wasm).expect("parse");
         assert_eq!(info.segments.len(), 1);
         assert_eq!(info.segments[0].ops.len(), 5);
+        assert_eq!(materialized(&wasm)[0].ops.len(), 5);
     }
 
     #[test]
@@ -645,6 +502,7 @@ mod tests {
                 .map(|s| format_ops(&s.ops))
                 .collect::<Vec<_>>()
         );
+        assert!(materialized(&wasm).len() >= 2);
     }
 
     #[test]
@@ -664,6 +522,7 @@ mod tests {
         let info = parse_wasm_bytes(&wasm).expect("parse");
         assert!(info.segments.len() >= 1);
         assert_eq!(info.segments[0].ops.len(), 3);
+        assert_eq!(materialized(&wasm)[0].ops.len(), 3);
     }
 
     #[test]
@@ -686,7 +545,8 @@ mod tests {
         let info = parse_wasm_bytes(&wasm).expect("parse");
         assert_eq!(info.segments.len(), 1, "expected single segment");
         assert_eq!(info.segments[0].ops.len(), 8);
-        assert!(!info.segments[0].opaque_meta.is_empty());
+        let seg = &materialized(&wasm)[0];
+        assert!(!seg.opaque_meta.is_empty());
     }
 
     #[test]
@@ -731,9 +591,8 @@ mod tests {
             "unexpected warnings: {:?}",
             info.warnings
         );
-        let seg = info
-            .segments
-            .iter()
+        let seg = materialized(&wasm)
+            .into_iter()
             .find(|s| s.ops.iter().any(|op| matches!(op, SemOp::LocalTee(0))))
             .expect("segment with local.tee");
         assert_eq!(seg.init.stack.len(), 1);

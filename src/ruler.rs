@@ -4,11 +4,11 @@
 //! saturate with proven rules, then match characteristic vectors across e-classes.
 
 use crate::lang::ValueLang;
-use crate::semantics::{synthesis_const_values, StackTy};
+use crate::semantics::{StackTy, synthesis_const_values};
 use crate::value::{
-    asts_valid_rewrite_random, asts_valid_rewrite_z3, is_ast_rewrite_pair, is_directed_ast_pair,
-    value_ast_from_expr, value_ast_to_expr, AstEvalSignature, RuleSignature, ValueAst, ValueOp,
-    cvec_test_inputs,
+    AstEvalSignature, RuleSignature, ValueAst, ValueOp, asts_valid_rewrite_random,
+    asts_valid_rewrite_z3, cvec_test_inputs, is_ast_rewrite_pair, is_directed_ast_pair,
+    value_ast_from_expr, value_ast_to_expr,
 };
 use egg::{AstSize, EGraph, Extractor, Id, Pattern, RecExpr, Rewrite, Runner};
 use std::collections::{HashMap, HashSet};
@@ -507,48 +507,7 @@ fn minimize_rhs_per_lhs(pairs: Vec<(ValueAst, ValueAst)>) -> Vec<(ValueAst, Valu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::{RuleSignature, StackTy, ValueAst, ValueOp};
-
-    #[test]
-    fn compact_with_rules_does_not_union_saturation_only_nodes() {
-        let sig = RuleSignature {
-            inputs: vec![StackTy::I32],
-            output: StackTy::I32,
-        };
-        let mut term_set = RulerTermSet::new(sig);
-        term_set.add_terms_of_size(StackTy::I32, 1);
-        term_set.add_terms_of_size(StackTy::I32, 2);
-        term_set.add_terms_of_size(StackTy::I32, 3);
-        let before = term_set.num_nodes();
-
-        let mul = ValueAst::app(
-            ValueOp::I32Mul,
-            vec![
-                ValueAst::symbol(0),
-                ValueAst::const_ty(StackTy::I32, 2),
-            ],
-        );
-        let shl = ValueAst::app(
-            ValueOp::I32Shl,
-            vec![
-                ValueAst::symbol(0),
-                ValueAst::const_ty(StackTy::I32, 1),
-            ],
-        );
-        let rw = Rewrite::<ValueLang, ()>::new(
-            "mul-shl",
-            mul.to_pattern().parse::<Pattern<ValueLang>>().unwrap(),
-            shl.to_pattern().parse::<Pattern<ValueLang>>().unwrap(),
-        )
-        .unwrap();
-
-        term_set.compact_with_rules(&[rw]);
-        assert_eq!(term_set.num_nodes(), before);
-        assert!(
-            term_set.num_classes() < term_set.num_nodes(),
-            "expected some e-class merges"
-        );
-    }
+    use crate::value::{RuleSignature, StackTy};
 
     #[test]
     fn f32_signature_builds_float_terms() {

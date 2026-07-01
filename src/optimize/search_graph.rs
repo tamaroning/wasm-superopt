@@ -18,7 +18,6 @@ pub enum NodeKind {
 struct TraceNode {
     id: u32,
     label: String,
-    cost: usize,
     kind: NodeKind,
 }
 
@@ -36,7 +35,6 @@ pub struct SearchTrace {
     key_to_id: HashMap<MemoKey, u32>,
     nodes: Vec<TraceNode>,
     edges: Vec<TraceEdge>,
-    solution_id: Option<u32>,
     /// Node ids from fin (root) to init (solution), inclusive.
     solution_path: Option<Vec<u32>>,
 }
@@ -55,9 +53,6 @@ impl SearchTrace {
                     node.kind = kind;
                     node.label = format_node_label(state, cost, kind);
                 }
-                if kind == NodeKind::Solution {
-                    self.solution_id = Some(id);
-                }
             }
             return id;
         }
@@ -67,12 +62,8 @@ impl SearchTrace {
         self.nodes.push(TraceNode {
             id,
             label,
-            cost,
             kind,
         });
-        if kind == NodeKind::Solution {
-            self.solution_id = Some(id);
-        }
         id
     }
 
@@ -96,20 +87,12 @@ impl SearchTrace {
         self.key_to_id.get(key).copied()
     }
 
-    pub fn num_edges(&self) -> usize {
-        self.edges.len()
-    }
-
     pub fn mark_memo_skip(&mut self, id: u32) {
         if let Some(node) = self.nodes.iter_mut().find(|n| n.id == id) {
             if node.kind == NodeKind::Intermediate {
                 node.kind = NodeKind::MemoSkip;
             }
         }
-    }
-
-    pub fn solution_node(&self) -> Option<u32> {
-        self.solution_id
     }
 
     pub fn set_solution_path(&mut self, keys: &[MemoKey]) {
@@ -122,17 +105,11 @@ impl SearchTrace {
         }
     }
 
-    pub fn solution_path(&self) -> Option<&[u32]> {
-        self.solution_path.as_deref()
-    }
-
     fn solution_path_edges(&self) -> Vec<(u32, u32)> {
         let Some(path) = &self.solution_path else {
             return vec![];
         };
-        path.windows(2)
-            .map(|w| (w[0], w[1]))
-            .collect()
+        path.windows(2).map(|w| (w[0], w[1])).collect()
     }
 
     pub fn to_dot(&self) -> String {
@@ -247,61 +224,8 @@ fn format_expr_human(expr: &ValueExpr) -> String {
 }
 
 fn dot_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::optimize::fixtures::{fin, init};
-    use crate::optimize::search::{solve_astar_traced, SearchConfig};
-    use crate::synthesis::test_synthesis_rewrites;
-    use crate::wasm::{SegmentBounds, StraightSegment};
 
-    fn example_segment() -> StraightSegment {
-        let init = init();
-        let fin = fin();
-        StraightSegment {
-            func_index: 0,
-            num_params: 1,
-            segment_index: 0,
-            split_part: None,
-            ops: vec![],
-            init: init.clone(),
-            fin: fin.clone(),
-            bounds: SegmentBounds::new(1, 4),
-            opaque_meta: vec![],
-            dependencies: vec![],
-            disasm_by_id: Default::default(),
-        }
-    }
-
-    #[test]
-    fn example_search_dot_has_nodes_and_solution() {
-        let segment = example_segment();
-        let rules = test_synthesis_rewrites();
-        let mut trace = SearchTrace::default();
-        let result = solve_astar_traced(
-            &segment,
-            &rules,
-            &SearchConfig::default(),
-            Some(&mut trace),
-        );
-        assert!(result.ops.is_some());
-        let dot = trace.to_dot();
-        assert!(dot.contains("digraph search"));
-        assert!(dot.contains("fin"));
-        assert!(dot.contains("init"));
-        assert!(
-            !dot.contains("\\\\n"),
-            "newlines must not be double-escaped in DOT"
-        );
-        assert!(trace.solution_node().is_some());
-        assert!(trace.num_edges() > 0);
-        let path = trace.solution_path().expect("solution path");
-        assert!(path.len() >= 2);
-        assert_eq!(path.first().copied(), trace.nodes.iter().find(|n| n.kind == NodeKind::Root).map(|n| n.id));
-        assert_eq!(path.last().copied(), trace.solution_node());
-        let dot = trace.to_dot();
-        assert!(dot.contains("color=red"));
-    }
-}

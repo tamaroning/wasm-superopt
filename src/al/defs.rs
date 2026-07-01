@@ -99,9 +99,7 @@ pub mod types {
                 WasmBinOp::Shr(Sign::S) => Some(BinOpKind::ShrS),
                 WasmBinOp::Rotl => Some(BinOpKind::Rotl),
                 WasmBinOp::Rotr => Some(BinOpKind::Rotr),
-                WasmBinOp::Min | WasmBinOp::Max | WasmBinOp::Copysign | WasmBinOp::FloatDiv => {
-                    None
-                }
+                WasmBinOp::Min | WasmBinOp::Max | WasmBinOp::Copysign | WasmBinOp::FloatDiv => None,
             }
         }
 
@@ -271,10 +269,7 @@ pub mod types {
     impl WasmUnOp {
         /// Whether `$unop_` may return ε (via float builtins / `$list_`).
         pub const fn is_partial(self) -> bool {
-            matches!(
-                self,
-                WasmUnOp::Sqrt | WasmUnOp::Trunc | WasmUnOp::Nearest
-            )
+            matches!(self, WasmUnOp::Sqrt | WasmUnOp::Trunc | WasmUnOp::Nearest)
         }
     }
 }
@@ -580,11 +575,7 @@ pub fn step_pure_binop_template(nt: NumType, binop: WasmBinOp) -> Vec<Instr> {
 pub fn step_pure_unop_template(nt: NumType, unop: WasmUnOp) -> Vec<Instr> {
     let unop_call = Expr::Call(
         "unop_",
-        vec![
-            Arg::NumType(nt),
-            Arg::UnOp(unop),
-            Arg::Var("c_1"),
-        ],
+        vec![Arg::NumType(nt), Arg::UnOp(unop), Arg::Var("c_1")],
     );
     vec![
         Instr::AssertI(InstrCond::Expr(Expr::TopValue(nt))),
@@ -611,11 +602,7 @@ pub fn step_pure_testop_template(nt: NumType, testop: WasmTestOp) -> Vec<Instr> 
             lhs: LetLhs::Var("c"),
             expr: Expr::Call(
                 "testop_",
-                vec![
-                    Arg::NumType(nt),
-                    Arg::TestOp(testop),
-                    Arg::Var("c_1"),
-                ],
+                vec![Arg::NumType(nt), Arg::TestOp(testop), Arg::Var("c_1")],
             ),
         },
         push_i32_const("c"),
@@ -1152,15 +1139,15 @@ pub fn binop_def() -> FuncA {
                         i_1.clone(),
                         i_2.clone(),
                     ))],
-                    else_steps: vec![Instr::AssertI(InstrCond::Pred(eq(
-                        p("sx"),
-                        Expr::SignLit(Sign::S),
-                    ))), singleton_binop(inn_ishr(
-                        sizenn_nt.clone(),
-                        Sign::S,
-                        i_1.clone(),
-                        i_2.clone(),
-                    ))],
+                    else_steps: vec![
+                        Instr::AssertI(InstrCond::Pred(eq(p("sx"), Expr::SignLit(Sign::S)))),
+                        singleton_binop(inn_ishr(
+                            sizenn_nt.clone(),
+                            Sign::S,
+                            i_1.clone(),
+                            i_2.clone(),
+                        )),
+                    ],
                 },
             ],
             else_steps: vec![],
@@ -1249,7 +1236,9 @@ pub fn binop_def() -> FuncA {
                 then_steps: inn_branch,
                 else_steps: vec![],
             }];
-            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype")))));
+            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p(
+                "numtype",
+            )))));
             body.extend(fnn_branch);
             body
         },
@@ -1570,7 +1559,9 @@ pub fn relop_def() -> FuncA {
                 then_steps: relop_inn_branch(sizenn_nt.clone(), i_1.clone(), i_2.clone()),
                 else_steps: vec![],
             }];
-            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype")))));
+            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p(
+                "numtype",
+            )))));
             body.extend(fnn_branch);
             body
         },
@@ -1696,7 +1687,9 @@ pub fn unop_def() -> FuncA {
                 then_steps: inn_branch,
                 else_steps: vec![],
             }];
-            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p("numtype")))));
+            body.push(Instr::AssertI(InstrCond::Pred(Pred::TypeIsFnn(p(
+                "numtype",
+            )))));
             body.extend(fnn_branch);
             body
         },

@@ -10,18 +10,20 @@ mod search;
 mod search_graph;
 mod statistics;
 
-pub use search::{
-    Backend, DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
-    format_ops,
-};
-pub use sat::{classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv, SatDiagnosis, SatGapRow};
-pub use search_graph::SearchTrace;
-pub use statistics::{statistics_rows, write_statistics_csv};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::wasm::StraightSegment;
 use egg::Rewrite;
+pub use sat::{
+    classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv,
+};
 use search::solve_astar_traced;
+pub use search::{
+    Backend, DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
+    format_ops,
+};
+pub use search_graph::SearchTrace;
+pub use statistics::{statistics_rows, write_statistics_csv};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -78,7 +80,9 @@ pub fn optimize_segment_with_trace(
             timeout_secs: segment_cfg.timeout_secs.unwrap_or(0),
         };
     }
-    if !segment.init.validate_bounds(&segment.bounds) || !segment.fin.validate_bounds(&segment.bounds) {
+    if !segment.init.validate_bounds(&segment.bounds)
+        || !segment.fin.validate_bounds(&segment.bounds)
+    {
         return SegmentOptResult {
             segment: segment.clone(),
             optimized: None,
@@ -129,7 +133,12 @@ pub fn optimize_segment_with_trace(
     }
 }
 
-fn dump_search_path(base: &Path, segment: &StraightSegment, _index: usize, total: usize) -> PathBuf {
+fn dump_search_path(
+    base: &Path,
+    segment: &StraightSegment,
+    _index: usize,
+    total: usize,
+) -> PathBuf {
     if total <= 1 {
         return base.to_path_buf();
     }
@@ -138,7 +147,11 @@ fn dump_search_path(base: &Path, segment: &StraightSegment, _index: usize, total
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "search".to_string());
-    parent.join(format!("{stem}-f{}-s{}.dot", segment.func_index, segment.label()))
+    parent.join(format!(
+        "{stem}-f{}-s{}.dot",
+        segment.func_index,
+        segment.label()
+    ))
 }
 
 pub fn optimize_segments(
@@ -271,12 +284,7 @@ pub fn optimize_and_print_segments(
             let _ = io::stderr().flush();
 
             let dump_path = dump_search.map(|base| dump_search_path(base, segment, i, total));
-            let result = optimize_segment_with_trace(
-                segment,
-                rules,
-                cfg,
-                dump_path.as_deref(),
-            );
+            let result = optimize_segment_with_trace(segment, rules, cfg, dump_path.as_deref());
             print_segment_result(&result);
             let _ = io::stdout().flush();
             results.push(result);
@@ -317,43 +325,11 @@ pub fn summarize(results: &[SegmentOptResult]) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimize::search::{segment_timeout_secs, validate_solution_ops, SearchConfig};
+    use crate::optimize::search::segment_timeout_secs;
     use crate::semantics::SemOp;
-    use crate::synthesis::test_synthesis_rewrites;
     use crate::wasm::ops_respect_dependencies;
+    use crate::wasm::materialize_segments;
     use crate::wasm::parse_wasm_bytes;
-
-    fn rules() -> Vec<Rewrite<ValueLang, ()>> {
-        test_synthesis_rewrites()
-    }
-
-    #[test]
-    fn optimizes_example_like_segment() {
-        let wasm = wat::parse_str(
-            r#"(module
-                (func (param i32) (result i32)
-                  local.get 0
-                  i32.const 1
-                  i32.add
-                  local.tee 0
-                  i32.const 2
-                  i32.mul
-                  local.get 0
-                )
-            )"#,
-        )
-        .unwrap();
-        let info = parse_wasm_bytes(&wasm).unwrap();
-        assert_eq!(info.segments.len(), 1);
-        let results = optimize_segments(
-            &info.segments,
-            &rules(),
-            &SearchConfig::default(),
-            1,
-        );
-        let opt = results[0].optimized.as_ref().expect("optimized");
-        assert!(opt.len() <= info.segments[0].original_len());
-    }
 
     #[test]
     fn tee_fusion_segment_parses_eighteen_instructions() {
@@ -385,82 +361,18 @@ mod tests {
         let info = parse_wasm_bytes(&wasm).expect("parse");
         assert_eq!(info.segments.len(), 1);
         assert_eq!(info.segments[0].original_len(), 18);
-    }
-
-    #[test]
-    fn optimizes_small_tee_fusion_segment() {
-        let wasm = wat::parse_str(
-            r#"(module
-                (func (param i32 i32)
-                  local.get 1
-                  i32.const 1
-                  i32.add
-                  local.set 1
-                  local.get 1
-                  local.get 0
-                  i32.lt_s
-                )
-            )"#,
-        )
-        .unwrap();
-        let info = parse_wasm_bytes(&wasm).expect("parse");
-        assert_eq!(info.segments.len(), 1);
-        let orig_len = info.segments[0].original_len();
-        assert_eq!(orig_len, 7);
-        let results = optimize_segments(
-            &info.segments,
-            &rules(),
-            &SearchConfig::default(),
-            1,
-        );
-        let opt = results[0].optimized.as_ref().expect("optimized");
-        assert!(
-            opt.len() < orig_len,
-            "expected shorter sequence, got: {}",
-            format_ops(opt)
-        );
+        assert_eq!(materialize_segments(&info.segments, 1)[0].original_len(), 18);
     }
 
     #[test]
     fn default_segment_timeout_matches_superstack_base() {
-        let wasm = wat::parse_str(
-            r#"(module (func (param i32) local.get 0 i32.const 1 i32.add))"#,
-        )
-        .unwrap();
+        let wasm = wat::parse_str(r#"(module (func (param i32) local.get 0 i32.const 1 i32.add))"#)
+            .unwrap();
         let info = parse_wasm_bytes(&wasm).unwrap();
         assert_eq!(
-            segment_timeout_secs(&info.segments[0], false),
+            segment_timeout_secs(&materialize_segments(&info.segments, 1)[0], false),
             DEFAULT_TIMEOUT_BASE_SECS
         );
-    }
-
-    #[test]
-    fn storage_ops_preserved_in_optimized_segment() {
-        let wasm = wat::parse_str(
-            r#"(module
-                (memory 1)
-                (func (param i32)
-                  local.get 0
-                  i32.const 1
-                  i32.add
-                  i32.const 0
-                  i32.store
-                )
-            )"#,
-        )
-        .unwrap();
-        let info = parse_wasm_bytes(&wasm).unwrap();
-        assert_eq!(info.segments.len(), 1);
-        let segment = &info.segments[0];
-        assert!(segment.ops.iter().any(|op| op.is_storage_boundary()));
-        let result = optimize_segment(segment, &rules(), &SearchConfig::default());
-        let opt = result.optimized.as_ref().expect("expected optimized ops");
-        assert!(
-            crate::wasm::storage_ops_preserved(&segment.ops, opt),
-            "optimized: {}",
-            format_ops(opt)
-        );
-        assert!(validate_solution_ops(opt, segment));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Core Wasm instruction and stack types (no AL dependency).
 
+use crate::value::ValueOp;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -37,6 +38,10 @@ pub enum SemOp {
     I32Clz,
     I32Ctz,
     I32Popcnt,
+    I64Const(i64),
+    F32Const(u32),
+    F64Const(u64),
+    Pure(ValueOp),
     LocalGet(u32),
     LocalSet(u32),
     LocalTee(u32),
@@ -102,6 +107,10 @@ impl SemOp {
             SemOp::I32Clz => "i32.clz",
             SemOp::I32Ctz => "i32.ctz",
             SemOp::I32Popcnt => "i32.popcnt",
+            SemOp::I64Const(_) => "i64.const",
+            SemOp::F32Const(_) => "f32.const",
+            SemOp::F64Const(_) => "f64.const",
+            SemOp::Pure(op) => op.pattern_name(),
             SemOp::LocalGet(x) => local_op_name("local.get", *x),
             SemOp::LocalSet(x) => local_op_name("local.set", *x),
             SemOp::LocalTee(x) => local_op_name("local.tee", *x),
@@ -134,10 +143,7 @@ impl SemOp {
             SemOp::I32Store { .. }
                 | SemOp::Call { .. }
                 | SemOp::GlobalSet { .. }
-                | SemOp::Opaque {
-                    storage: true,
-                    ..
-                }
+                | SemOp::Opaque { storage: true, .. }
         )
     }
 
@@ -156,7 +162,6 @@ impl SemOp {
                 | SemOp::Opaque { storage: true, .. }
         )
     }
-
 }
 
 impl fmt::Display for SemOp {
@@ -187,40 +192,35 @@ impl fmt::Display for SemOp {
             SemOp::I32Clz => write!(f, "i32.clz"),
             SemOp::I32Ctz => write!(f, "i32.ctz"),
             SemOp::I32Popcnt => write!(f, "i32.popcnt"),
+            SemOp::I64Const(n) => write!(f, "i64.const {n}"),
+            SemOp::F32Const(bits) => write!(f, "f32.const {bits}"),
+            SemOp::F64Const(bits) => write!(f, "f64.const {bits}"),
+            SemOp::Pure(op) => write!(f, "{}", op.pattern_name()),
             SemOp::LocalGet(x) => write!(f, "local.get {x}"),
             SemOp::LocalSet(x) => write!(f, "local.set {x}"),
             SemOp::LocalTee(x) => write!(f, "local.tee {x}"),
             SemOp::Drop => write!(f, "drop"),
-            SemOp::I32Load {
-                id,
-                mem,
-                offset,
-            } => write!(f, "i32.load {id} mem={mem} off={offset}"),
-            SemOp::I32Store {
-                id,
-                mem,
-                offset,
-            } => write!(f, "i32.store {id} mem={mem} off={offset}"),
+            SemOp::I32Load { id, mem, offset } => write!(f, "i32.load {id} mem={mem} off={offset}"),
+            SemOp::I32Store { id, mem, offset } => {
+                write!(f, "i32.store {id} mem={mem} off={offset}")
+            }
             SemOp::Call {
                 id,
                 func_index,
                 pops,
                 pushes,
             } => write!(f, "call {id} fn={func_index} pops={pops} pushes={pushes}"),
-            SemOp::GlobalGet {
-                id,
-                global_index,
-            } => write!(f, "global.get {id} g={global_index}"),
-            SemOp::GlobalSet {
-                id,
-                global_index,
-            } => write!(f, "global.set {id} g={global_index}"),
+            SemOp::GlobalGet { id, global_index } => write!(f, "global.get {id} g={global_index}"),
+            SemOp::GlobalSet { id, global_index } => write!(f, "global.set {id} g={global_index}"),
             SemOp::Opaque {
                 id,
                 pops,
                 pushes,
                 storage,
-            } => write!(f, "opaque {id} pops={pops} pushes={pushes} storage={storage}"),
+            } => write!(
+                f,
+                "opaque {id} pops={pops} pushes={pushes} storage={storage}"
+            ),
         }
     }
 }
@@ -243,82 +243,10 @@ fn local_op_name(kind: &'static str, x: u32) -> &'static str {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InstKind {
     I32Const,
-    I32Add,
-    I32Sub,
-    I32Mul,
-    I32DivU,
-    I32DivS,
-    I32RemU,
-    I32RemS,
-    I32Shl,
-    I32And,
-    I32Or,
-    I32Xor,
-    I32ShrU,
-    I32ShrS,
-    I32Rotl,
-    I32Rotr,
-    I32Eq,
-    I32Ne,
-    I32LtS,
-    I32LeS,
-    I32GtS,
-    I32Eqz,
-    I32Clz,
-    I32Ctz,
-    I32Popcnt,
+    Pure(ValueOp),
     LocalGet(u32),
     LocalSet(u32),
     LocalTee(u32),
-}
-
-impl InstKind {
-    pub fn is_i32_binop(self) -> bool {
-        matches!(
-            self,
-            InstKind::I32Add
-                | InstKind::I32Sub
-                | InstKind::I32Mul
-                | InstKind::I32DivU
-                | InstKind::I32DivS
-                | InstKind::I32RemU
-                | InstKind::I32RemS
-                | InstKind::I32Shl
-                | InstKind::I32And
-                | InstKind::I32Or
-                | InstKind::I32Xor
-                | InstKind::I32ShrU
-                | InstKind::I32ShrS
-                | InstKind::I32Rotl
-                | InstKind::I32Rotr
-        )
-    }
-
-    pub fn is_i32_relop(self) -> bool {
-        matches!(
-            self,
-            InstKind::I32Eq
-                | InstKind::I32Ne
-                | InstKind::I32LtS
-                | InstKind::I32LeS
-                | InstKind::I32GtS
-        )
-    }
-
-    pub fn is_i32_testop(self) -> bool {
-        matches!(self, InstKind::I32Eqz)
-    }
-
-    pub fn is_i32_unop(self) -> bool {
-        matches!(
-            self,
-            InstKind::I32Clz | InstKind::I32Ctz | InstKind::I32Popcnt
-        )
-    }
-
-    pub fn may_trap_as_unop(self) -> bool {
-        false
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

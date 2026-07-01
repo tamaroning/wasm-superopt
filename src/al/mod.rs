@@ -17,21 +17,18 @@ pub use ast::{
     format_rule_unop_pretty,
 };
 pub use defs::format_rule_local_pretty;
-pub use defs::{
-    NumType, Sign, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp,
-};
+pub use defs::{NumType, Sign, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp};
 pub use derive::{
     derive_inst_spec, derive_rule_binop_spec, derive_rule_local_get_spec,
     derive_rule_local_set_spec, derive_rule_local_tee_spec, derive_rule_relop_spec,
     derive_rule_testop_spec, derive_rule_unop_spec,
 };
+pub use eval::{
+    asts_valid_rewrite_z3, eval_value_ast_concrete_sig, z3_context,
+};
 pub use ir::format_al_pretty;
 pub use policy::STRAIGHT_LINE_EMBED;
 pub use specs::al_spec_for;
-pub use eval::{
-    asts_valid_rewrite_z3, call_func, concrete_valid_rewrite, eval_value_ast_concrete,
-    eval_value_ast_concrete_sig, eval_value_ast_z3, EvalError, ValueAstResult, z3_context,
-};
 
 /// Default number of randomized concrete tests before invoking Z3.
 pub const DEFAULT_RANDOM_TESTS: usize = 100;

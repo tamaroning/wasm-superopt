@@ -2,10 +2,10 @@
 
 use crate::al::ast::{NumType, Sign, WasmBinOp};
 use crate::al::eval::concrete::call_func;
-use crate::al::eval::value::{i32_to_nat, AlValue};
-use crate::al::eval_value_ast_concrete;
+use crate::al::eval::value::AlValue;
+use crate::al::eval::concrete::eval_value_ast_concrete;
 use crate::semantics::StackTy;
-use crate::value::{asts_valid_rewrite_z3, RuleSignature, ValueAst, ValueOp};
+use crate::value::{RuleSignature, ValueAst, ValueOp, asts_valid_rewrite_z3};
 
 fn i32_sig(arity: usize) -> RuleSignature {
     RuleSignature {
@@ -19,8 +19,8 @@ fn div_s_min_over_neg_one_traps_via_al() {
     let args = vec![
         AlValue::NumType(NumType::I32),
         AlValue::BinOp(WasmBinOp::Div(Sign::S)),
-        AlValue::Nat(i32_to_nat(i32::MIN)),
-        AlValue::Nat(i32_to_nat(-1)),
+        AlValue::Nat(i32::MIN as u32 as u64),
+        AlValue::Nat((-1i32) as u32 as u64),
     ];
     let list = call_func("binop_", args).unwrap();
     assert!(list.is_empty_list_or_opt());
@@ -45,17 +45,11 @@ fn mul_by_two_equals_shl_one_z3() {
     let sig = i32_sig(1);
     let lhs = ValueAst::app(
         ValueOp::I32Mul,
-        vec![
-            ValueAst::symbol(0),
-            ValueAst::const_ty(StackTy::I32, 2),
-        ],
+        vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 2)],
     );
     let rhs = ValueAst::app(
         ValueOp::I32Shl,
-        vec![
-            ValueAst::symbol(0),
-            ValueAst::const_ty(StackTy::I32, 1),
-        ],
+        vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 1)],
     );
     assert!(asts_valid_rewrite_z3(&ctx, &sig, &lhs, &rhs));
 }
@@ -80,7 +74,7 @@ fn sizenn_i32_works() {
 fn binop_shr_s_and_xor_concrete() {
     use crate::al::ast::{NumType, Sign, WasmBinOp};
     use crate::al::eval::concrete::call_func;
-    use crate::al::eval::value::{i32_to_nat, nat_to_i32, AlValue};
+    use crate::al::eval::value::AlValue;
 
     for (binop, a, b, expect) in [
         (WasmBinOp::Add, 4i32, 1i32, 5i32),
@@ -90,12 +84,12 @@ fn binop_shr_s_and_xor_concrete() {
         let args = vec![
             AlValue::NumType(NumType::I32),
             AlValue::BinOp(binop),
-            AlValue::Nat(i32_to_nat(a)),
-            AlValue::Nat(i32_to_nat(b)),
+            AlValue::Nat(a as u32 as u64),
+            AlValue::Nat(b as u32 as u64),
         ];
         let list = call_func("binop_", args).expect("binop call");
         assert!(!list.is_empty_list_or_opt(), "{binop:?} should not trap");
-        let v = nat_to_i32(list.choose_singleton().unwrap().as_nat().unwrap());
+        let v = list.choose_singleton().unwrap().as_nat().unwrap() as u32 as i32;
         assert_eq!(v, expect, "{binop:?} {a} {b}");
     }
 }
@@ -109,7 +103,10 @@ fn f32_double_neg_is_identity() {
         output: StackTy::F32,
     };
     let x = ValueAst::symbol(0);
-    let double_neg = ValueAst::app(ValueOp::F32Neg, vec![ValueAst::app(ValueOp::F32Neg, vec![x.clone()])]);
+    let double_neg = ValueAst::app(
+        ValueOp::F32Neg,
+        vec![ValueAst::app(ValueOp::F32Neg, vec![x.clone()])],
+    );
     for bits in [
         0u32,
         f32::to_bits(1.0),

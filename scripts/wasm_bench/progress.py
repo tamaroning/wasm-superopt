@@ -26,6 +26,8 @@ from rich.table import Table
 from rich.text import Text
 
 OPTIMIZING_TOTAL_RE = re.compile(r"=== Optimizing (\d+) segment")
+MATERIALIZE_START_RE = re.compile(r"materializing (\d+) raw segment")
+MATERIALIZE_DONE_RE = re.compile(r"materialized (\d+) segment")
 PARALLEL_START_RE = re.compile(r"optimizing (\d+) segment\(s\) with (\d+) threads")
 SEGMENT_STEP_RE = re.compile(r"\[(\d+)/(\d+)\]")
 DONE_STATUS_RE = re.compile(r"instr done \((improved|timeout|unchanged)\)")
@@ -204,6 +206,28 @@ class BenchmarkRunnerUI:
         stripped = line.rstrip("\n")
         if stripped:
             state.segments.last_line = stripped
+
+        match = MATERIALIZE_START_RE.search(stripped)
+        if match:
+            total = int(match.group(1))
+            self._reset_segment_task(
+                f"Materializing: {total} raw segments",
+                total=total,
+                completed=0,
+            )
+            self._refresh()
+            return
+
+        match = MATERIALIZE_DONE_RE.search(stripped)
+        if match:
+            total = int(match.group(1))
+            self._reset_segment_task(
+                f"Materialized {total} segments",
+                total=total,
+                completed=total,
+            )
+            self._refresh()
+            return
 
         match = OPTIMIZING_TOTAL_RE.search(stripped)
         if match:

@@ -3,14 +3,11 @@
 use super::ir::{AlCond, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
-use crate::semantics::{InstKind, InstSpec, StackTy};
+use crate::semantics::{value_op_from_inst_kind, InstKind, InstSpec, StackTy};
+use crate::value::ValueOp;
 
-const I32: StackTy = StackTy::I32;
 const POPS_0: &[StackTy] = &[];
-const POPS_1: &[StackTy] = &[I32];
-const POPS_2: &[StackTy] = &[I32, I32];
 const PUSHES_0: &[StackTy] = &[];
-const PUSHES_1: &[StackTy] = &[I32];
 
 fn count_pops(steps: &[AlStep]) -> usize {
     let mut n = 0;
@@ -69,21 +66,61 @@ fn derive_can_trap(steps: &[AlStep]) -> bool {
     false
 }
 
-fn pops_slice(n: usize) -> &'static [StackTy] {
-    match n {
-        0 => POPS_0,
-        1 => POPS_1,
-        2 => POPS_2,
-        _ => POPS_2,
+fn push_slice(ty: StackTy) -> &'static [StackTy] {
+    match ty {
+        StackTy::I32 => &[StackTy::I32],
+        StackTy::I64 => &[StackTy::I64],
+        StackTy::F32 => &[StackTy::F32],
+        StackTy::F64 => &[StackTy::F64],
     }
 }
 
-fn pushes_slice(n: usize) -> &'static [StackTy] {
-    match n {
-        0 => PUSHES_0,
-        1 => PUSHES_1,
-        _ => PUSHES_1,
-    }
+fn value_op_may_trap(op: ValueOp) -> bool {
+    matches!(
+        op,
+        ValueOp::I32DivU
+            | ValueOp::I32DivS
+            | ValueOp::I32RemU
+            | ValueOp::I32RemS
+            | ValueOp::I64DivU
+            | ValueOp::I64DivS
+            | ValueOp::I64RemU
+            | ValueOp::I64RemS
+            | ValueOp::F32Div
+            | ValueOp::F64Div
+    )
+}
+
+fn is_relop(op: ValueOp) -> bool {
+    matches!(
+        op,
+        ValueOp::I32Eq
+            | ValueOp::I32Ne
+            | ValueOp::I32LtS
+            | ValueOp::I32LeS
+            | ValueOp::I32GtS
+            | ValueOp::I64Eq
+            | ValueOp::I64Ne
+            | ValueOp::I64LtS
+            | ValueOp::I64LeS
+            | ValueOp::I64GtS
+            | ValueOp::F64Eq
+            | ValueOp::F64Ne
+            | ValueOp::F64Lt
+            | ValueOp::F64Le
+            | ValueOp::F64Gt
+            | ValueOp::F64Ge
+            | ValueOp::F32Eq
+            | ValueOp::F32Ne
+            | ValueOp::F32Lt
+            | ValueOp::F32Le
+            | ValueOp::F32Gt
+            | ValueOp::F32Ge
+    )
+}
+
+fn is_testop(op: ValueOp) -> bool {
+    matches!(op, ValueOp::I32Eqz | ValueOp::I64Eqz)
 }
 
 pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
@@ -91,23 +128,29 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
     let push_n = count_pushes(&al.steps, policy);
     InstSpec {
         kind: InstKind::I32Const,
-        pops: pops_slice(pop_n),
-        pushes: pushes_slice(push_n),
+        pops: match pop_n {
+            0 => POPS_0,
+            1 => &[StackTy::I32],
+            _ => &[StackTy::I32, StackTy::I32],
+        },
+        pushes: match push_n {
+            0 => PUSHES_0,
+            _ => &[StackTy::I32],
+        },
         can_trap: derive_can_trap(&al.steps),
     }
 }
 
 /// Static `InstSpec` for `Step_pure/binop` from meta template shape.
 pub fn derive_rule_binop_spec(kind: InstKind) -> InstSpec {
-    assert!(kind.is_i32_binop(), "derive_rule_binop_spec: {kind:?}");
+    let op = value_op_from_inst_kind(kind).expect("derive_rule_binop_spec");
+    assert_eq!(op.pops().len(), 2, "derive_rule_binop_spec: {kind:?}");
+    assert!(!is_relop(op) && !is_testop(op), "derive_rule_binop_spec: {kind:?}");
     InstSpec {
         kind,
-        pops: POPS_2,
-        pushes: PUSHES_1,
-        can_trap: matches!(
-            kind,
-            InstKind::I32DivU | InstKind::I32DivS | InstKind::I32RemU | InstKind::I32RemS
-        ),
+        pops: op.pops(),
+        pushes: push_slice(op.push()),
+        can_trap: value_op_may_trap(op),
     }
 }
 
@@ -116,7 +159,7 @@ pub fn derive_rule_local_get_spec(slot: u32) -> InstSpec {
     InstSpec {
         kind: InstKind::LocalGet(slot),
         pops: POPS_0,
-        pushes: PUSHES_1,
+        pushes: &[StackTy::I32],
         can_trap: false,
     }
 }
@@ -125,7 +168,7 @@ pub fn derive_rule_local_get_spec(slot: u32) -> InstSpec {
 pub fn derive_rule_local_set_spec(slot: u32) -> InstSpec {
     InstSpec {
         kind: InstKind::LocalSet(slot),
-        pops: POPS_1,
+        pops: &[StackTy::I32],
         pushes: PUSHES_0,
         can_trap: false,
     }
@@ -135,41 +178,45 @@ pub fn derive_rule_local_set_spec(slot: u32) -> InstSpec {
 pub fn derive_rule_local_tee_spec(slot: u32) -> InstSpec {
     InstSpec {
         kind: InstKind::LocalTee(slot),
-        pops: POPS_1,
-        pushes: PUSHES_1,
+        pops: &[StackTy::I32],
+        pushes: &[StackTy::I32],
         can_trap: false,
     }
 }
 
 /// Static `InstSpec` for `Step_pure/relop` — pop two `nt`, push one `i32`.
 pub fn derive_rule_relop_spec(kind: InstKind) -> InstSpec {
-    assert!(kind.is_i32_relop(), "derive_rule_relop_spec: {kind:?}");
+    let op = value_op_from_inst_kind(kind).expect("derive_rule_relop_spec");
+    assert!(is_relop(op), "derive_rule_relop_spec: {kind:?}");
     InstSpec {
         kind,
-        pops: POPS_2,
-        pushes: PUSHES_1,
+        pops: op.pops(),
+        pushes: &[StackTy::I32],
         can_trap: false,
     }
 }
 
 /// Static `InstSpec` for `Step_pure/testop` — pop one `nt`, push one `i32`.
 pub fn derive_rule_testop_spec(kind: InstKind) -> InstSpec {
-    assert!(kind.is_i32_testop(), "derive_rule_testop_spec: {kind:?}");
+    let op = value_op_from_inst_kind(kind).expect("derive_rule_testop_spec");
+    assert!(is_testop(op), "derive_rule_testop_spec: {kind:?}");
     InstSpec {
         kind,
-        pops: POPS_1,
-        pushes: PUSHES_1,
+        pops: op.pops(),
+        pushes: &[StackTy::I32],
         can_trap: false,
     }
 }
 
-/// Static `InstSpec` for `Step_pure/unop` — pop one `nt`, push one `nt`.
+/// Static `InstSpec` for `Step_pure/unop` — pop one `nt`, push one result `nt`.
 pub fn derive_rule_unop_spec(kind: InstKind) -> InstSpec {
-    assert!(kind.is_i32_unop(), "derive_rule_unop_spec: {kind:?}");
+    let op = value_op_from_inst_kind(kind).expect("derive_rule_unop_spec");
+    assert_eq!(op.pops().len(), 1, "derive_rule_unop_spec: {kind:?}");
+    assert!(!is_testop(op), "derive_rule_unop_spec: {kind:?}");
     InstSpec {
         kind,
-        pops: POPS_1,
-        pushes: PUSHES_1,
-        can_trap: kind.may_trap_as_unop(),
+        pops: op.pops(),
+        pushes: push_slice(op.push()),
+        can_trap: value_op_may_trap(op),
     }
 }

@@ -1,6 +1,6 @@
 //! Shared helpers for AL analysis and lowering.
 
-use super::ir::{AlStep};
+use super::ir::AlStep;
 
 pub(crate) fn is_trap_else_push(then_steps: &[AlStep], else_steps: &[AlStep]) -> bool {
     then_steps == [AlStep::Trap]

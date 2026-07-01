@@ -20,8 +20,4 @@ impl Env {
     pub fn get(&self, name: &str) -> Option<&AlValue> {
         self.bindings.get(name)
     }
-
-    pub fn child(&self) -> Self {
-        self.clone()
-    }
 }

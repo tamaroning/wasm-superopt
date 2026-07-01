@@ -3,11 +3,48 @@
 use crate::semantics::SemOp;
 use crate::sym::SymMachine;
 use crate::wasm::deps::compute_dependencies;
-use crate::wasm::segment::{SegmentBounds, StraightSegment};
+use crate::wasm::segment::{RawSegment, SegmentBounds, StraightSegment};
 use crate::wasm::stack_analysis::stack_bounds_ops;
+use std::collections::HashMap;
 
 /// Default maximum instructions per optimization chunk (SuperStack smoke eval uses 10).
 pub const DEFAULT_MAX_SEGMENT_INSTR: usize = 10;
+
+/// Mechanical split before symbolic execution (SuperStack `split_simple`).
+pub fn split_raw_segment(raw: &RawSegment, max_instr: usize) -> Vec<RawSegment> {
+    if max_instr == 0 || raw.ops.len() <= max_instr {
+        return vec![raw.clone()];
+    }
+    let part_count = raw.ops.len().div_ceil(max_instr);
+    (0..part_count)
+        .map(|part| {
+            let beg = part * max_instr;
+            let end = ((part + 1) * max_instr).min(raw.ops.len());
+            let ops = raw.ops[beg..end].to_vec();
+            let disasm_by_id: HashMap<u32, String> = ops
+                .iter()
+                .filter_map(|op| op.opaque_id())
+                .filter_map(|id| raw.disasm_by_id.get(&id).map(|d| (id, d.clone())))
+                .collect();
+            RawSegment {
+                func_index: raw.func_index,
+                num_params: raw.num_params,
+                total_locals: raw.total_locals,
+                segment_index: raw.segment_index,
+                split_part: Some((part, part_count)),
+                bounds_template: raw.bounds_template,
+                ops,
+                disasm_by_id,
+            }
+        })
+        .collect()
+}
+
+pub fn split_raw_segments(raw: &[RawSegment], max_instr: usize) -> Vec<RawSegment> {
+    raw.iter()
+        .flat_map(|s| split_raw_segment(s, max_instr))
+        .collect()
+}
 
 fn chunk_bounds(segment: &StraightSegment, ops: &[SemOp]) -> SegmentBounds {
     let (_, max_stack) = stack_bounds_ops(ops);
@@ -102,16 +139,16 @@ pub fn split_segments(segments: &[StraightSegment], max_instr: usize) -> Vec<Str
 mod tests {
     use super::*;
     use crate::optimize::format_ops;
+    use crate::wasm::materialize_segments;
     use crate::wasm::parse_wasm_bytes;
 
     #[test]
     fn short_segment_not_split() {
-        let wasm = wat::parse_str(
-            r#"(module (func (param i32) local.get 0 i32.const 1 i32.add))"#,
-        )
-        .unwrap();
+        let wasm = wat::parse_str(r#"(module (func (param i32) local.get 0 i32.const 1 i32.add))"#)
+            .unwrap();
         let info = parse_wasm_bytes(&wasm).unwrap();
-        let parts = split_segment(&info.segments[0], DEFAULT_MAX_SEGMENT_INSTR);
+        let seg = &materialize_segments(&info.segments, 1)[0];
+        let parts = split_segment(seg, DEFAULT_MAX_SEGMENT_INSTR);
         assert_eq!(parts.len(), 1);
         assert!(parts[0].split_part.is_none());
     }
@@ -144,8 +181,9 @@ mod tests {
         )
         .unwrap();
         let info = parse_wasm_bytes(&wasm).unwrap();
-        assert_eq!(info.segments[0].original_len(), 18);
-        let parts = split_segment(&info.segments[0], DEFAULT_MAX_SEGMENT_INSTR);
+        let seg = &materialize_segments(&info.segments, 1)[0];
+        assert_eq!(seg.original_len(), 18);
+        let parts = split_segment(seg, DEFAULT_MAX_SEGMENT_INSTR);
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0].ops.len(), 10);
         assert_eq!(parts[1].ops.len(), 8);
@@ -153,7 +191,7 @@ mod tests {
         assert_eq!(parts[1].split_part, Some((1, 2)));
         assert_eq!(
             parts.iter().map(|p| p.ops.len()).sum::<usize>(),
-            info.segments[0].original_len()
+            seg.original_len()
         );
     }
 
@@ -184,7 +222,8 @@ mod tests {
             )"#,
         )
         .unwrap();
-        let seg = &parse_wasm_bytes(&wasm).unwrap().segments[0];
+        let info = parse_wasm_bytes(&wasm).unwrap();
+        let seg = &materialize_segments(&info.segments, 1)[0];
         let parts = split_segment(seg, DEFAULT_MAX_SEGMENT_INSTR);
         let merged: Vec<_> = parts.iter().flat_map(|p| p.ops.iter()).cloned().collect();
         assert_eq!(format_ops(&merged), format_ops(&seg.ops));

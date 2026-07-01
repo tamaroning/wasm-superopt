@@ -35,7 +35,7 @@ From the repository root:
 # 1) Run benchmarks (SuperStack SAT + ewasm)
 #  - sequence timeout: 300s
 #  - timeout for each program: 3600s
-uv run --project scripts wasm-bench-run --suite wsouper --only mux1_1 -j 28 --split 15 --segment-timeout 30 --timeout 3600
+uv run --project scripts wasm-bench-run --suite wsouper --only mux1_1 -j 20 --split 10 --segment-timeout 10 --timeout 3600
 
 # 2) Re-merge raw CSVs (optional; plot also auto-merges if combined_blocks.csv is missing)
 uv run --project scripts wasm-bench-merge --suite wsouper
@@ -67,7 +67,7 @@ Note: superstack only supports the following r3 benchmarks:
 
 ## Caveats (comparison limits)
 
-1. **ewasm type support** — i32 arithmetic is optimized with A*. i64/f32/f64 locals and instructions are parsed as symbolic execution (`opaque`), like SuperStack; segment splitting continues. Only i32 is optimized.
+1. **ewasm type support** — i32/i64/f32/f64 pure arithmetic and conversions are optimized (A* peel + SAT tables). Side effects (memory, `call`, `global.*`) remain opaque / uninterpreted, like SuperStack; segment splitting continues across all value types.
 2. **SuperStack greedy ≠ ewasm A\*** — `r3` / `rosetta` default to `superstack-greedy` (fast heuristic). `wsouper` defaults to `superstack` (SAT via `--ub-greedy`). ewasm uses A* shortest-path search by default; pass `--ewasm-solver sat` to use the descending Pure-SAT backend (CaDiCaL) instead. The SAT backend encodes side effects directly (SuperStack-style): memory/global/call/opaque ops become uninterpreted instructions with `storage` (exactly-once), at-most-once, and dependency-order (`deplist`) constraints, so there is no A* fallback. If a segment is too large to encode or cannot be improved, the original sequence is kept.
 3. **Default split** — `wasm-bench-run` uses `--split 25` / `-sp 25` by default (ewasm CLI alone defaults to 10; SuperStack defaults to no splitting).
 4. **Parallelism** — `-j` maps to ewasm `-j` and SuperStack `-j` for parallel block optimization.

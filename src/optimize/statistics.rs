@@ -1,9 +1,9 @@
 //! SuperStack-compatible `statistics.csv` rows for benchmark analysis.
 
-use super::search::validate_solution_ops;
-use crate::wasm::format_ops_superstack_csv;
 use super::SegmentOptResult;
+use super::search::validate_solution_ops;
 use crate::wasm::StraightSegment;
+use crate::wasm::format_ops_superstack_csv;
 use serde::Serialize;
 use std::io;
 use std::path::Path;
@@ -96,7 +96,10 @@ impl StatisticsCsvRecord {
 }
 
 pub fn block_id(segment: &StraightSegment) -> String {
-    let mut id = format!("function_{}_block_{}", segment.func_index, segment.segment_index);
+    let mut id = format!(
+        "function_{}_block_{}",
+        segment.func_index, segment.segment_index
+    );
     if let Some((part, total)) = segment.split_part {
         if total > 1 {
             id.push('_');
@@ -129,7 +132,11 @@ fn classify_outcome(result: &SegmentOptResult, initial_len: usize) -> (String, b
             "non_optimal".to_string(),
             true,
             false,
-            if improved { "astar".to_string() } else { "original".to_string() },
+            if improved {
+                "astar".to_string()
+            } else {
+                "original".to_string()
+            },
         );
     }
 

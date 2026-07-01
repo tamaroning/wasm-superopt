@@ -1,10 +1,9 @@
 //! Evaluate [`ValueAst`](crate::value::ValueAst) via AL `$fn` helpers.
 
+use super::super::value::{AlValue, ValueAstResult, nat_to_value, value_to_nat};
 use super::call_func;
-use super::super::error::EvalError;
-use super::super::value::{nat_to_value, value_to_nat, AlValue, ValueAstResult};
 use crate::al::ast::{NumType, Sign, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp};
-use crate::value::{RuleSignature, StackTy, ValueAst, ValueOp};
+use crate::value::{RuleSignature, ValueAst, ValueOp};
 
 fn eval_partial_list(
     left: &ValueAst,
@@ -141,31 +140,115 @@ fn eval_op(sig: &RuleSignature, op: ValueOp, args: &[&ValueAst], inputs: &[i64])
         I32Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Add),
         I32Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Sub),
         I32Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Mul),
-        I32DivU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Div(Sign::U)),
-        I32DivS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Div(Sign::S)),
-        I32RemU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rem(Sign::U)),
-        I32RemS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rem(Sign::S)),
+        I32DivU => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I32,
+            WasmBinOp::Div(Sign::U),
+        ),
+        I32DivS => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I32,
+            WasmBinOp::Div(Sign::S),
+        ),
+        I32RemU => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I32,
+            WasmBinOp::Rem(Sign::U),
+        ),
+        I32RemS => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I32,
+            WasmBinOp::Rem(Sign::S),
+        ),
         I32Shl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Shl),
         I32And => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::And),
         I32Or => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Or),
         I32Xor => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Xor),
-        I32ShrU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Shr(Sign::U)),
-        I32ShrS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Shr(Sign::S)),
+        I32ShrU => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I32,
+            WasmBinOp::Shr(Sign::U),
+        ),
+        I32ShrS => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I32,
+            WasmBinOp::Shr(Sign::S),
+        ),
         I32Rotl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rotl),
         I32Rotr => eval_partial_list(args[0], args[1], sig, inputs, NumType::I32, WasmBinOp::Rotr),
         I64Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Add),
         I64Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Sub),
         I64Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Mul),
-        I64DivU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Div(Sign::U)),
-        I64DivS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Div(Sign::S)),
-        I64RemU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rem(Sign::U)),
-        I64RemS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rem(Sign::S)),
+        I64DivU => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I64,
+            WasmBinOp::Div(Sign::U),
+        ),
+        I64DivS => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I64,
+            WasmBinOp::Div(Sign::S),
+        ),
+        I64RemU => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I64,
+            WasmBinOp::Rem(Sign::U),
+        ),
+        I64RemS => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I64,
+            WasmBinOp::Rem(Sign::S),
+        ),
         I64Shl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Shl),
         I64And => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::And),
         I64Or => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Or),
         I64Xor => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Xor),
-        I64ShrU => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Shr(Sign::U)),
-        I64ShrS => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Shr(Sign::S)),
+        I64ShrU => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I64,
+            WasmBinOp::Shr(Sign::U),
+        ),
+        I64ShrS => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::I64,
+            WasmBinOp::Shr(Sign::S),
+        ),
         I64Rotl => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rotl),
         I64Rotr => eval_partial_list(args[0], args[1], sig, inputs, NumType::I64, WasmBinOp::Rotr),
         I32Eq => {
@@ -367,21 +450,45 @@ fn eval_op(sig: &RuleSignature, op: ValueOp, args: &[&ValueAst], inputs: &[i64])
         F32Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Add),
         F32Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Sub),
         F32Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Mul),
-        F32Div => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::FloatDiv),
+        F32Div => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::F32,
+            WasmBinOp::FloatDiv,
+        ),
         F32Min => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Min),
         F32Max => eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Max),
-        F32Copysign => {
-            eval_partial_list(args[0], args[1], sig, inputs, NumType::F32, WasmBinOp::Copysign)
-        }
+        F32Copysign => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::F32,
+            WasmBinOp::Copysign,
+        ),
         F64Add => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Add),
         F64Sub => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Sub),
         F64Mul => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Mul),
-        F64Div => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::FloatDiv),
+        F64Div => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::F64,
+            WasmBinOp::FloatDiv,
+        ),
         F64Min => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Min),
         F64Max => eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Max),
-        F64Copysign => {
-            eval_partial_list(args[0], args[1], sig, inputs, NumType::F64, WasmBinOp::Copysign)
-        }
+        F64Copysign => eval_partial_list(
+            args[0],
+            args[1],
+            sig,
+            inputs,
+            NumType::F64,
+            WasmBinOp::Copysign,
+        ),
         F32Eq => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Eq),
         F32Ne => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Ne),
         F32Lt => eval_float_relop(args, sig, inputs, NumType::F32, WasmRelOp::Flt),
@@ -466,28 +573,12 @@ pub fn eval_value_ast_concrete_sig(
 }
 
 /// Concrete evaluation of a [`ValueAst`] as homogeneous i32 (legacy).
+#[cfg(test)]
 pub fn eval_value_ast_concrete(ast: &ValueAst, inputs: &[i32]) -> ValueAstResult {
     let inputs64: Vec<i64> = inputs.iter().map(|&v| v as i64).collect();
     let sig = RuleSignature {
-        inputs: vec![StackTy::I32; inputs64.len()],
-        output: StackTy::I32,
+        inputs: vec![crate::semantics::StackTy::I32; inputs64.len()],
+        output: crate::semantics::StackTy::I32,
     };
     eval_value_ast_concrete_sig(&sig, ast, &inputs64)
-}
-
-pub fn concrete_valid_rewrite(sig: &RuleSignature, lhs: &ValueAst, rhs: &ValueAst, inputs: &[i64]) -> bool {
-    let l = eval_value_ast_concrete_sig(sig, lhs, inputs);
-    let r = eval_value_ast_concrete_sig(sig, rhs, inputs);
-    if l.trap != r.trap {
-        return false;
-    }
-    l.trap || l.value == r.value
-}
-
-/// Map AL evaluation failure to trap for symbolic path consistency.
-pub fn eval_error_to_trap(_: EvalError) -> ValueAstResult {
-    ValueAstResult {
-        value: 0,
-        trap: true,
-    }
 }

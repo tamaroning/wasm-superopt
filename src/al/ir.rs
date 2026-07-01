@@ -23,6 +23,9 @@ pub enum AlStep {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AlExpr {
     ConstI32(i32),
+    ConstI64(i64),
+    ConstF32(u32),
+    ConstF64(u64),
     #[allow(dead_code)]
     Var(&'static str),
     BinOp(BinOpKind, &'static str, &'static str),
@@ -75,6 +78,9 @@ fn format_cond_pretty(cond: &AlCond) -> String {
 fn format_expr_pretty(expr: &AlExpr) -> String {
     match expr {
         AlExpr::ConstI32(n) => format!("const {n}"),
+        AlExpr::ConstI64(n) => format!("const {n}"),
+        AlExpr::ConstF32(bits) => format!("const f32:{bits}"),
+        AlExpr::ConstF64(bits) => format!("const f64:{bits}"),
         AlExpr::Var(name) => (*name).to_string(),
         AlExpr::BinOp(kind, lhs, rhs) => format!("{}({lhs}, {rhs})", kind.label()),
     }

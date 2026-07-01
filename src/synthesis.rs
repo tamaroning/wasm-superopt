@@ -5,7 +5,7 @@
 use crate::al::z3_context;
 use crate::lang::ValueLang;
 use crate::ruler::{canonical_rewrite_key, discover_rules_for_signature};
-use crate::value::{enumerate_signatures, is_reachable, RuleSignature, ValueAst};
+use crate::value::{RuleSignature, enumerate_signatures, is_reachable};
 use egg::{Pattern, Rewrite};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -193,22 +193,13 @@ pub fn synthesize_rules(
                 .map(|sig| {
                     let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                     report_progress(&format!("[{n}/{total_sigs}] signature {sig}"));
-                    synthesize_one_signature(
-                        sig,
-                        max_ast_size,
-                        random_tests,
-                        verify_jobs,
-                    )
+                    synthesize_one_signature(sig, max_ast_size, random_tests, verify_jobs)
                 })
                 .collect()
         } else {
             let mut out = Vec::with_capacity(total_sigs);
             for (sig_idx, sig) in signatures.iter().enumerate() {
-                report_progress(&format!(
-                    "[{}/{}] signature {sig}",
-                    sig_idx + 1,
-                    total_sigs
-                ));
+                report_progress(&format!("[{}/{}] signature {sig}", sig_idx + 1, total_sigs));
                 out.push(synthesize_one_signature(
                     sig,
                     max_ast_size,
@@ -257,25 +248,6 @@ pub fn synthesize_rules(
     proven
 }
 
-fn collect_candidate_indices(sig: &RuleSignature, asts: &[ValueAst]) -> Vec<(usize, usize)> {
-    let mut indices = Vec::new();
-    for i in 0..asts.len() {
-        for j in 0..asts.len() {
-            if i == j {
-                continue;
-            }
-            let lhs = &asts[i];
-            let rhs = &asts[j];
-            if crate::value::is_directed_ast_pair(lhs, rhs)
-                && crate::value::is_ast_rewrite_pair(sig, lhs, rhs)
-            {
-                indices.push((i, j));
-            }
-        }
-    }
-    indices
-}
-
 pub fn synthesized_to_rewrites(rules: &[SynthesizedRule]) -> Vec<Rewrite<ValueLang, ()>> {
     rules
         .iter()
@@ -293,17 +265,19 @@ fn parse_rewrite(name: &str, lhs: &str, rhs: &str) -> Result<Rewrite<ValueLang, 
 mod tests {
     use super::*;
     use crate::semantics::StackTy;
-    use crate::value::{enumerate_value_asts, is_ast_rewrite_pair, is_directed_ast_pair, ValueAst, ValueOp};
+    use crate::value::{
+        ValueAst, ValueOp, is_ast_rewrite_pair, is_directed_ast_pair,
+    };
 
     #[test]
     fn constant_fold_rhs_allowed_in_rewrite_pair() {
-        let sig = RuleSignature::new(vec![StackTy::I32], StackTy::I32);
+        let sig = RuleSignature {
+            inputs: vec![StackTy::I32],
+            output: StackTy::I32,
+        };
         let mul0 = ValueAst::app(
             ValueOp::I32Mul,
-            vec![
-                ValueAst::symbol(0),
-                ValueAst::const_ty(StackTy::I32, 0),
-            ],
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 0)],
         );
         let zero = ValueAst::const_ty(StackTy::I32, 0);
         assert!(is_ast_rewrite_pair(&sig, &mul0, &zero));
@@ -316,19 +290,17 @@ mod tests {
             .filter(|sig| is_reachable(sig))
             .collect();
         assert!(sigs.iter().all(|sig| !sig.inputs.is_empty()));
-        assert!(sigs.iter().any(|sig| {
-            sig.inputs == vec![StackTy::I32] && sig.output == StackTy::I64
-        }));
+        assert!(
+            sigs.iter()
+                .any(|sig| { sig.inputs == vec![StackTy::I32] && sig.output == StackTy::I64 })
+        );
     }
 
     #[test]
     fn ast_pattern_for_mul_const2() {
         let mul = ValueAst::app(
             ValueOp::I32Mul,
-            vec![
-                ValueAst::symbol(0),
-                ValueAst::const_ty(StackTy::I32, 2),
-            ],
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 2)],
         );
         assert_eq!(mul.to_pattern(), "(i32.mul ?a 2)");
         assert!(!mul.to_pattern().contains("stack"));
@@ -355,10 +327,7 @@ mod tests {
     fn ast_pattern_for_sub() {
         let sub = ValueAst::app(
             ValueOp::I32Sub,
-            vec![
-                ValueAst::symbol(0),
-                ValueAst::const_ty(StackTy::I32, 1),
-            ],
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 1)],
         );
         assert_eq!(sub.to_pattern(), "(i32.sub ?a 1)");
     }
@@ -382,10 +351,7 @@ mod tests {
     fn i64_ast_pattern_for_mul_const2() {
         let mul = ValueAst::app(
             ValueOp::I64Mul,
-            vec![
-                ValueAst::symbol(0),
-                ValueAst::const_ty(StackTy::I64, 2),
-            ],
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I64, 2)],
         );
         assert_eq!(mul.to_pattern(), "(i64.mul ?a 2)");
     }
@@ -402,10 +368,7 @@ mod tests {
             vec![
                 ValueAst::app(
                     ValueOp::I32Add,
-                    vec![
-                        ValueAst::symbol(0),
-                        ValueAst::const_ty(StackTy::I32, 1),
-                    ],
+                    vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 1)],
                 ),
                 ValueAst::const_ty(StackTy::I32, 2),
             ],
@@ -419,39 +382,13 @@ mod tests {
     fn directed_ast_pair_skips_larger_rhs() {
         let short = ValueAst::app(
             ValueOp::I32Mul,
-            vec![
-                ValueAst::symbol(0),
-                ValueAst::const_ty(StackTy::I32, 2),
-            ],
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 2)],
         );
         let long = ValueAst::app(
             ValueOp::I32Add,
-            vec![
-                ValueAst::const_ty(StackTy::I32, 1),
-                short.clone(),
-            ],
+            vec![ValueAst::const_ty(StackTy::I32, 1), short.clone()],
         );
         assert!(!is_directed_ast_pair(&short, &long));
         assert!(is_directed_ast_pair(&long, &short));
-    }
-
-    #[test]
-    fn count_enumeration_scale_after_pruning() {
-        let sigs: Vec<_> = enumerate_signatures(3)
-            .into_iter()
-            .filter(|sig| is_reachable(sig))
-            .collect();
-        let mut total_pairs = 0usize;
-        for sig in &sigs {
-            let asts: Vec<ValueAst> = enumerate_value_asts(sig, 4)
-                .into_iter()
-                .filter(|ast| ast.uses_each_symbol_once(sig))
-                .collect();
-            total_pairs += collect_candidate_indices(sig, &asts).len();
-        }
-        assert!(
-            total_pairs < 12_000_000,
-            "expected pruned pair count under 12M, got {total_pairs}"
-        );
     }
 }

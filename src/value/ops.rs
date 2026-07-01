@@ -1,6 +1,5 @@
 //! Typed Wasm value-op catalog for rule synthesis.
 
-use crate::al::NumType;
 use crate::lang::ValueLang;
 use crate::semantics::StackTy;
 use egg::Id;
@@ -23,12 +22,6 @@ pub struct RuleSignature {
     pub output: StackTy,
 }
 
-impl RuleSignature {
-    pub fn new(inputs: Vec<StackTy>, output: StackTy) -> Self {
-        Self { inputs, output }
-    }
-}
-
 impl fmt::Display for RuleSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[")?;
@@ -43,7 +36,7 @@ impl fmt::Display for RuleSignature {
 }
 
 /// Synthesis instruction with a fixed pop/push stack signature.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ValueOp {
     I32Add,
     I32Sub,
@@ -143,15 +136,6 @@ impl StackTy {
         match self {
             Self::I32 | Self::F32 => 32,
             Self::I64 | Self::F64 => 64,
-        }
-    }
-
-    pub fn al_num_type(self) -> NumType {
-        match self {
-            Self::I32 => NumType::I32,
-            Self::I64 => NumType::I64,
-            Self::F32 => NumType::F32,
-            Self::F64 => NumType::F64,
         }
     }
 
@@ -262,24 +246,20 @@ impl ValueOp {
     pub fn pops(self) -> &'static [StackTy] {
         use ValueOp::*;
         match self {
-            I32Add | I32Sub | I32Mul | I32DivU | I32DivS | I32RemU | I32RemS | I32Shl
-            | I32And | I32Or | I32Xor | I32ShrU | I32ShrS | I32Rotl | I32Rotr | I32Eq
-            | I32Ne | I32LtS | I32LeS | I32GtS => POPS_2_I32,
+            I32Add | I32Sub | I32Mul | I32DivU | I32DivS | I32RemU | I32RemS | I32Shl | I32And
+            | I32Or | I32Xor | I32ShrU | I32ShrS | I32Rotl | I32Rotr | I32Eq | I32Ne | I32LtS
+            | I32LeS | I32GtS => POPS_2_I32,
             I32Eqz | I32Clz | I32Ctz | I32Popcnt => POPS_1_I32,
-            I64Add | I64Sub | I64Mul | I64DivU | I64DivS | I64RemU | I64RemS | I64Shl
-            | I64And | I64Or | I64Xor | I64ShrU | I64ShrS | I64Rotl | I64Rotr | I64Eq
-            | I64Ne | I64LtS | I64LeS | I64GtS => POPS_2_I64,
+            I64Add | I64Sub | I64Mul | I64DivU | I64DivS | I64RemU | I64RemS | I64Shl | I64And
+            | I64Or | I64Xor | I64ShrU | I64ShrS | I64Rotl | I64Rotr | I64Eq | I64Ne | I64LtS
+            | I64LeS | I64GtS => POPS_2_I64,
             I64Eqz | I64Clz | I64Ctz | I64Popcnt => POPS_1_I64,
-            F32Add | F32Sub | F32Mul | F32Div | F32Min | F32Max | F32Copysign | F32Eq
-            | F32Ne | F32Lt | F32Le | F32Gt | F32Ge => POPS_2_F32,
-            F32Abs | F32Neg | F32Sqrt | F32Ceil | F32Floor | F32Trunc | F32Nearest => {
-                POPS_1_F32
-            }
-            F64Add | F64Sub | F64Mul | F64Div | F64Min | F64Max | F64Copysign | F64Eq
-            | F64Ne | F64Lt | F64Le | F64Gt | F64Ge => POPS_2_F64,
-            F64Abs | F64Neg | F64Sqrt | F64Ceil | F64Floor | F64Trunc | F64Nearest => {
-                POPS_1_F64
-            }
+            F32Add | F32Sub | F32Mul | F32Div | F32Min | F32Max | F32Copysign | F32Eq | F32Ne
+            | F32Lt | F32Le | F32Gt | F32Ge => POPS_2_F32,
+            F32Abs | F32Neg | F32Sqrt | F32Ceil | F32Floor | F32Trunc | F32Nearest => POPS_1_F32,
+            F64Add | F64Sub | F64Mul | F64Div | F64Min | F64Max | F64Copysign | F64Eq | F64Ne
+            | F64Lt | F64Le | F64Gt | F64Ge => POPS_2_F64,
+            F64Abs | F64Neg | F64Sqrt | F64Ceil | F64Floor | F64Trunc | F64Nearest => POPS_1_F64,
             I64ExtendI32S | I64ExtendI32U => POPS_1_I32,
             I32WrapI64 => POPS_1_I64,
         }
@@ -288,19 +268,19 @@ impl ValueOp {
     pub fn push(self) -> StackTy {
         use ValueOp::*;
         match self {
-            I32Add | I32Sub | I32Mul | I32DivU | I32DivS | I32RemU | I32RemS | I32Shl
-            | I32And | I32Or | I32Xor | I32ShrU | I32ShrS | I32Rotl | I32Rotr | I32Clz
-            | I32Ctz | I32Popcnt => StackTy::I32,
+            I32Add | I32Sub | I32Mul | I32DivU | I32DivS | I32RemU | I32RemS | I32Shl | I32And
+            | I32Or | I32Xor | I32ShrU | I32ShrS | I32Rotl | I32Rotr | I32Clz | I32Ctz
+            | I32Popcnt => StackTy::I32,
             I32Eq | I32Ne | I32LtS | I32LeS | I32GtS | I32Eqz => StackTy::I32,
-            I64Add | I64Sub | I64Mul | I64DivU | I64DivS | I64RemU | I64RemS | I64Shl
-            | I64And | I64Or | I64Xor | I64ShrU | I64ShrS | I64Rotl | I64Rotr | I64Clz
-            | I64Ctz | I64Popcnt | I64ExtendI32S | I64ExtendI32U => StackTy::I64,
+            I64Add | I64Sub | I64Mul | I64DivU | I64DivS | I64RemU | I64RemS | I64Shl | I64And
+            | I64Or | I64Xor | I64ShrU | I64ShrS | I64Rotl | I64Rotr | I64Clz | I64Ctz
+            | I64Popcnt | I64ExtendI32S | I64ExtendI32U => StackTy::I64,
             I64Eq | I64Ne | I64LtS | I64LeS | I64GtS | I64Eqz => StackTy::I32,
-            F32Add | F32Sub | F32Mul | F32Div | F32Min | F32Max | F32Copysign | F32Abs
-            | F32Neg | F32Sqrt | F32Ceil | F32Floor | F32Trunc | F32Nearest => StackTy::F32,
+            F32Add | F32Sub | F32Mul | F32Div | F32Min | F32Max | F32Copysign | F32Abs | F32Neg
+            | F32Sqrt | F32Ceil | F32Floor | F32Trunc | F32Nearest => StackTy::F32,
             F32Eq | F32Ne | F32Lt | F32Le | F32Gt | F32Ge => StackTy::I32,
-            F64Add | F64Sub | F64Mul | F64Div | F64Min | F64Max | F64Copysign | F64Abs
-            | F64Neg | F64Sqrt | F64Ceil | F64Floor | F64Trunc | F64Nearest => StackTy::F64,
+            F64Add | F64Sub | F64Mul | F64Div | F64Min | F64Max | F64Copysign | F64Abs | F64Neg
+            | F64Sqrt | F64Ceil | F64Floor | F64Trunc | F64Nearest => StackTy::F64,
             F64Eq | F64Ne | F64Lt | F64Le | F64Gt | F64Ge => StackTy::I32,
             I32WrapI64 => StackTy::I32,
         }
@@ -404,7 +384,10 @@ impl ValueOp {
     }
 
     pub fn ops_with_result(ty: StackTy) -> impl Iterator<Item = ValueOp> {
-        Self::all().iter().copied().filter(move |op| op.push() == ty)
+        Self::all()
+            .iter()
+            .copied()
+            .filter(move |op| op.push() == ty)
     }
 
     pub fn is_commutative(self) -> bool {
@@ -673,7 +656,6 @@ pub fn is_reachable(sig: &RuleSignature) -> bool {
     }
     available.contains(&sig.output)
 }
-
 
 /// Canonical `i64` carrier for an `f32` bit pattern (sign-extended).
 pub fn f32_bits_to_i64(bits: u32) -> i64 {

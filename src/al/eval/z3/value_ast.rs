@@ -3,10 +3,10 @@
 use super::{EvalError, SymEval, SymValue};
 use crate::al::ast::{NumType, Sign, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp};
 use crate::al::eval::value::AlValue;
-use crate::value::{RuleSignature, StackTy, ValueAst, ValueOp};
+use crate::value::{RuleSignature, ValueAst, ValueOp};
 use z3::ast::{Ast, BV, Bool};
 
-fn normalize_bv_width<'ctx>(ctx: &'ctx z3::Context, v: BV<'ctx>, out_w: u32) -> BV<'ctx> {
+fn normalize_bv_width<'ctx>(_ctx: &'ctx z3::Context, v: BV<'ctx>, out_w: u32) -> BV<'ctx> {
     let w = v.get_size();
     if w > out_w {
         v.extract(out_w - 1, 0)
@@ -290,16 +290,6 @@ impl<'ctx> SymEval<'ctx> {
         }
         Ok((c_val.extract(out_w - 1, 0), c_trap))
     }
-}
-
-pub fn eval_value_ast_z3<'ctx>(
-    ctx: &'ctx z3::Context,
-    sig: &RuleSignature,
-    ast: &ValueAst,
-    vars: &[BV<'ctx>],
-) -> Option<(BV<'ctx>, Bool<'ctx>)> {
-    let eval = SymEval::new(ctx, sig.clone());
-    eval.eval_value_ast(ast, vars).ok()
 }
 
 pub fn asts_valid_rewrite_z3<'ctx>(

@@ -4,22 +4,19 @@ mod context;
 mod value_ast;
 
 pub use context::z3_context;
-pub use value_ast::{asts_valid_rewrite_z3, eval_value_ast_z3};
+pub use value_ast::asts_valid_rewrite_z3;
 
 use super::env::Env;
 use super::error::EvalError;
 use super::value::AlValue;
 use crate::al::ast::{
-    Arg, BinOpCase, Expr, FuncA, Instr, InstrCond, LetLhs, NumType, Pred, RelOpCase, Sign,
-    UnOpCase, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp,
+    Arg, BinOpCase, Expr, FuncA, Instr, InstrCond, LetLhs, Pred, RelOpCase,
+    UnOpCase, WasmBinOp, WasmRelOp, WasmUnOp,
 };
 use crate::al::defs::lookup_func;
-use crate::al::I32_BITS;
-use crate::value::{RuleSignature, StackTy};
-use z3::ast::{Ast, BV, Bool, Int};
+use crate::value::RuleSignature;
 use z3::Context;
-
-const I32_WIDTH: u32 = I32_BITS;
+use z3::ast::{Ast, BV, Bool, Int};
 
 fn nat_width<'ctx>(v: &SymValue<'ctx>) -> Option<u32> {
     match v {
@@ -70,14 +67,6 @@ pub struct SymEval<'ctx> {
 impl<'ctx> SymEval<'ctx> {
     pub fn new(ctx: &'ctx Context, sig: RuleSignature) -> Self {
         Self { ctx, sig }
-    }
-
-    fn bitwidth_of(&self, ty: StackTy) -> u32 {
-        ty.bit_width()
-    }
-
-    fn al_num_type(&self, ty: StackTy) -> NumType {
-        ty.al_num_type()
     }
 
     pub fn call_func(
@@ -326,15 +315,10 @@ impl<'ctx> SymEval<'ctx> {
 
     fn eval_pred(&self, pred: &Pred, env: &mut SymEnv<'ctx>) -> Result<bool, EvalError> {
         match pred {
-            Pred::Eq(a, b) => Ok(self.values_equal(
-                &self.eval_expr(a, env)?,
-                &self.eval_expr(b, env)?,
-            )),
-            Pred::Lt(_, _)
-            | Pred::Le(_, _)
-            | Pred::Gt(_, _)
-            | Pred::Ge(_, _)
-            | Pred::Ne(_, _) => {
+            Pred::Eq(a, b) => {
+                Ok(self.values_equal(&self.eval_expr(a, env)?, &self.eval_expr(b, env)?))
+            }
+            Pred::Lt(_, _) | Pred::Le(_, _) | Pred::Gt(_, _) | Pred::Ge(_, _) | Pred::Ne(_, _) => {
                 let mut cenv = Env::new();
                 Ok(super::concrete::eval_pred(pred, &mut cenv)?)
             }
@@ -406,25 +390,19 @@ impl<'ctx> SymEval<'ctx> {
     fn values_equal(&self, a: &SymValue<'ctx>, b: &SymValue<'ctx>) -> bool {
         match (a, b) {
             (SymValue::Meta(x), SymValue::Meta(y)) => x == y,
-            (SymValue::Bv(x), SymValue::Bv(y)) => x
-                .simplify()
-                ._eq(&y.simplify())
-                .as_bool()
-                .unwrap_or(false),
+            (SymValue::Bv(x), SymValue::Bv(y)) => {
+                x.simplify()._eq(&y.simplify()).as_bool().unwrap_or(false)
+            }
+            (SymValue::Bool(x), SymValue::Bool(y)) => {
+                x.simplify().as_bool() == y.simplify().as_bool()
+            }
             _ => false,
         }
     }
 
-    fn eval_expr(
-        &self,
-        expr: &Expr,
-        env: &mut SymEnv<'ctx>,
-    ) -> Result<SymValue<'ctx>, EvalError> {
+    fn eval_expr(&self, expr: &Expr, env: &mut SymEnv<'ctx>) -> Result<SymValue<'ctx>, EvalError> {
         match expr {
-            Expr::VarE(name) => env
-                .get(name)
-                .cloned()
-                .ok_or(EvalError::UnknownVar(name)),
+            Expr::VarE(name) => env.get(name).cloned().ok_or(EvalError::UnknownVar(name)),
             Expr::NatLit(n) => Ok(SymValue::Bv(BV::from_u64(
                 self.ctx,
                 *n as u64,
@@ -444,7 +422,11 @@ impl<'ctx> SymEval<'ctx> {
             Expr::SingletonList(v) => Ok(SymValue::List(vec![self.eval_expr(v, env)?])),
             Expr::OptionalLen(v) => {
                 let len = self.eval_expr(v, env)?.list_len();
-                Ok(SymValue::Bv(BV::from_u64(self.ctx, len as u64, self.default_width())))
+                Ok(SymValue::Bv(BV::from_u64(
+                    self.ctx,
+                    len as u64,
+                    self.default_width(),
+                )))
             }
             Expr::Choose(v) => self
                 .eval_expr(v, env)?
@@ -534,11 +516,12 @@ impl<'ctx> SymEval<'ctx> {
             Arg::RelOp(r) => Ok(SymValue::Meta(AlValue::RelOp(*r))),
             Arg::TestOp(t) => Ok(SymValue::Meta(AlValue::TestOp(*t))),
             Arg::UnOp(u) => Ok(SymValue::Meta(AlValue::UnOp(*u))),
-            Arg::Var(name) => env
-                .get(name)
-                .cloned()
-                .ok_or(EvalError::UnknownVar(name)),
-            Arg::Nat(n) => Ok(SymValue::Bv(BV::from_u64(self.ctx, *n as u64, self.default_width()))),
+            Arg::Var(name) => env.get(name).cloned().ok_or(EvalError::UnknownVar(name)),
+            Arg::Nat(n) => Ok(SymValue::Bv(BV::from_u64(
+                self.ctx,
+                *n as u64,
+                self.default_width(),
+            ))),
             Arg::Sign(s) => Ok(SymValue::Meta(AlValue::Sign(*s))),
             Arg::ExpA(expr) => self.eval_expr(expr, env),
         }
@@ -562,11 +545,7 @@ impl<'ctx> SymEval<'ctx> {
         }
     }
 
-    fn int_of_expr(
-        &self,
-        expr: &Expr,
-        env: &mut SymEnv<'ctx>,
-    ) -> Result<Int<'ctx>, EvalError> {
+    fn int_of_expr(&self, expr: &Expr, env: &mut SymEnv<'ctx>) -> Result<Int<'ctx>, EvalError> {
         match self.eval_expr(expr, env)? {
             SymValue::Int(i) => Ok(i),
             SymValue::Bv(b) => Ok(b.to_int(true)),
@@ -576,10 +555,7 @@ impl<'ctx> SymEval<'ctx> {
 
     fn align_bv_pair(&self, a: BV<'ctx>, b: BV<'ctx>) -> (BV<'ctx>, BV<'ctx>) {
         let w = a.get_size().max(b.get_size());
-        (
-            self.coerce_bv_width(a, w),
-            self.coerce_bv_width(b, w),
-        )
+        (self.coerce_bv_width(a, w), self.coerce_bv_width(b, w))
     }
 
     fn coerce_bv_width(&self, v: BV<'ctx>, w: u32) -> BV<'ctx> {

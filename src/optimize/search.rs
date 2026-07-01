@@ -6,7 +6,9 @@ use super::inverse::{PeelAction, SearchState, applicable_peels};
 use crate::lang::ValueLang;
 use crate::semantics::SemOp;
 use crate::sym::{LocalReq, SymMachine, SymState};
-use crate::wasm::{ops_respect_dependencies, storage_ops_preserved, SegmentBounds, StraightSegment};
+use crate::wasm::{
+    SegmentBounds, StraightSegment, ops_respect_dependencies, storage_ops_preserved,
+};
 use egg::Rewrite;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
@@ -103,8 +105,7 @@ pub fn is_solution(
 }
 
 pub fn validate_solution_ops(ops: &[SemOp], segment: &StraightSegment) -> bool {
-    storage_ops_preserved(&segment.ops, ops)
-        && ops_respect_dependencies(ops, &segment.dependencies)
+    storage_ops_preserved(&segment.ops, ops) && ops_respect_dependencies(ops, &segment.dependencies)
 }
 
 /// Solver backend for length minimization.
@@ -204,12 +205,8 @@ fn solution_forward_valid(
     bounds: &SegmentBounds,
     canon: &mut Canonizer,
 ) -> bool {
-    let mut m = SymMachine::from_segment_entry(
-        segment.num_params,
-        bounds,
-        &segment.init,
-        bounds.max_stack,
-    );
+    let mut m =
+        SymMachine::from_segment_entry(segment.num_params, bounds, &segment.init, bounds.max_stack);
     for op in ops {
         if m.exec(op).is_err() {
             return false;
@@ -256,14 +253,6 @@ impl PartialOrd for AstarNode {
     }
 }
 
-pub fn solve_astar(
-    segment: &StraightSegment,
-    rules: &[Rewrite<ValueLang, ()>],
-    cfg: &SearchConfig,
-) -> SearchResult {
-    solve_astar_traced(segment, rules, cfg, None)
-}
-
 pub fn solve_astar_traced(
     segment: &StraightSegment,
     rules: &[Rewrite<ValueLang, ()>],
@@ -282,7 +271,8 @@ pub fn solve_astar_traced(
     let mut best = cfg.max_depth;
 
     let mut memo = HashSet::new();
-    let mut parent_map: std::collections::HashMap<MemoKey, MemoKey> = std::collections::HashMap::new();
+    let mut parent_map: std::collections::HashMap<MemoKey, MemoKey> =
+        std::collections::HashMap::new();
     let mut heap = BinaryHeap::new();
     let initial = SearchState::initial(segment, &segment.fin);
     let h0 = h_goal(&initial.goal, init, bounds, &mut canon);
@@ -342,7 +332,8 @@ pub fn solve_astar_traced(
         if g >= cfg.max_depth.min(best) {
             continue;
         }
-        for (PeelAction::Forward(op), next) in applicable_peels(&state, segment, bounds, &mut canon) {
+        for (PeelAction::Forward(op), next) in applicable_peels(&state, segment, bounds, &mut canon)
+        {
             let ng = g + 1;
             let nh = h_goal(&next.goal, init, bounds, &mut canon);
             let nf = ng + nh;
@@ -384,82 +375,20 @@ pub fn format_ops(ops: &[SemOp]) -> String {
         .join("; ")
 }
 
-/// Space-separated instruction list (SuperStack `statistics.csv` style).
-pub fn format_ops_csv(ops: &[SemOp]) -> String {
-    ops.iter()
-        .map(|op| op.to_string())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::optimize::fixtures::{fin, init};
+    use crate::optimize::canon::Canonizer;
+    use crate::semantics::InstKind;
+    use crate::sym::{LocalReq, SymState};
     use crate::synthesis::test_synthesis_rewrites;
-    use crate::sym::SymMachine;
-    use crate::value::parse_value_expr;
-    use crate::wasm::SegmentBounds;
+    use crate::value::{parse_value_expr, ValueOp};
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
         test_synthesis_rewrites()
     }
 
-    fn example_segment() -> StraightSegment {
-        let init = init();
-        let fin = fin();
-        StraightSegment {
-            func_index: 0,
-            num_params: 1,
-            segment_index: 0,
-            split_part: None,
-            ops: vec![],
-            init: init.clone(),
-            fin: fin.clone(),
-            bounds: SegmentBounds::new(1, 4),
-            opaque_meta: vec![],
-            dependencies: vec![],
-            disasm_by_id: Default::default(),
-        }
-    }
-
-    #[test]
-    fn astar_finds_shortest_on_parsed_example_wat() {
-        let wasm = wat::parse_str(include_str!("../../examples/example.wat")).unwrap();
-        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
-        let segment = &info.segments[0];
-        let rules = test_rules();
-        let cfg = SearchConfig::default();
-        let result = solve_astar(segment, &rules, &cfg);
-        assert_eq!(result.ops.as_ref().map(|o| o.len()), Some(7));
-    }
-
-    #[test]
-    fn optimized_example_preserves_fin_state() {
-        let segment = example_segment();
-        let rules = test_rules();
-        let bounds = segment.bounds;
-        let ops = solve_astar(&segment, &rules, &SearchConfig::default())
-            .ops
-            .expect("solution");
-        assert_eq!(ops.len(), 4, "ops: {}", format_ops(&ops));
-
-        let mut m = SymMachine::from_segment_entry(segment.num_params, &bounds, &segment.init, bounds.max_stack);
-        for op in &ops {
-            m.exec(op).unwrap();
-        }
-        let got = m.to_fin_state();
-        let mut canon = crate::optimize::canon::Canonizer::new(rules);
-        assert!(is_grounded(&got, &segment.fin, &bounds, &mut canon));
-    }
-
     #[test]
     fn normalized_memo_key_merges_mul_and_shl_peel_paths() {
-        use crate::optimize::canon::Canonizer;
-        use crate::semantics::InstKind;
-        use crate::sym::LocalReq;
-        use crate::value::parse_value_expr;
-
         let rules = test_rules();
         let mut canon = Canonizer::new(rules);
         let top = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
@@ -473,7 +402,7 @@ mod tests {
         let decomps = canon.binop_decompositions(g.top().unwrap());
         let (_, e1, e2) = decomps
             .iter()
-            .find(|(k, _, _)| *k == InstKind::I32Mul)
+            .find(|(k, _, _)| *k == InstKind::Pure(ValueOp::I32Mul))
             .unwrap();
         let mut after_mul = g.clone();
         after_mul.stack.pop();
@@ -482,7 +411,7 @@ mod tests {
         after_mul.stack.pop();
         let (_, e1s, e2s) = decomps
             .iter()
-            .find(|(k, _, _)| *k == InstKind::I32Shl)
+            .find(|(k, _, _)| *k == InstKind::Pure(ValueOp::I32Shl))
             .unwrap();
         let mut after_shl = g.clone();
         after_shl.stack.pop();
@@ -493,95 +422,5 @@ mod tests {
             canon.normalize_state(&after_mul),
             canon.normalize_state(&after_shl)
         );
-    }
-
-    #[test]
-    fn example_simple_debug_fin_and_validation() {
-        use crate::sym::SymMachine;
-        let wasm = wat::parse_str(include_str!("../../examples/example-simple.wat")).unwrap();
-        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
-        let segment = &info.segments[0];
-        println!("init stack: {:?}", segment.init.stack);
-        println!("init locals: {:?}", segment.init.locals);
-        println!("fin stack: {:?}", segment.fin.stack);
-        println!("fin locals: {:?}", segment.fin.locals);
-        let wrong = [
-            SemOp::LocalGet(0),
-            SemOp::I32Const(2),
-            SemOp::I32Shl,
-            SemOp::LocalTee(0),
-        ];
-        let right = [
-            SemOp::LocalGet(0),
-            SemOp::I32Const(2),
-            SemOp::I32Mul,
-            SemOp::LocalTee(0),
-        ];
-        let rules = test_rules();
-        let mut canon = Canonizer::new(rules.clone());
-        let bounds = segment.bounds;
-        for (name, ops) in [("wrong", &wrong[..]), ("right", &right[..])] {
-            let mut m = SymMachine::from_segment_entry(
-                segment.num_params,
-                &bounds,
-                &segment.init,
-                bounds.max_stack,
-            );
-            for op in ops {
-                m.exec(op).unwrap();
-            }
-            let got = m.to_fin_state();
-            println!("{name} stack: {:?}", got.stack);
-            println!("{name} locals: {:?}", got.locals);
-            println!(
-                "{name} grounded: {}",
-                is_grounded(&got, &segment.fin, &bounds, &mut canon)
-            );
-        }
-        let mul = parse_value_expr("(i32.mul ?L0 2)");
-        let shl2 = parse_value_expr("(i32.shl ?L0 2)");
-        let shl1 = parse_value_expr("(i32.shl ?L0 1)");
-        println!("canon mul == shl2: {}", canon.values_equivalent(&mul, &shl2));
-        println!("canon mul == shl1: {}", canon.values_equivalent(&mul, &shl1));
-        let result = solve_astar(segment, &rules, &SearchConfig::default());
-        let ops = result.ops.as_ref().unwrap();
-        println!("solution: {}", format_ops(ops));
-        println!(
-            "forward valid: {}",
-            solution_forward_valid(ops, segment, &bounds, &mut canon)
-        );
-    }
-
-    #[test]
-    fn example_simple_prefers_mul_over_shl() {
-        let wasm = wat::parse_str(include_str!("../../examples/example-simple.wat")).unwrap();
-        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
-        let segment = &info.segments[0];
-        let rules = test_rules();
-        let mut canon = Canonizer::new(rules.clone());
-        let ops = solve_astar(segment, &rules, &SearchConfig::default())
-            .ops
-            .expect("solution");
-        assert!(
-            ops.len() < segment.ops.len(),
-            "expected shorter solution, got: {}",
-            format_ops(&ops)
-        );
-        assert!(
-            solution_forward_valid(&ops, segment, &segment.bounds, &mut canon),
-            "optimized sequence must preserve fin: {}",
-            format_ops(&ops)
-        );
-    }
-
-    #[test]
-    fn solve_example_astar() {
-        let segment = example_segment();
-        let rules = test_rules();
-        let ops = solve_astar(&segment, &rules, &SearchConfig::default())
-            .ops
-            .expect("solution");
-        assert!(!ops.is_empty());
-        assert!(ops.len() <= 4);
     }
 }

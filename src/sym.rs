@@ -1,10 +1,10 @@
 //! Symbolic machine state and forward execution (shared by wasm parsing and optimization).
 
-use crate::lang::ValueLang;
-use crate::semantics::SemOp;
-use crate::value::parse_value_expr;
+use crate::lang::{F32Bits, F64Bits, ValueLang};
+use crate::semantics::{sem_to_value_op, SemOp};
+use crate::value::ValueOp;
 use crate::wasm::{OpaqueMeta, SegmentBounds};
-use egg::{Id, RecExpr};
+use egg::{Id, RecExpr, Symbol};
 use std::collections::{BTreeMap, HashMap};
 
 pub type ValueExpr = RecExpr<ValueLang>;
@@ -27,17 +27,12 @@ pub struct SymState {
 
 impl SymState {
     pub fn validate_bounds(&self, bounds: &SegmentBounds) -> bool {
-        self.stack.len() <= bounds.max_stack
-            && self
-                .locals
-                .keys()
-                .all(|&s| s <= bounds.max_local)
+        self.stack.len() <= bounds.max_stack && self.locals.keys().all(|&s| s <= bounds.max_local)
     }
 
     pub fn top(&self) -> Option<&ValueExpr> {
         self.stack.last()
     }
-
 }
 
 pub fn subtree_expr(expr: &ValueExpr, node: Id) -> ValueExpr {
@@ -51,9 +46,10 @@ fn go_subtree(
     src: &ValueExpr,
     id: Id,
     dst: &mut RecExpr<ValueLang>,
-    memo: &mut HashMap<Id, Id>,
+    memo: &mut HashMap<(*const ValueExpr, Id), Id>,
 ) -> Id {
-    if let Some(&mapped) = memo.get(&id) {
+    let key = (std::ptr::from_ref(src), id);
+    if let Some(&mapped) = memo.get(&key) {
         return mapped;
     }
     let mapped = match &src[id] {
@@ -72,7 +68,7 @@ fn go_subtree(
             dst.add(op.to_enode(&kids))
         }
     };
-    memo.insert(id, mapped);
+    memo.insert(key, mapped);
     mapped
 }
 
@@ -82,12 +78,44 @@ pub fn all_subtree_exprs(expr: &ValueExpr) -> Vec<ValueExpr> {
         .collect()
 }
 
+fn expr_root(expr: &ValueExpr) -> Id {
+    Id::from(expr.len() - 1)
+}
+
+fn symbol_expr(name: &str) -> ValueExpr {
+    let mut dst = RecExpr::default();
+    dst.add(ValueLang::Symbol(Symbol::from(name)));
+    dst
+}
+
+fn i32_const_expr(n: i32) -> ValueExpr {
+    let mut dst = RecExpr::default();
+    dst.add(ValueLang::I32Const(n));
+    dst
+}
+
+fn i64_const_expr(n: i64) -> ValueExpr {
+    let mut dst = RecExpr::default();
+    dst.add(ValueLang::I64Const(n));
+    dst
+}
+
+fn apply_value_op(vop: ValueOp, args: &[ValueExpr]) -> ValueExpr {
+    let mut dst = RecExpr::default();
+    let mut memo = HashMap::new();
+    let arg_ids: Vec<Id> = args
+        .iter()
+        .map(|arg| go_subtree(arg, expr_root(arg), &mut dst, &mut memo))
+        .collect();
+    dst.add(vop.to_enode(&arg_ids));
+    dst
+}
+
 #[derive(Debug, Clone)]
 pub struct SymMachine {
     stack: Vec<ValueExpr>,
     locals: BTreeMap<u32, ValueExpr>,
     total_locals: u32,
-    num_params: u32,
     max_stack: usize,
     segment_start_locals: BTreeMap<u32, ValueExpr>,
 }
@@ -102,12 +130,12 @@ pub enum ForwardError {
 
 impl SymMachine {
     pub fn local_symbol(slot: u32) -> ValueExpr {
-        parse_value_expr(&format!("?L{slot}"))
+        symbol_expr(&format!("?L{slot}"))
     }
 
     /// Unknown stack slot entering a straight-line block (`?in_0`, …; SuperStack `in_0`).
     pub fn stack_input_symbol(index: usize) -> ValueExpr {
-        parse_value_expr(&format!("?in_{index}"))
+        symbol_expr(&format!("?in_{index}"))
     }
 
     pub fn implicit_stack_inputs(count: usize) -> Vec<ValueExpr> {
@@ -120,7 +148,7 @@ impl SymMachine {
     }
 
     /// SuperStack-style entry: every local is an unknown `?L{i}` (not zero-initialized).
-    pub fn function_entry(num_params: u32, total_locals: u32, max_stack: usize) -> Self {
+    pub fn function_entry(_num_params: u32, total_locals: u32, max_stack: usize) -> Self {
         let mut locals = BTreeMap::new();
         for slot in 0..total_locals {
             locals.insert(slot, Self::local_symbol(slot));
@@ -129,7 +157,6 @@ impl SymMachine {
             stack: Vec::new(),
             locals,
             total_locals,
-            num_params,
             max_stack,
             segment_start_locals: BTreeMap::new(),
         }
@@ -161,6 +188,7 @@ impl SymMachine {
         self.segment_start_locals = self.locals.clone();
     }
 
+    #[cfg(test)]
     pub fn to_init_state(&self) -> SymState {
         let mut locals = BTreeMap::new();
         for slot in 0..self.total_locals {
@@ -194,18 +222,6 @@ impl SymMachine {
         }
     }
 
-    /// Init state for a sub-chunk: carried stack plus every local as `?L{i}` (SuperStack per-chunk frame).
-    pub fn to_chunk_init_state(&self) -> SymState {
-        let mut locals = BTreeMap::new();
-        for slot in 0..self.total_locals {
-            locals.insert(slot, LocalReq::Need(Self::local_symbol(slot)));
-        }
-        SymState {
-            stack: self.stack.clone(),
-            locals,
-        }
-    }
-
     /// Init state for a split sub-chunk: carried stack and actual symbolic local values.
     pub fn to_carried_init_state(&self) -> SymState {
         let mut locals = BTreeMap::new();
@@ -227,10 +243,27 @@ impl SymMachine {
     pub fn exec_with_meta(&mut self, op: &SemOp) -> Result<Option<OpaqueMeta>, ForwardError> {
         match op {
             SemOp::I32Const(n) => {
-                self.push_expr(parse_value_expr(&n.to_string()))?;
+                self.push_expr(i32_const_expr(*n))?;
                 Ok(None)
             }
-            SemOp::I32Add
+            SemOp::I64Const(n) => {
+                self.push_expr(i64_const_expr(*n))?;
+                Ok(None)
+            }
+            SemOp::F32Const(bits) => {
+                let mut expr = RecExpr::default();
+                expr.add(ValueLang::F32Const(F32Bits(*bits)));
+                self.push_expr(expr)?;
+                Ok(None)
+            }
+            SemOp::F64Const(bits) => {
+                let mut expr = RecExpr::default();
+                expr.add(ValueLang::F64Const(F64Bits(*bits)));
+                self.push_expr(expr)?;
+                Ok(None)
+            }
+            SemOp::Pure(_)
+            | SemOp::I32Add
             | SemOp::I32Sub
             | SemOp::I32Mul
             | SemOp::I32DivU
@@ -249,43 +282,19 @@ impl SymMachine {
             | SemOp::I32Ne
             | SemOp::I32LtS
             | SemOp::I32LeS
-            | SemOp::I32GtS => {
-                let b = self.pop()?;
-                let a = self.pop()?;
-                let expr = match op {
-                    SemOp::I32Add => parse_value_expr(&format!("(i32.add {a} {b})")),
-                    SemOp::I32Sub => parse_value_expr(&format!("(i32.sub {a} {b})")),
-                    SemOp::I32Mul => parse_value_expr(&format!("(i32.mul {a} {b})")),
-                    SemOp::I32DivU => parse_value_expr(&format!("(i32.div_u {a} {b})")),
-                    SemOp::I32DivS => parse_value_expr(&format!("(i32.div_s {a} {b})")),
-                    SemOp::I32RemU => parse_value_expr(&format!("(i32.rem_u {a} {b})")),
-                    SemOp::I32RemS => parse_value_expr(&format!("(i32.rem_s {a} {b})")),
-                    SemOp::I32Shl => parse_value_expr(&format!("(i32.shl {a} {b})")),
-                    SemOp::I32And => parse_value_expr(&format!("(i32.and {a} {b})")),
-                    SemOp::I32Or => parse_value_expr(&format!("(i32.or {a} {b})")),
-                    SemOp::I32Xor => parse_value_expr(&format!("(i32.xor {a} {b})")),
-                    SemOp::I32ShrU => parse_value_expr(&format!("(i32.shr_u {a} {b})")),
-                    SemOp::I32ShrS => parse_value_expr(&format!("(i32.shr_s {a} {b})")),
-                    SemOp::I32Rotl => parse_value_expr(&format!("(i32.rotl {a} {b})")),
-                    SemOp::I32Rotr => parse_value_expr(&format!("(i32.rotr {a} {b})")),
-                    SemOp::I32Eq => parse_value_expr(&format!("(i32.eq {a} {b})")),
-                    SemOp::I32Ne => parse_value_expr(&format!("(i32.ne {a} {b})")),
-                    SemOp::I32LtS => parse_value_expr(&format!("(i32.lt_s {a} {b})")),
-                    SemOp::I32LeS => parse_value_expr(&format!("(i32.le_s {a} {b})")),
-                    SemOp::I32GtS => parse_value_expr(&format!("(i32.gt_s {a} {b})")),
-                    _ => unreachable!(),
-                };
-                self.push_expr(expr)?;
-                Ok(None)
-            }
-            SemOp::I32Eqz | SemOp::I32Clz | SemOp::I32Ctz | SemOp::I32Popcnt => {
-                let a = self.pop()?;
-                let expr = match op {
-                    SemOp::I32Eqz => parse_value_expr(&format!("(i32.eqz {a})")),
-                    SemOp::I32Clz => parse_value_expr(&format!("(i32.clz {a})")),
-                    SemOp::I32Ctz => parse_value_expr(&format!("(i32.ctz {a})")),
-                    SemOp::I32Popcnt => parse_value_expr(&format!("(i32.popcnt {a})")),
-                    _ => unreachable!(),
+            | SemOp::I32GtS
+            | SemOp::I32Eqz
+            | SemOp::I32Clz
+            | SemOp::I32Ctz
+            | SemOp::I32Popcnt => {
+                let vop = sem_to_value_op(op).expect("pure op");
+                let expr = if vop.pops().len() == 2 {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    apply_value_op(vop, &[a, b])
+                } else {
+                    let a = self.pop()?;
+                    apply_value_op(vop, &[a])
                 };
                 self.push_expr(expr)?;
                 Ok(None)
@@ -330,7 +339,7 @@ impl SymMachine {
                 let addr = self.pop()?;
                 let sym = format!("?load_{id}");
                 let results = vec![sym.clone()];
-                self.push_expr(parse_value_expr(&sym))?;
+                self.push_expr(symbol_expr(&sym))?;
                 Ok(Some(OpaqueMeta::from_exec(
                     *id,
                     false,
@@ -349,10 +358,7 @@ impl SymMachine {
                 )))
             }
             SemOp::Call {
-                id,
-                pops,
-                pushes,
-                ..
+                id, pops, pushes, ..
             } => {
                 let mut inputs = Vec::with_capacity(*pops as usize);
                 for _ in 0..*pops {
@@ -363,25 +369,15 @@ impl SymMachine {
                 for i in 0..*pushes {
                     let sym = format!("?call_{id}_{i}");
                     results.push(sym.clone());
-                    self.push_expr(parse_value_expr(&sym))?;
+                    self.push_expr(symbol_expr(&sym))?;
                 }
-                Ok(Some(OpaqueMeta::from_exec(
-                    *id,
-                    true,
-                    inputs,
-                    results,
-                )))
+                Ok(Some(OpaqueMeta::from_exec(*id, true, inputs, results)))
             }
             SemOp::GlobalGet { id, .. } => {
                 let sym = format!("?global_get_{id}");
                 let results = vec![sym.clone()];
-                self.push_expr(parse_value_expr(&sym))?;
-                Ok(Some(OpaqueMeta::from_exec(
-                    *id,
-                    false,
-                    vec![],
-                    results,
-                )))
+                self.push_expr(symbol_expr(&sym))?;
+                Ok(Some(OpaqueMeta::from_exec(*id, false, vec![], results)))
             }
             SemOp::GlobalSet { id, .. } => {
                 let value = self.pop()?;
@@ -407,14 +403,9 @@ impl SymMachine {
                 for i in 0..*pushes {
                     let sym = format!("?opaque_{id}_{i}");
                     results.push(sym.clone());
-                    self.push_expr(parse_value_expr(&sym))?;
+                    self.push_expr(symbol_expr(&sym))?;
                 }
-                Ok(Some(OpaqueMeta::from_exec(
-                    *id,
-                    *storage,
-                    inputs,
-                    results,
-                )))
+                Ok(Some(OpaqueMeta::from_exec(*id, *storage, inputs, results)))
             }
         }
     }
@@ -436,7 +427,16 @@ impl SymMachine {
 mod tests {
     use super::*;
     use crate::optimize::fixtures::init;
+    use crate::value::parse_value_expr;
     use crate::wasm::SegmentBounds;
+
+    #[test]
+    fn apply_value_op_preserves_distinct_single_node_roots() {
+        let a = SymMachine::local_symbol(0);
+        let b = i32_const_expr(1);
+        let got = apply_value_op(ValueOp::I32Shl, &[a, b]);
+        assert_eq!(got.to_string(), "(i32.shl ?L0 1)");
+    }
 
     #[test]
     fn function_entry_matches_running_example_init() {
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn from_segment_entry_applies_carried_locals() {
-        let bounds = SegmentBounds::new(0, 4);
+        let bounds = SegmentBounds::new(5, 4);
         let mut init_locals = BTreeMap::new();
         for slot in 0..=4 {
             init_locals.insert(slot, LocalReq::Need(SymMachine::local_symbol(slot)));
@@ -465,6 +465,7 @@ mod tests {
             locals: init_locals,
         };
         let mut m = SymMachine::from_segment_entry(0, &bounds, &init, bounds.max_stack);
+        m.exec(&SemOp::LocalGet(3)).unwrap();
         m.exec(&SemOp::I32Const(1)).unwrap();
         m.exec(&SemOp::I32Add).unwrap();
         m.exec(&SemOp::LocalSet(3)).unwrap();
@@ -479,12 +480,28 @@ mod tests {
     }
 
     #[test]
+    fn i64_add_builds_expr_tree_not_opaque() {
+        let bounds = SegmentBounds::new(1, 8);
+        let mut m = SymMachine::function_entry(0, 1, bounds.max_stack);
+        m.begin_segment();
+        m.exec(&SemOp::I64Const(1)).unwrap();
+        m.exec(&SemOp::I64Const(2)).unwrap();
+        m.exec(&SemOp::Pure(crate::value::ValueOp::I64Add))
+            .unwrap();
+        let top = m.to_fin_state().stack.last().expect("top").to_string();
+        assert!(top.contains("i64.add"), "expected expr tree, got {top}");
+        assert!(!top.contains("?opaque_"), "i64.add must not be opaque: {top}");
+    }
+
+    #[test]
     fn implicit_stack_inputs_seed_local_tee() {
         let bounds = SegmentBounds::new(3, 4);
         let mut machine = SymMachine::function_entry(0, 3, bounds.max_stack);
         machine.seed_implicit_stack_inputs(1);
         machine.begin_segment();
-        machine.exec(&SemOp::LocalTee(2)).expect("local.tee with implicit input");
+        machine
+            .exec(&SemOp::LocalTee(2))
+            .expect("local.tee with implicit input");
         let fin = machine.to_fin_state();
         assert_eq!(fin.stack.len(), 1);
         assert!(matches!(

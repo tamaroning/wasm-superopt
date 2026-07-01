@@ -2,7 +2,7 @@
 
 use crate::semantics::SemOp;
 use crate::wasm::segment::OpaqueMeta;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MemWidth {
@@ -58,7 +58,12 @@ fn are_dependent_mem(a: &MemAccess, b: &MemAccess) -> bool {
         effective_addr(&b.addr_symbol, b.offset),
     ) {
         (Some(e1), Some(e2)) => overlap_address(e1, w1, e2, w2),
-        _ => a.mem == b.mem,
+        (None, None) => {
+            // Same symbolic base may alias; distinct symbols are independent.
+            !a.addr_symbol.is_empty() && a.addr_symbol == b.addr_symbol
+        }
+        // One concrete and one symbolic address — conservative (SuperStack).
+        _ => true,
     }
 }
 
@@ -73,24 +78,42 @@ fn are_dependent_var(a: &VarAccess, b: &VarAccess) -> bool {
 }
 
 fn simplify_dependencies(deps: &[(u32, u32)]) -> Vec<(u32, u32)> {
-    let mut edges: BTreeSet<(u32, u32)> = deps.iter().copied().collect();
-    loop {
-        let mut changed = false;
-        let current: Vec<_> = edges.iter().copied().collect();
-        for &(a, b) in &current {
-            for &(c, d) in &current {
-                if b == c && edges.contains(&(a, d)) {
-                    if edges.remove(&(a, b)) {
-                        changed = true;
-                    }
-                }
+    if deps.len() <= 1 {
+        return deps.to_vec();
+    }
+
+    let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for &(a, b) in deps {
+        adj.entry(a).or_default().insert(b);
+    }
+
+    // Reachability from each node (SuperStack: nx.transitive_reduction).
+    let mut reach: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for start in adj.keys().copied().collect::<Vec<_>>() {
+        let mut seen = HashSet::new();
+        let mut stack = vec![start];
+        while let Some(n) = stack.pop() {
+            if !seen.insert(n) {
+                continue;
+            }
+            if let Some(nexts) = adj.get(&n) {
+                stack.extend(nexts);
             }
         }
-        if !changed {
-            break;
-        }
+        reach.insert(start, seen);
     }
-    edges.into_iter().collect()
+
+    deps.iter()
+        .copied()
+        .filter(|&(a, b)| {
+            let Some(succ) = adj.get(&a) else {
+                return true;
+            };
+            !succ.iter().any(|&c| {
+                c != b && reach.get(&c).is_some_and(|r| r.contains(&b))
+            })
+        })
+        .collect()
 }
 
 fn collect_mem_accesses(ops: &[SemOp], meta: &[OpaqueMeta]) -> Vec<MemAccess> {
@@ -249,4 +272,30 @@ pub fn storage_ops_preserved(original: &[SemOp], optimized: &[SemOp]) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn simplify_dependencies_dense_call_edges_is_fast() {
+        let n = 500u32;
+        let mut deps = Vec::new();
+        for i in 0..n {
+            for j in i + 1..n {
+                deps.push((i, j));
+            }
+        }
+        let t0 = Instant::now();
+        let out = simplify_dependencies(&deps);
+        eprintln!(
+            "simplify dense n=500: {:.3}ms -> {} edges",
+            t0.elapsed().as_secs_f64() * 1000.0,
+            out.len()
+        );
+        assert!(t0.elapsed().as_secs_f32() < 1.0, "took {:?}", t0.elapsed());
+        assert_eq!(out.len(), (n - 1) as usize);
+    }
 }

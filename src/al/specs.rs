@@ -9,6 +9,18 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         SemOp::I32Const(n) => Cow::Owned(AlSpec {
             steps: vec![AlStep::Push(AlExpr::ConstI32(*n))],
         }),
+        SemOp::I64Const(n) => Cow::Owned(AlSpec {
+            steps: vec![AlStep::Push(AlExpr::ConstI64(*n))],
+        }),
+        SemOp::F32Const(bits) => Cow::Owned(AlSpec {
+            steps: vec![AlStep::Push(AlExpr::ConstF32(*bits))],
+        }),
+        SemOp::F64Const(bits) => Cow::Owned(AlSpec {
+            steps: vec![AlStep::Push(AlExpr::ConstF64(*bits))],
+        }),
+        SemOp::Pure(v) => {
+            panic!("pure {v:?} uses meta AL (Step_pure), not flat AlSpec")
+        }
         SemOp::I32Add
         | SemOp::I32Sub
         | SemOp::I32Mul
@@ -26,11 +38,7 @@ pub fn al_spec_for(op: &SemOp) -> Cow<'_, AlSpec> {
         | SemOp::I32Rotr => {
             panic!("binop {op:?} uses meta AL (Step_pure/binop), not flat AlSpec")
         }
-        SemOp::I32Eq
-        | SemOp::I32Ne
-        | SemOp::I32LtS
-        | SemOp::I32LeS
-        | SemOp::I32GtS => {
+        SemOp::I32Eq | SemOp::I32Ne | SemOp::I32LtS | SemOp::I32LeS | SemOp::I32GtS => {
             panic!("relop {op:?} uses meta AL (Step_pure/relop), not flat AlSpec")
         }
         SemOp::I32Eqz => {

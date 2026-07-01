@@ -117,6 +117,10 @@ pub fn format_op_superstack(op: &SemOp, disasm_by_id: &HashMap<u32, String>) -> 
     match op {
         SemOp::Drop => "drop".to_string(),
         SemOp::I32Const(n) => format!("i32.const[{n}]"),
+        SemOp::I64Const(n) => format!("i64.const[{n}]"),
+        SemOp::F32Const(bits) => format!("f32.const[{bits}]"),
+        SemOp::F64Const(bits) => format!("f64.const[{bits}]"),
+        SemOp::Pure(v) => v.pattern_name().to_string(),
         SemOp::I32Add => "i32.add".to_string(),
         SemOp::I32Sub => "i32.sub".to_string(),
         SemOp::I32Mul => "i32.mul".to_string(),
