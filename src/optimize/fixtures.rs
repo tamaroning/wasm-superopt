@@ -1,7 +1,7 @@
 //! Parsed `examples/example.wat` / `example-opt.wat` for unit tests (idea.md §12).
 
 use crate::sym::SymState;
-use crate::wasm::{materialize_segments, parse_wasm_bytes, StraightSegment};
+use crate::wasm::{StraightSegment, materialize_segments, parse_wasm_bytes};
 use std::sync::OnceLock;
 
 const BLOATED_WAT: &str = include_str!("../../examples/example.wat");
@@ -13,7 +13,10 @@ fn bloated_segment() -> &'static StraightSegment {
         let wasm = wat::parse_str(BLOATED_WAT).expect("examples/example.wat must parse");
         let info = parse_wasm_bytes(&wasm).expect("examples/example.wat must yield wasm");
         assert_eq!(info.segments.len(), 1);
-        materialize_segments(&info.segments, 1).into_iter().next().unwrap()
+        materialize_segments(&info.segments, 1)
+            .into_iter()
+            .next()
+            .unwrap()
     })
 }
 

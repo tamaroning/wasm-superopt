@@ -1,7 +1,7 @@
 //! Value canonicalization via equality saturation.
 
 use crate::lang::ValueLang;
-use crate::semantics::{inst_kind_from_value_op, InstKind};
+use crate::semantics::{InstKind, inst_kind_from_value_op};
 use crate::value::ValueOp;
 use egg::{AstSize, Extractor, Id, RecExpr, Rewrite, Runner};
 use std::collections::{HashMap, HashSet};
@@ -253,9 +253,9 @@ mod tests {
         let top = parse_value_expr("(i64.mul ?L0 2)");
         let decomps = canon.binop_decompositions(&top);
         assert!(
-            decomps.iter().any(|(k, _, _)| {
-                matches!(k, InstKind::Pure(crate::value::ValueOp::I64Mul))
-            }),
+            decomps
+                .iter()
+                .any(|(k, _, _)| { matches!(k, InstKind::Pure(crate::value::ValueOp::I64Mul)) }),
             "expected i64.mul decomposition: {decomps:?}"
         );
     }
@@ -284,7 +284,10 @@ mod tests {
         let b = parse_value_expr("(i32.add ?L1 (i32.sub ?L4 1))");
         let parts = canon.equiv_partition(&[a.clone(), b.clone()]);
         assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0], parts[1], "commutative add operands should share e-class");
+        assert_eq!(
+            parts[0], parts[1],
+            "commutative add operands should share e-class"
+        );
     }
 
     #[test]

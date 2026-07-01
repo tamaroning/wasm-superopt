@@ -23,9 +23,7 @@ pub use derive::{
     derive_rule_local_set_spec, derive_rule_local_tee_spec, derive_rule_relop_spec,
     derive_rule_testop_spec, derive_rule_unop_spec,
 };
-pub use eval::{
-    asts_valid_rewrite_z3, eval_value_ast_concrete_sig, z3_context,
-};
+pub use eval::{asts_valid_rewrite_z3, eval_value_ast_concrete_sig, z3_context};
 pub use ir::format_al_pretty;
 pub use policy::STRAIGHT_LINE_EMBED;
 pub use specs::al_spec_for;

@@ -16,11 +16,7 @@ mod tests {
             elapsed.as_secs_f64(),
             info.segments.len()
         );
-        assert!(
-            elapsed.as_secs_f32() < 1.0,
-            "fast parse took {:?}",
-            elapsed
-        );
+        assert!(elapsed.as_secs_f32() < 1.0, "fast parse took {:?}", elapsed);
     }
 
     #[test]

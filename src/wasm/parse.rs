@@ -2,8 +2,7 @@
 
 use crate::semantics::SemOp;
 use crate::wasm::stack_analysis::{
-    ModuleStackTypes, operator_is_storage, operator_stack_effect_with_types,
-    stack_bounds_operators,
+    ModuleStackTypes, operator_is_storage, operator_stack_effect_with_types, stack_bounds_operators,
 };
 use crate::wasm::superstack_disasm::operator_disasm;
 use crate::wasm::{RawSegment, SegmentBounds};
@@ -445,8 +444,8 @@ fn classify_operator(op: &Operator<'_>, ctx: &mut OpClassCtx<'_>) -> OpClass {
 mod tests {
     use super::*;
     use crate::optimize::format_ops;
-    use crate::wasm::materialize_segments;
     use crate::wasm::StraightSegment;
+    use crate::wasm::materialize_segments;
 
     fn wat_to_wasm(wat: &str) -> Vec<u8> {
         wat::parse_str(wat).expect("wat parse")

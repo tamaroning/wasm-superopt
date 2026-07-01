@@ -59,11 +59,7 @@ impl SearchTrace {
         let id = self.nodes.len() as u32;
         let label = format_node_label(state, cost, kind);
         self.key_to_id.insert(key.clone(), id);
-        self.nodes.push(TraceNode {
-            id,
-            label,
-            kind,
-        });
+        self.nodes.push(TraceNode { id, label, kind });
         id
     }
 
@@ -228,4 +224,3 @@ fn dot_escape(s: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
 }
-

@@ -265,9 +265,7 @@ fn parse_rewrite(name: &str, lhs: &str, rhs: &str) -> Result<Rewrite<ValueLang, 
 mod tests {
     use super::*;
     use crate::semantics::StackTy;
-    use crate::value::{
-        ValueAst, ValueOp, is_ast_rewrite_pair, is_directed_ast_pair,
-    };
+    use crate::value::{ValueAst, ValueOp, is_ast_rewrite_pair, is_directed_ast_pair};
 
     #[test]
     fn constant_fold_rhs_allowed_in_rewrite_pair() {

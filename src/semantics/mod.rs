@@ -1,13 +1,14 @@
 //! Centralized Wasm instruction semantics: stack types, specs, and synthesis config.
 
-mod types;
 mod pure_ops;
+mod types;
 
-pub use types::{InstKind, InstSpec, SemOp, StackTy};
 pub use pure_ops::{
-    classify_pure_operator, const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op, sat_pure_ops, sem_from_inst_kind, sem_to_value_op, value_op_from_inst_kind, value_op_is_binop, value_op_is_unop,
-    value_op_to_sem,
+    classify_pure_operator, const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op,
+    sat_pure_ops, sem_from_inst_kind, sem_to_value_op, value_op_from_inst_kind, value_op_is_binop,
+    value_op_is_unop, value_op_to_sem,
 };
+pub use types::{InstKind, InstSpec, SemOp, StackTy};
 
 use crate::al::{
     NumType, STRAIGHT_LINE_EMBED, Sign, WasmBinOp, WasmRelOp, WasmTestOp, WasmUnOp, al_spec_for,
@@ -69,10 +70,7 @@ pub fn spec_for(op: &SemOp) -> InstSpec {
         return spec_for_pure(v);
     }
     match op {
-        SemOp::I32Const(_)
-        | SemOp::I64Const(_)
-        | SemOp::F32Const(_)
-        | SemOp::F64Const(_) => {
+        SemOp::I32Const(_) | SemOp::I64Const(_) | SemOp::F32Const(_) | SemOp::F64Const(_) => {
             let al = al_spec_for(op);
             derive_inst_spec(&al, &STRAIGHT_LINE_EMBED)
         }
@@ -201,12 +199,7 @@ pub fn synthesis_const_exprs() -> Vec<crate::sym::ValueExpr> {
     for &c in synthesis_constants() {
         out.push(parse_value_expr(&c.to_string()));
     }
-    for ty in [
-        StackTy::I32,
-        StackTy::I64,
-        StackTy::F32,
-        StackTy::F64,
-    ] {
+    for ty in [StackTy::I32, StackTy::I64, StackTy::F32, StackTy::F64] {
         for &v in synthesis_const_values(ty) {
             match ty {
                 StackTy::I32 => out.push(parse_value_expr(&v.to_string())),

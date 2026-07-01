@@ -2,8 +2,8 @@
 
 use crate::al::ast::{NumType, Sign, WasmBinOp};
 use crate::al::eval::concrete::call_func;
-use crate::al::eval::value::AlValue;
 use crate::al::eval::concrete::eval_value_ast_concrete;
+use crate::al::eval::value::AlValue;
 use crate::semantics::StackTy;
 use crate::value::{RuleSignature, ValueAst, ValueOp, asts_valid_rewrite_z3};
 

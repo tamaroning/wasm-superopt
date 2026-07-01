@@ -11,8 +11,8 @@ pub use ops::{
     RuleSignature, ValueOp, enumerate_signatures, f32_bits_to_i64, f64_bits_to_i64, is_reachable,
 };
 
-use crate::al::eval_value_ast_concrete_sig;
 use crate::al::asts_valid_rewrite_z3 as al_asts_valid_rewrite_z3;
+use crate::al::eval_value_ast_concrete_sig;
 use crate::lang::ValueLang;
 use egg::RecExpr;
 

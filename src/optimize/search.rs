@@ -168,11 +168,8 @@ pub fn opaque_inputs_equivalent(
     segment: &StraightSegment,
     canon: &mut Canonizer,
 ) -> bool {
-    let expected: HashMap<u32, &OpaqueMeta> = segment
-        .opaque_meta
-        .iter()
-        .map(|m| (m.id, m))
-        .collect();
+    let expected: HashMap<u32, &OpaqueMeta> =
+        segment.opaque_meta.iter().map(|m| (m.id, m)).collect();
 
     let exec_bounds = scratch_extended_bounds(&segment.bounds, ops);
     let mut m = SymMachine::from_segment_entry(
@@ -213,11 +210,7 @@ pub fn opaque_inputs_equivalent(
 }
 
 /// Full candidate validation: structural checks, opaque operand equivalence, and `fin` grounding.
-pub fn solution_valid(
-    ops: &[SemOp],
-    segment: &StraightSegment,
-    canon: &mut Canonizer,
-) -> bool {
+pub fn solution_valid(ops: &[SemOp], segment: &StraightSegment, canon: &mut Canonizer) -> bool {
     validate_solution_ops(ops, segment)
         && opaque_inputs_equivalent(ops, segment, canon)
         && solution_forward_valid(ops, segment, &segment.bounds, canon)
@@ -525,7 +518,7 @@ mod tests {
     use crate::semantics::InstKind;
     use crate::sym::{LocalReq, SymState};
     use crate::synthesis::test_synthesis_rewrites;
-    use crate::value::{parse_value_expr, ValueOp};
+    use crate::value::{ValueOp, parse_value_expr};
 
     fn test_rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
         test_synthesis_rewrites()

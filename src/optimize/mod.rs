@@ -17,13 +17,13 @@ use egg::Rewrite;
 pub use sat::{
     classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv, profile_sat,
 };
-pub use statistics::block_id;
 use search::solve_astar_traced;
 pub use search::{
     Backend, DEFAULT_MAX_DEPTH, DEFAULT_SCRATCH_LOCALS, DEFAULT_TIMEOUT_BASE_SECS,
     DIRECT_TIMEOUT_SECS, SearchConfig, format_ops, max_sat_len_for_split,
 };
 pub use search_graph::SearchTrace;
+pub use statistics::block_id;
 pub use statistics::{statistics_rows, write_statistics_csv};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -333,8 +333,8 @@ mod tests {
     use super::*;
     use crate::optimize::search::segment_timeout_secs;
     use crate::semantics::SemOp;
-    use crate::wasm::ops_respect_dependencies;
     use crate::wasm::materialize_segments;
+    use crate::wasm::ops_respect_dependencies;
     use crate::wasm::parse_wasm_bytes;
 
     #[test]
@@ -367,7 +367,10 @@ mod tests {
         let info = parse_wasm_bytes(&wasm).expect("parse");
         assert_eq!(info.segments.len(), 1);
         assert_eq!(info.segments[0].original_len(), 18);
-        assert_eq!(materialize_segments(&info.segments, 1)[0].original_len(), 18);
+        assert_eq!(
+            materialize_segments(&info.segments, 1)[0].original_len(),
+            18
+        );
     }
 
     #[test]

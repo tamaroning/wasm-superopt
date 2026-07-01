@@ -3,7 +3,7 @@
 use super::ir::{AlCond, AlSpec, AlStep};
 use super::policy::EmbeddingPolicy;
 use super::util::is_trap_else_push;
-use crate::semantics::{value_op_from_inst_kind, InstKind, InstSpec, StackTy};
+use crate::semantics::{InstKind, InstSpec, StackTy, value_op_from_inst_kind};
 use crate::value::ValueOp;
 
 const POPS_0: &[StackTy] = &[];
@@ -145,7 +145,10 @@ pub fn derive_inst_spec(al: &AlSpec, policy: &EmbeddingPolicy) -> InstSpec {
 pub fn derive_rule_binop_spec(kind: InstKind) -> InstSpec {
     let op = value_op_from_inst_kind(kind).expect("derive_rule_binop_spec");
     assert_eq!(op.pops().len(), 2, "derive_rule_binop_spec: {kind:?}");
-    assert!(!is_relop(op) && !is_testop(op), "derive_rule_binop_spec: {kind:?}");
+    assert!(
+        !is_relop(op) && !is_testop(op),
+        "derive_rule_binop_spec: {kind:?}"
+    );
     InstSpec {
         kind,
         pops: op.pops(),

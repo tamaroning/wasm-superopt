@@ -2,7 +2,7 @@
 
 use crate::al::eval_value_ast_concrete_sig;
 use crate::lang::{F32Bits, F64Bits, ValueLang};
-use crate::semantics::{sem_to_value_op, SemOp, StackTy};
+use crate::semantics::{SemOp, StackTy, sem_to_value_op};
 use crate::value::{RuleSignature, ValueAst, ValueOp};
 use crate::wasm::{OpaqueMeta, SegmentBounds};
 use egg::{Id, RecExpr, Symbol};
@@ -561,11 +561,13 @@ mod tests {
         m.begin_segment();
         m.exec(&SemOp::I64Const(1)).unwrap();
         m.exec(&SemOp::I64Const(2)).unwrap();
-        m.exec(&SemOp::Pure(crate::value::ValueOp::I64Add))
-            .unwrap();
+        m.exec(&SemOp::Pure(crate::value::ValueOp::I64Add)).unwrap();
         let top = m.to_fin_state().stack.last().expect("top").to_string();
         assert_eq!(top, "3");
-        assert!(!top.contains("?opaque_"), "i64.add must not be opaque: {top}");
+        assert!(
+            !top.contains("?opaque_"),
+            "i64.add must not be opaque: {top}"
+        );
     }
 
     #[test]

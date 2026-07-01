@@ -24,12 +24,12 @@ use super::canon::{CanonId, Canonizer};
 use super::search::{SearchConfig, SearchResult, solution_valid};
 use crate::lang::ValueLang;
 use crate::semantics::{
-    const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op, sat_pure_ops, sem_from_inst_kind,
-    sem_to_value_op, synthesis_const_exprs, value_op_from_inst_kind, value_op_is_binop,
-    value_op_is_unop, InstKind, SemOp, StackTy,
+    InstKind, SemOp, StackTy, const_stack_ty, inst_kind_from_sem, inst_kind_from_value_op,
+    sat_pure_ops, sem_from_inst_kind, sem_to_value_op, synthesis_const_exprs,
+    value_op_from_inst_kind, value_op_is_binop, value_op_is_unop,
 };
 use crate::sym::{LocalReq, SymMachine, SymState, ValueExpr, all_subtree_exprs};
-use crate::value::{parse_value_expr, ValueOp};
+use crate::value::{ValueOp, parse_value_expr};
 use crate::wasm::{OpaqueMeta, StraightSegment};
 use cadical::{Solver, Timeout};
 use egg::{Id, Runner};
@@ -101,12 +101,7 @@ fn types_in_segment(segment: &StraightSegment) -> HashSet<StackTy> {
             types.insert(v.push());
         }
     }
-    for e in segment
-        .init
-        .stack
-        .iter()
-        .chain(segment.fin.stack.iter())
-    {
+    for e in segment.init.stack.iter().chain(segment.fin.stack.iter()) {
         if let Some(ty) = stack_ty_of_expr(e) {
             types.insert(ty);
         }
@@ -130,18 +125,12 @@ fn types_in_segment(segment: &StraightSegment) -> HashSet<StackTy> {
 fn synthesis_const_exprs_for_types(types: &HashSet<StackTy>) -> Vec<ValueExpr> {
     synthesis_const_exprs()
         .into_iter()
-        .filter(|e| {
-            stack_ty_of_expr(e)
-                .is_some_and(|ty| types.contains(&ty))
-        })
+        .filter(|e| stack_ty_of_expr(e).is_some_and(|ty| types.contains(&ty)))
         .collect()
 }
 
 /// Types present in `V` or the original segment — used to prune the SAT op tables.
-fn types_in_segment_and_vocab(
-    segment: &StraightSegment,
-    vocab: &Vocab,
-) -> HashSet<StackTy> {
+fn types_in_segment_and_vocab(segment: &StraightSegment, vocab: &Vocab) -> HashSet<StackTy> {
     let mut types = types_in_segment(segment);
     for e in &vocab.reals {
         if let Some(ty) = stack_ty_of_expr(e) {
@@ -590,9 +579,10 @@ fn merge_unop_edge(ops: &mut Vec<SatOp>, kind: InstKind, edge: (usize, usize)) {
 }
 
 fn ensure_const_op(ops: &mut Vec<SatOp>, sem: &SemOp, val: usize) {
-    if ops.iter().any(|o| {
-        matches!(o, SatOp::Const { sem: s, val: v } if sem_eq_const(s, sem) && *v == val)
-    }) {
+    if ops
+        .iter()
+        .any(|o| matches!(o, SatOp::Const { sem: s, val: v } if sem_eq_const(s, sem) && *v == val))
+    {
         return;
     }
     ops.push(SatOp::Const {
@@ -620,10 +610,7 @@ fn merge_trace_witness_tables(
     );
     for op in &segment.ops {
         match op {
-            SemOp::I32Const(_)
-            | SemOp::I64Const(_)
-            | SemOp::F32Const(_)
-            | SemOp::F64Const(_) => {
+            SemOp::I32Const(_) | SemOp::I64Const(_) | SemOp::F32Const(_) | SemOp::F64Const(_) => {
                 let expr = const_expr(op)?;
                 let val = vocab.real_of_expr(canon, &expr)?;
                 ensure_const_op(ops, op, val);
@@ -720,7 +707,11 @@ fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
     (seeds, max_height)
 }
 
-fn build_vocab(segment: &StraightSegment, canon: &mut Canonizer, deadline: Instant) -> Option<(Vocab, usize)> {
+fn build_vocab(
+    segment: &StraightSegment,
+    canon: &mut Canonizer,
+    deadline: Instant,
+) -> Option<(Vocab, usize)> {
     build_vocab_with_limit(segment, canon, max_vocab_for_segment(segment), deadline)
 }
 
@@ -978,8 +969,7 @@ fn build_ops(
         let mut edges = Vec::new();
         for a in 0..n {
             let reps = lookup_all(uni_ids[ki][a]);
-            if !reps.is_empty() {
-                let res = *reps.iter().min().unwrap();
+            for &res in reps {
                 edges.push((a, res));
             }
         }
@@ -992,8 +982,7 @@ fn build_ops(
         for a1 in 0..n {
             for a0 in 0..n {
                 let reps = lookup_all(bin_ids[ki][a1 * n + a0]);
-                if !reps.is_empty() {
-                    let res = *reps.iter().min().unwrap();
+                for &res in reps {
                     edges.push((a1, a0, res));
                 }
             }
@@ -1045,15 +1034,28 @@ fn equiv_reals(vocab: &Vocab, req: usize) -> Vec<usize> {
         .collect()
 }
 
+fn pin_stack_equiv(cnf: &mut Cnf, dims: &Dims, vocab: &Vocab, i: usize, j: usize, req: usize) {
+    let lits = equiv_reals(vocab, req)
+        .into_iter()
+        .map(|v| dims.y(i, j, v))
+        .collect();
+    cnf.add(lits);
+}
+
+fn pin_local_equiv(cnf: &mut Cnf, dims: &Dims, vocab: &Vocab, i: usize, rr: usize, req: usize) {
+    let lits = equiv_reals(vocab, req)
+        .into_iter()
+        .map(|v| dims.w(i, rr, v))
+        .collect();
+    cnf.add(lits);
+}
+
 /// Pin one SAT op per original instruction step (`x_{i,o} = 1`).
 fn sat_op_index_for_orig(ops: &[SatOp], sem: &SemOp) -> Option<usize> {
     match sem {
-        SemOp::I32Const(_)
-        | SemOp::I64Const(_)
-        | SemOp::F32Const(_)
-        | SemOp::F64Const(_) => ops.iter().position(|o| {
-            matches!(o, SatOp::Const { sem: s, .. } if sem_eq_const(s, sem))
-        }),
+        SemOp::I32Const(_) | SemOp::I64Const(_) | SemOp::F32Const(_) | SemOp::F64Const(_) => ops
+            .iter()
+            .position(|o| matches!(o, SatOp::Const { sem: s, .. } if sem_eq_const(s, sem))),
         SemOp::LocalGet(s) => ops
             .iter()
             .position(|o| matches!(o, SatOp::Get(slot) if slot == s)),
@@ -1195,7 +1197,7 @@ fn encode(
     for j in 0..h {
         if let Some(e) = stack_expr_at(fin, j) {
             let v = vocab.real_of_expr(canon, e)?;
-            cnf.unit(dims.y(l, j, v));
+            pin_stack_equiv(&mut cnf, dims, vocab, l, j, v);
         } else {
             cnf.unit(dims.y(l, j, bot));
         }
@@ -1208,7 +1210,7 @@ fn encode(
         match fin.locals.get(&(rr as u32)) {
             Some(LocalReq::Need(v)) => {
                 let idx = vocab.real_of_expr(canon, v)?;
-                cnf.unit(dims.w(l, rr, idx));
+                pin_local_equiv(&mut cnf, dims, vocab, l, rr, idx);
             }
             Some(LocalReq::DontCare) => {
                 // Explicitly dead at exit → unconstrained.
@@ -1219,7 +1221,7 @@ fn encode(
                 match init.locals.get(&(rr as u32)) {
                     Some(LocalReq::Need(v)) => {
                         let idx = vocab.real_of_expr(canon, v)?;
-                        cnf.unit(dims.w(l, rr, idx));
+                        pin_local_equiv(&mut cnf, dims, vocab, l, rr, idx);
                     }
                     _ => cnf.unit(dims.w(l, rr, star)),
                 }
@@ -1282,10 +1284,20 @@ fn encode(
                 }
                 SatOp::Unop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
-                    let mut domain = vec![-xio];
+                    let mut by_arg: HashMap<usize, Vec<usize>> = HashMap::new();
                     for &(a, res) in edges {
+                        by_arg.entry(a).or_default().push(res);
+                    }
+                    for (&a, results) in &by_arg {
+                        let mut clause = vec![-xio, -dims.y(i - 1, 0, a)];
+                        for &res in results {
+                            clause.push(dims.y(i, 0, res));
+                        }
+                        cnf.add(clause);
+                    }
+                    let mut domain = vec![-xio];
+                    for &a in by_arg.keys() {
                         domain.push(dims.y(i - 1, 0, a));
-                        cnf.add(vec![-xio, -dims.y(i - 1, 0, a), dims.y(i, 0, res)]);
                     }
                     // Domain miss or ⊤ operand → result is ⊤ (out-of-vocab sink).
                     domain.push(dims.y(i, 0, top));
@@ -1301,16 +1313,19 @@ fn encode(
                 SatOp::Binop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     cnf.add(vec![-xio, -dims.y(i - 1, 1, bot)]);
-                    // Total function: positive real→real edges + per-a1 domain with ⊤ fallback.
+                    // Total relation: positive real→one real result + per-a1 domain with ⊤ fallback.
+                    let mut by_pair: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
                     let mut by_a1: HashMap<usize, Vec<usize>> = HashMap::new();
                     for &(a1, a0, res) in edges {
+                        by_pair.entry((a1, a0)).or_default().push(res);
                         by_a1.entry(a1).or_default().push(a0);
-                        cnf.add(vec![
-                            -xio,
-                            -dims.y(i - 1, 1, a1),
-                            -dims.y(i - 1, 0, a0),
-                            dims.y(i, 0, res),
-                        ]);
+                    }
+                    for (&(a1, a0), results) in &by_pair {
+                        let mut clause = vec![-xio, -dims.y(i - 1, 1, a1), -dims.y(i - 1, 0, a0)];
+                        for &res in results {
+                            clause.push(dims.y(i, 0, res));
+                        }
+                        cnf.add(clause);
                     }
                     for a1 in 0..n {
                         let mut clause = vec![-xio, -dims.y(i - 1, 1, a1)];
@@ -1572,11 +1587,7 @@ impl SatCnfProfile {
         );
         eprintln!(
             "  time: vocab={:.1}ms ops={:.1}ms encode={:.1}ms add_clauses={:.1}ms witness={:.1}ms",
-            self.vocab_ms,
-            self.ops_ms,
-            self.encode_ms,
-            self.add_clauses_ms,
-            self.witness_ms
+            self.vocab_ms, self.ops_ms, self.encode_ms, self.add_clauses_ms, self.witness_ms
         );
         eprintln!("  diagnosis: {:?}", self.diagnosis);
     }
@@ -1634,15 +1645,7 @@ pub fn profile_sat(
 
     let t2 = Instant::now();
     let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
-    let cnf = encode(
-        segment,
-        &vocab,
-        &ops,
-        &mut dims,
-        &mut canon,
-        deadline,
-    )
-    .ok_or("encode")?;
+    let cnf = encode(segment, &vocab, &ops, &mut dims, &mut canon, deadline).ok_or("encode")?;
     let encode_ms = t2.elapsed().as_secs_f64() * 1000.0;
     let n_vars = (dims.next_var - 1) as usize;
     let n_clauses = cnf.clauses.len();
@@ -2031,9 +2034,7 @@ pub fn solve_sat(
     let remaining = |now: Instant| deadline.saturating_duration_since(now).as_secs_f32();
 
     // Step 1: the original program must be a model (witness at L_orig).
-    let Some(witness) =
-        original_witness_assumptions(segment, &ops, &dims)
-    else {
+    let Some(witness) = original_witness_assumptions(segment, &ops, &dims) else {
         return fail();
     };
     solver.set_callbacks(Some(Timeout::new(remaining(Instant::now()).max(0.0))));
@@ -2172,7 +2173,10 @@ mod tests {
     }
 
     /// Phase-1 core vocabulary size (unique ≡_R classes) without subtree/saturation expansion.
-    fn core_vocab_size(segment: &StraightSegment, rules: &[egg::Rewrite<crate::lang::ValueLang, ()>]) -> usize {
+    fn core_vocab_size(
+        segment: &StraightSegment,
+        rules: &[egg::Rewrite<crate::lang::ValueLang, ()>],
+    ) -> usize {
         let mut canon = Canonizer::new(rules.to_vec());
         let limit = max_vocab_for_segment(segment);
         build_vocab_with_limit(
@@ -2252,7 +2256,11 @@ mod tests {
             .filter(|(_, id)| **id == vocab.canon_ids[0])
             .map(|(i, _)| i)
             .collect();
-        assert_eq!(canon_only, vec![0], "canon_ids partition alone misses index 1");
+        assert_eq!(
+            canon_only,
+            vec![0],
+            "canon_ids partition alone misses index 1"
+        );
     }
 
     #[test]
@@ -2400,17 +2408,13 @@ mod tests {
 
     #[test]
     fn max_vocab_scales_with_segment_length() {
-        let wasm = wat::parse_str(
-            r#"(module (func (param i32) local.get 0 i32.const 1 i32.add))"#,
-        )
-        .unwrap();
+        let wasm = wat::parse_str(r#"(module (func (param i32) local.get 0 i32.const 1 i32.add))"#)
+            .unwrap();
         let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
         let short = materialize_segments(&info.segments, 1).pop().unwrap();
         assert_eq!(max_vocab_for_segment(&short), MIN_VOCAB);
 
-        let long_ops: Vec<SemOp> = (0..60)
-            .map(|_| SemOp::LocalGet(0))
-            .collect();
+        let long_ops: Vec<SemOp> = (0..60).map(|_| SemOp::LocalGet(0)).collect();
         let long = StraightSegment {
             ops: long_ops,
             ..short.clone()
@@ -2460,25 +2464,18 @@ mod tests {
         materialize_segments(&raw, 1)
     }
 
-    fn find_residual_gap_segment(
-        segments: &[StraightSegment],
-        func_index: u32,
-    ) -> StraightSegment {
+    fn find_residual_gap_segment(segments: &[StraightSegment], func_index: u32) -> StraightSegment {
         segments
             .iter()
             .find(|s| {
                 s.func_index == func_index
                     && s.original_len() == 12
                     && storage_ops_in_trace_order(s).len() == 2
-                    && s.disasm_by_id
-                        .values()
-                        .any(|d| d.contains("i64.store32"))
+                    && s.disasm_by_id.values().any(|d| d.contains("i64.store32"))
             })
             .cloned()
             .unwrap_or_else(|| {
-                panic!(
-                    "no 12-instruction i64.store32 gap segment for function_{func_index}"
-                )
+                panic!("no 12-instruction i64.store32 gap segment for function_{func_index}")
             })
     }
 
@@ -2612,7 +2609,7 @@ mod tests {
     #[test]
     fn residual_gap_height_diagnosis() {
         use crate::optimize::search::{
-            opaque_inputs_equivalent, validate_solution_ops, Backend, SearchConfig,
+            Backend, SearchConfig, opaque_inputs_equivalent, validate_solution_ops,
         };
 
         let rules_v = rules();
@@ -2711,7 +2708,7 @@ mod tests {
             stack_height_bound(max_h24, &seg24, 1),
             deadline,
         )
-            .expect("probe should complete");
+        .expect("probe should complete");
         assert!(
             at_h24.sat && at_h24.valid,
             "block 24 should admit valid 11-instr schedule at its stack height"
@@ -2837,7 +2834,9 @@ mod tests {
         let scfg = cfg.for_segment(seg);
         let res = solve_sat(seg, &rules_v, &scfg);
         assert!(
-            res.ops.as_ref().is_some_and(|o| o.len() < seg.original_len()),
+            res.ops
+                .as_ref()
+                .is_some_and(|o| o.len() < seg.original_len()),
             "function_111_block_8_4: symbolic constant fold should shorten the segment"
         );
         assert_eq!(
@@ -2881,7 +2880,10 @@ mod tests {
             .expect("function_14_block_0_0");
         let scfg = cfg.for_segment(seg);
         let res = solve_sat(seg, &rules_v, &scfg);
-        let ops = res.ops.as_ref().expect("function_14 should remain solvable");
+        let ops = res
+            .ops
+            .as_ref()
+            .expect("function_14 should remain solvable");
         let mut canon = Canonizer::new(rules_v);
         let (vocab, _) = build_vocab(
             seg,

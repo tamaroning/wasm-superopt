@@ -3,11 +3,11 @@
 use super::canon::Canonizer;
 use crate::lang::ValueLang;
 use crate::semantics::{
-    inst_kind_from_sem, sem_from_inst_kind, value_op_from_inst_kind,
-    value_op_to_sem, InstKind, SemOp,
+    InstKind, SemOp, inst_kind_from_sem, sem_from_inst_kind, value_op_from_inst_kind,
+    value_op_to_sem,
 };
 use crate::sym::{LocalReq, SymState, subtree_expr};
-use crate::value::{parse_value_expr, ValueOp};
+use crate::value::{ValueOp, parse_value_expr};
 use crate::wasm::{SegmentBounds, StraightSegment};
 use std::collections::BTreeSet;
 
@@ -300,11 +300,7 @@ fn structural_binop_peel(
         return None;
     }
     let sem = value_op_to_sem(op);
-    Some((
-        sem,
-        subtree_expr(top, args[0]),
-        subtree_expr(top, args[1]),
-    ))
+    Some((sem, subtree_expr(top, args[0]), subtree_expr(top, args[1])))
 }
 
 /// Peel the stack-top unop as its syntactic form.
@@ -403,9 +399,15 @@ mod tests {
             ("(i32.eqz (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Eqz)),
             ("(i32.clz (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Clz)),
             ("(i32.ctz (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Ctz)),
-            ("(i32.popcnt (i32.add ?L0 1))", SemOp::Pure(ValueOp::I32Popcnt)),
+            (
+                "(i32.popcnt (i32.add ?L0 1))",
+                SemOp::Pure(ValueOp::I32Popcnt),
+            ),
             ("(i64.eqz (i64.add ?L0 1))", SemOp::Pure(ValueOp::I64Eqz)),
-            ("(f32.sqrt (f32.add ?L0 1.0))", SemOp::Pure(ValueOp::F32Sqrt)),
+            (
+                "(f32.sqrt (f32.add ?L0 1.0))",
+                SemOp::Pure(ValueOp::F32Sqrt),
+            ),
         ];
         for (expr, want) in cases {
             let top = parse_value_expr(expr);
@@ -453,7 +455,10 @@ mod tests {
                 PeelAction::Forward(op)
                     if matches!(
                         op,
-                        SemOp::I32Mul | SemOp::I32Shl | SemOp::I32Sub | SemOp::Pure(ValueOp::I32Mul)
+                        SemOp::I32Mul
+                            | SemOp::I32Shl
+                            | SemOp::I32Sub
+                            | SemOp::Pure(ValueOp::I32Mul)
                     ) =>
                 {
                     let stack: Vec<_> = s.goal.stack.iter().map(|e| e.to_string()).collect();
@@ -463,10 +468,10 @@ mod tests {
             })
             .collect();
         assert!(
-            binops
-                .iter()
-                .any(|(op, st)| matches!(op, SemOp::I32Mul | SemOp::Pure(ValueOp::I32Mul))
-                    && st == &["?L0", "2"]),
+            binops.iter().any(|(op, st)| matches!(
+                op,
+                SemOp::I32Mul | SemOp::Pure(ValueOp::I32Mul)
+            ) && st == &["?L0", "2"]),
             "missing i32.mul peel: {binops:?}"
         );
         assert!(
@@ -524,9 +529,11 @@ mod tests {
         let bounds = SegmentBounds::new(1, 4);
         let top_expr = g.stack.last().expect("top");
         let decomps = canon.binop_decompositions(top_expr);
-        assert!(decomps.iter().any(|(k, _, _)| {
-            *k == InstKind::Pure(ValueOp::I32Mul)
-        }));
+        assert!(
+            decomps
+                .iter()
+                .any(|(k, _, _)| { *k == InstKind::Pure(ValueOp::I32Mul) })
+        );
         let (_, e1, e2) = decomps
             .iter()
             .find(|(k, _, _)| *k == InstKind::Pure(ValueOp::I32Mul))
@@ -568,7 +575,9 @@ mod tests {
             let peels = applicable_peels_arithmetic_only(&g, &bounds, &mut canon);
             let next = peels
                 .into_iter()
-                .find(|(a, _)| matches!(a, PeelAction::Forward(actual) if peel_matches(&op, actual)))
+                .find(
+                    |(a, _)| matches!(a, PeelAction::Forward(actual) if peel_matches(&op, actual)),
+                )
                 .map(|(_, n)| n)
                 .expect("peel step");
             g = next;

@@ -10,8 +10,8 @@ use super::env::Env;
 use super::error::EvalError;
 use super::value::AlValue;
 use crate::al::ast::{
-    Arg, BinOpCase, Expr, FuncA, Instr, InstrCond, LetLhs, Pred, RelOpCase,
-    UnOpCase, WasmBinOp, WasmRelOp, WasmUnOp,
+    Arg, BinOpCase, Expr, FuncA, Instr, InstrCond, LetLhs, Pred, RelOpCase, UnOpCase, WasmBinOp,
+    WasmRelOp, WasmUnOp,
 };
 use crate::al::defs::lookup_func;
 use crate::value::RuleSignature;

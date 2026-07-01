@@ -28,7 +28,8 @@ pub fn materialize_raw_segment(raw: &RawSegment) -> Option<StraightSegment> {
         raw.total_locals,
         block_max_stack.max(raw.bounds_template.max_stack),
     );
-    let mut machine = SymMachine::function_entry(raw.num_params, raw.total_locals, bounds.max_stack);
+    let mut machine =
+        SymMachine::function_entry(raw.num_params, raw.total_locals, bounds.max_stack);
     machine.seed_implicit_stack_inputs(init_stack);
     machine.begin_segment();
 

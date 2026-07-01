@@ -1,6 +1,5 @@
 //! Loop/jump-free WebAssembly basic blocks → backward goal search + e-graph rules.
 
-
 mod al;
 mod lang;
 mod optimize;
@@ -256,9 +255,7 @@ fn run_sat_profile(path: &std::path::Path, cli: &Cli) {
 }
 
 fn run_classify_sat_gaps(path: &std::path::Path, csv_path: &std::path::Path, cli: &Cli) {
-    use optimize::{
-        classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv,
-    };
+    use optimize::{classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv};
     use wasm::{materialize_segments, split_raw_segments};
 
     let info = parse_wasm_file(path).unwrap_or_else(|e| {

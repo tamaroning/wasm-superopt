@@ -57,10 +57,7 @@ pub fn semop_stack_effect(op: &SemOp) -> (usize, usize) {
         return (v.pops().len(), 1);
     }
     match op {
-        SemOp::I32Const(_)
-        | SemOp::I64Const(_)
-        | SemOp::F32Const(_)
-        | SemOp::F64Const(_) => (0, 1),
+        SemOp::I32Const(_) | SemOp::I64Const(_) | SemOp::F32Const(_) | SemOp::F64Const(_) => (0, 1),
         SemOp::LocalGet(_) => (0, 1),
         SemOp::LocalSet(_) => (1, 0),
         SemOp::LocalTee(_) => (1, 1),

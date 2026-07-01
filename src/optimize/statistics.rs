@@ -150,7 +150,12 @@ fn classify_outcome(
     let shown_optimal = result.proven_optimal;
 
     if improved && checker {
-        return ("optimal".to_string(), true, shown_optimal, "astar".to_string());
+        return (
+            "optimal".to_string(),
+            true,
+            shown_optimal,
+            "astar".to_string(),
+        );
     }
 
     (
