@@ -441,6 +441,205 @@ fn dedup_by_string(exprs: &mut Vec<ValueExpr>) {
     exprs.retain(|e| seen.insert(e.to_string()));
 }
 
+/// Local slots that need `Get`/`Set`/`Tee` in the SAT alphabet for this segment.
+fn active_local_slots(segment: &StraightSegment) -> HashSet<u32> {
+    let mut slots = HashSet::new();
+    for op in &segment.ops {
+        match op {
+            SemOp::LocalGet(s) | SemOp::LocalSet(s) | SemOp::LocalTee(s) => {
+                slots.insert(*s);
+            }
+            _ => {}
+        }
+    }
+    for slot in 0..=segment.bounds.max_local {
+        let init = segment.init.locals.get(&slot);
+        let fin = segment.fin.locals.get(&slot);
+        if local_boundary_changed(init, fin) {
+            slots.insert(slot);
+        }
+    }
+    slots
+}
+
+fn local_boundary_changed(init: Option<&LocalReq>, fin: Option<&LocalReq>) -> bool {
+    match (init, fin) {
+        (Some(LocalReq::Need(a)), Some(LocalReq::Need(b))) => a != b,
+        _ => false,
+    }
+}
+
+/// How each local slot is tracked through the encoding (`w` variables).
+#[derive(Clone, Debug)]
+enum LocalSlotKind {
+    /// `★` for all steps — no `locals_unchanged` propagation needed.
+    FixedStar,
+    /// Fixed real index for all steps.
+    FixedVal(usize),
+    /// May change via `set`/`tee` in the segment.
+    Active,
+}
+
+fn classify_local_slots(
+    segment: &StraightSegment,
+    r: usize,
+    vocab: &Vocab,
+    canon: &mut Canonizer,
+) -> Option<Vec<LocalSlotKind>> {
+    let mut written = HashSet::new();
+    for op in &segment.ops {
+        match op {
+            SemOp::LocalSet(s) | SemOp::LocalTee(s) => {
+                written.insert(*s);
+            }
+            _ => {}
+        }
+    }
+    let mut kinds = Vec::with_capacity(r);
+    for rr in 0..r {
+        let slot = rr as u32;
+        if written.contains(&slot) {
+            kinds.push(LocalSlotKind::Active);
+            continue;
+        }
+        match segment.init.locals.get(&slot) {
+            Some(LocalReq::Need(v)) => {
+                let idx = vocab.real_of_expr(canon, v)?;
+                kinds.push(LocalSlotKind::FixedVal(idx));
+            }
+            _ => kinds.push(LocalSlotKind::FixedStar),
+        }
+    }
+    Some(kinds)
+}
+
+fn pin_fixed_locals(cnf: &mut Cnf, dims: &Dims, local_kinds: &[LocalSlotKind]) {
+    let star = dims.star();
+    for i in 1..=dims.l {
+        for (rr, kind) in local_kinds.iter().enumerate() {
+            match kind {
+                LocalSlotKind::FixedStar => cnf.unit(dims.w(i, rr, star)),
+                LocalSlotKind::FixedVal(v) => cnf.unit(dims.w(i, rr, *v)),
+                LocalSlotKind::Active => {}
+            }
+        }
+    }
+}
+
+fn merge_binop_edge(ops: &mut Vec<SatOp>, kind: InstKind, edge: (usize, usize, usize)) {
+    if let Some(SatOp::Binop { edges, .. }) = ops
+        .iter_mut()
+        .find(|o| matches!(o, SatOp::Binop { kind: k, .. } if *k == kind))
+    {
+        if !edges.contains(&edge) {
+            edges.push(edge);
+        }
+    } else {
+        ops.push(SatOp::Binop {
+            kind,
+            edges: vec![edge],
+        });
+    }
+}
+
+fn merge_unop_edge(ops: &mut Vec<SatOp>, kind: InstKind, edge: (usize, usize)) {
+    if let Some(SatOp::Unop { edges, .. }) = ops
+        .iter_mut()
+        .find(|o| matches!(o, SatOp::Unop { kind: k, .. } if *k == kind))
+    {
+        if !edges.contains(&edge) {
+            edges.push(edge);
+        }
+    } else {
+        ops.push(SatOp::Unop {
+            kind,
+            edges: vec![edge],
+        });
+    }
+}
+
+fn ensure_const_op(ops: &mut Vec<SatOp>, sem: &SemOp, val: usize) {
+    if ops.iter().any(|o| {
+        matches!(o, SatOp::Const { sem: s, val: v } if sem_eq_const(s, sem) && *v == val)
+    }) {
+        return;
+    }
+    ops.push(SatOp::Const {
+        sem: sem.clone(),
+        val,
+    });
+}
+
+/// Ensure every pure step of the original trace has a corresponding SAT transition edge.
+fn inject_trace_edges(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    canon: &mut Canonizer,
+    ops: &mut Vec<SatOp>,
+) -> Option<()> {
+    let mut m = SymMachine::from_segment_entry(
+        segment.num_params,
+        &segment.bounds,
+        &segment.init,
+        segment.bounds.max_stack,
+    );
+    for op in &segment.ops {
+        match op {
+            SemOp::I32Const(_)
+            | SemOp::I64Const(_)
+            | SemOp::F32Const(_)
+            | SemOp::F64Const(_) => {
+                let expr = const_expr(op)?;
+                let val = vocab.real_of_expr(canon, &expr)?;
+                ensure_const_op(ops, op, val);
+            }
+            SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) | SemOp::Drop => {}
+            SemOp::I32Load { .. }
+            | SemOp::I32Store { .. }
+            | SemOp::Call { .. }
+            | SemOp::GlobalGet { .. }
+            | SemOp::GlobalSet { .. }
+            | SemOp::Opaque { .. } => {}
+            other => {
+                let vop = sem_to_value_op(other)?;
+                let kind = inst_kind_from_sem(other)?;
+                if vop.pops().len() == 2 {
+                    let st = m.to_carried_init_state();
+                    let len = st.stack.len();
+                    if len < 2 {
+                        return None;
+                    }
+                    let a0_expr = st.stack[len - 1].clone();
+                    let a1_expr = st.stack[len - 2].clone();
+                    m.exec(op).ok()?;
+                    let st = m.to_carried_init_state();
+                    let res_expr = st.stack.last()?.clone();
+                    let a1 = vocab.real_of_expr(canon, &a1_expr)?;
+                    let a0 = vocab.real_of_expr(canon, &a0_expr)?;
+                    let res = vocab.real_of_expr(canon, &res_expr)?;
+                    merge_binop_edge(ops, kind, (a1, a0, res));
+                } else {
+                    let st = m.to_carried_init_state();
+                    let len = st.stack.len();
+                    if len < 1 {
+                        return None;
+                    }
+                    let a_expr = st.stack[len - 1].clone();
+                    m.exec(op).ok()?;
+                    let st = m.to_carried_init_state();
+                    let res_expr = st.stack.last()?.clone();
+                    let a = vocab.real_of_expr(canon, &a_expr)?;
+                    let res = vocab.real_of_expr(canon, &res_expr)?;
+                    merge_unop_edge(ops, kind, (a, res));
+                }
+                continue;
+            }
+        }
+        m.exec(op).ok()?;
+    }
+    Some(())
+}
+
 /// Forward-execute the original ops, collecting all stack/local values and the max stack height.
 fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
     let mut seeds = Vec::new();
@@ -633,7 +832,7 @@ fn build_ops(
     vocab: &Vocab,
     canon: &mut Canonizer,
     rules: &[egg::Rewrite<ValueLang, ()>],
-    r: usize,
+    _r: usize,
     deadline: Instant,
 ) -> Option<Vec<SatOp>> {
     if Instant::now() >= deadline {
@@ -668,7 +867,9 @@ fn build_ops(
         }
     }
 
-    for slot in 0..r as u32 {
+    let mut active_slots: Vec<u32> = active_local_slots(segment).into_iter().collect();
+    active_slots.sort();
+    for slot in active_slots {
         ops.push(SatOp::Get(slot));
         ops.push(SatOp::Set(slot));
         ops.push(SatOp::Tee(slot));
@@ -745,6 +946,8 @@ fn build_ops(
             ops.push(SatOp::Binop { kind, edges });
         }
     }
+
+    inject_trace_edges(segment, vocab, canon, &mut ops)?;
 
     // Side-effecting / uninterpreted ops (SuperStack-style). Each is one instruction
     // that requires its operand values on top and produces fresh result symbols.
@@ -884,6 +1087,7 @@ fn encode(
     let star = dims.star();
     let nop = NOP_INDEX;
     let past = |cnf: &Cnf| Instant::now() >= deadline || cnf.over_limit;
+    let local_kinds = classify_local_slots(segment, r, vocab, canon)?;
 
     // §5.1 instruction uniqueness.
     for i in 1..=l {
@@ -927,6 +1131,7 @@ fn encode(
             _ => cnf.unit(dims.w(0, rr, star)),
         }
     }
+    pin_fixed_locals(&mut cnf, dims, &local_kinds);
 
     // §5.2 boundary (final).
     let fin = &segment.fin;
@@ -971,13 +1176,13 @@ fn encode(
             match op {
                 SatOp::Nop => {
                     stack_unchanged(&mut cnf, dims, i, xio);
-                    locals_unchanged(&mut cnf, dims, i, xio);
+                    locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
                 SatOp::Const { val, .. } => {
                     cnf.add(vec![-xio, dims.y(i - 1, h - 1, bot)]);
                     cnf.add(vec![-xio, dims.y(i, 0, *val)]);
                     stack_push_shift(&mut cnf, dims, i, xio);
-                    locals_unchanged(&mut cnf, dims, i, xio);
+                    locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
                 SatOp::Get(slot) => {
                     let slot = *slot as usize;
@@ -987,7 +1192,7 @@ fn encode(
                         cnf.imply_iff(xio, dims.y(i, 0, v), dims.w(i - 1, slot, v));
                     }
                     stack_push_shift(&mut cnf, dims, i, xio);
-                    locals_unchanged(&mut cnf, dims, i, xio);
+                    locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
                 SatOp::Set(slot) => {
                     let slot = *slot as usize;
@@ -995,7 +1200,7 @@ fn encode(
                     for v in 0..n {
                         cnf.imply_iff(xio, dims.w(i, slot, v), dims.y(i - 1, 0, v));
                     }
-                    locals_unchanged_except(&mut cnf, dims, i, xio, slot);
+                    locals_unchanged_except(&mut cnf, dims, i, xio, slot, &local_kinds);
                     stack_pop_shift(&mut cnf, dims, i, xio, 0);
                 }
                 SatOp::Tee(slot) => {
@@ -1004,13 +1209,13 @@ fn encode(
                     for v in 0..n {
                         cnf.imply_iff(xio, dims.w(i, slot, v), dims.y(i - 1, 0, v));
                     }
-                    locals_unchanged_except(&mut cnf, dims, i, xio, slot);
+                    locals_unchanged_except(&mut cnf, dims, i, xio, slot, &local_kinds);
                     stack_unchanged(&mut cnf, dims, i, xio);
                 }
                 SatOp::Drop => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
                     stack_pop_shift(&mut cnf, dims, i, xio, 0);
-                    locals_unchanged(&mut cnf, dims, i, xio);
+                    locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
                 SatOp::Unop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
@@ -1026,7 +1231,7 @@ fn encode(
                             cnf.imply_iff(xio, dims.y(i, j, v), dims.y(i - 1, j, v));
                         }
                     }
-                    locals_unchanged(&mut cnf, dims, i, xio);
+                    locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
                 SatOp::Binop { edges, .. } => {
                     cnf.add(vec![-xio, -dims.y(i - 1, 0, bot)]);
@@ -1050,14 +1255,23 @@ fn encode(
                         cnf.add(clause);
                     }
                     stack_pop_shift(&mut cnf, dims, i, xio, 1);
-                    locals_unchanged(&mut cnf, dims, i, xio);
+                    locals_unchanged(&mut cnf, dims, i, xio, &local_kinds);
                 }
                 SatOp::Opaque {
                     in_reals,
                     out_reals,
                     ..
                 } => {
-                    encode_opaque(&mut cnf, dims, i, xio, vocab, in_reals, out_reals);
+                    encode_opaque(
+                        &mut cnf,
+                        dims,
+                        i,
+                        xio,
+                        vocab,
+                        in_reals,
+                        out_reals,
+                        &local_kinds,
+                    );
                 }
             }
         }
@@ -1116,6 +1330,7 @@ fn encode_opaque(
     vocab: &Vocab,
     in_reals: &[usize],
     out_reals: &[usize],
+    local_kinds: &[LocalSlotKind],
 ) {
     let h = dims.h;
     let sd = dims.sd;
@@ -1163,7 +1378,7 @@ fn encode_opaque(
         }
     }
 
-    locals_unchanged(cnf, dims, i, xio);
+    locals_unchanged(cnf, dims, i, xio, local_kinds);
 }
 
 fn stack_unchanged(cnf: &mut Cnf, dims: &Dims, i: usize, xio: i32) {
@@ -1195,17 +1410,27 @@ fn stack_pop_shift(cnf: &mut Cnf, dims: &Dims, i: usize, xio: i32, keep_from: us
     cnf.add(vec![-xio, dims.y(i, dims.h - 1, dims.bot())]);
 }
 
-fn locals_unchanged(cnf: &mut Cnf, dims: &Dims, i: usize, xio: i32) {
-    for rr in 0..dims.r {
+fn locals_unchanged(cnf: &mut Cnf, dims: &Dims, i: usize, xio: i32, local_kinds: &[LocalSlotKind]) {
+    for (rr, kind) in local_kinds.iter().enumerate() {
+        if !matches!(kind, LocalSlotKind::Active) {
+            continue;
+        }
         for v in 0..dims.ld {
             cnf.imply_iff(xio, dims.w(i, rr, v), dims.w(i - 1, rr, v));
         }
     }
 }
 
-fn locals_unchanged_except(cnf: &mut Cnf, dims: &Dims, i: usize, xio: i32, slot: usize) {
-    for rr in 0..dims.r {
-        if rr == slot {
+fn locals_unchanged_except(
+    cnf: &mut Cnf,
+    dims: &Dims,
+    i: usize,
+    xio: i32,
+    slot: usize,
+    local_kinds: &[LocalSlotKind],
+) {
+    for (rr, kind) in local_kinds.iter().enumerate() {
+        if rr == slot || !matches!(kind, LocalSlotKind::Active) {
             continue;
         }
         for v in 0..dims.ld {
@@ -1368,7 +1593,7 @@ pub fn profile_sat(
     let witness = original_witness_assumptions(segment, &ops, &dims);
     let t4 = Instant::now();
     let diagnosis = if witness.is_none() {
-        SatDiagnosis::OriginalUnsat
+        SatDiagnosis::OriginalWitnessMissingOp
     } else {
         solver.set_callbacks(Some(Timeout::new(remaining(Instant::now()).max(0.0))));
         match solver.solve_with(witness.unwrap().iter().copied()) {
@@ -1384,7 +1609,7 @@ pub fn profile_sat(
                     SatDiagnosis::OriginalModelInvalid
                 }
             }
-            Some(false) => SatDiagnosis::OriginalUnsat,
+            Some(false) => SatDiagnosis::OriginalWitnessUnsat,
             None => SatDiagnosis::Solved {
                 best_len: l_orig,
                 proven_optimal: false,
@@ -1431,7 +1656,10 @@ pub enum SatDiagnosis {
         h: usize,
         r: usize,
     },
-    OriginalUnsat,
+    /// `sat_op_index_for_orig` failed for at least one original step.
+    OriginalWitnessMissingOp,
+    /// Witness assumptions built but SAT returned UNSAT.
+    OriginalWitnessUnsat,
     OriginalModelInvalid,
     Solved {
         best_len: usize,
@@ -1491,12 +1719,12 @@ pub fn diagnose_sat(
     }
     let remaining = |now: Instant| deadline.saturating_duration_since(now).as_secs_f32();
     let Some(witness) = original_witness_assumptions(segment, &ops, &dims) else {
-        return SatDiagnosis::OriginalUnsat;
+        return SatDiagnosis::OriginalWitnessMissingOp;
     };
     solver.set_callbacks(Some(Timeout::new(remaining(Instant::now()).max(0.0))));
     match solver.solve_with(witness.iter().copied()) {
         Some(true) => {}
-        Some(false) => return SatDiagnosis::OriginalUnsat,
+        Some(false) => return SatDiagnosis::OriginalWitnessUnsat,
         None => {
             return SatDiagnosis::Solved {
                 best_len: l_orig,
@@ -1886,5 +2114,109 @@ mod tests {
             ..short.clone()
         };
         assert_eq!(max_vocab_for_segment(&long), 80);
+    }
+
+    fn segment_by_block_id(wasm_path: &str, split: usize, bid: &str) -> Option<StraightSegment> {
+        let path = std::path::Path::new(wasm_path);
+        if !path.is_file() {
+            return None;
+        }
+        let info = parse_wasm_file(path).ok()?;
+        let raw = split_raw_segments(&info.segments, split);
+        let segments = materialize_segments(&raw, split);
+        segments
+            .into_iter()
+            .find(|s| crate::optimize::statistics::block_id(s) == bid)
+    }
+
+    fn sat_cfg_split_15() -> SearchConfig {
+        SearchConfig {
+            max_sat_len: super::super::search::max_sat_len_for_split(15),
+            timeout_secs: Some(120),
+            ..SearchConfig::default()
+        }
+    }
+
+    /// Regression: i64 mul/add/shr chains must witness the original program (not OriginalUnsat).
+    #[test]
+    fn function_24_block_witnesses_original_program() {
+        let Some(seg) = segment_by_block_id(
+            "benchmarks/wsouper/sign_test.wasm",
+            15,
+            "function_24_block_0_0",
+        ) else {
+            return;
+        };
+        let r = rules();
+        let cfg = sat_cfg_split_15();
+        let diag = diagnose_sat(&seg, &r, &cfg);
+        assert!(
+            !matches!(
+                diag,
+                SatDiagnosis::OriginalWitnessMissingOp | SatDiagnosis::OriginalWitnessUnsat
+            ),
+            "function_24_block_0_0: {diag:?}"
+        );
+        assert!(
+            !matches!(diag, SatDiagnosis::EncodeFailed { .. }),
+            "function_24_block_0_0 encode failed: {diag:?}"
+        );
+        let result = solve_sat(&seg, &r, &cfg);
+        assert!(
+            result.ops.is_some(),
+            "solve_sat should return a model, timed_out={}",
+            result.timed_out
+        );
+    }
+
+    #[test]
+    fn function_25_block_witnesses_original_program() {
+        let Some(seg) = segment_by_block_id(
+            "benchmarks/wsouper/sign_test.wasm",
+            15,
+            "function_25_block_0_0",
+        ) else {
+            return;
+        };
+        let r = rules();
+        let cfg = sat_cfg_split_15();
+        let diag = diagnose_sat(&seg, &r, &cfg);
+        assert!(
+            !matches!(
+                diag,
+                SatDiagnosis::OriginalWitnessMissingOp | SatDiagnosis::OriginalWitnessUnsat
+            ),
+            "function_25_block_0_0: {diag:?}"
+        );
+        assert!(
+            !matches!(diag, SatDiagnosis::EncodeFailed { .. }),
+            "function_25_block_0_0 encode failed: {diag:?}"
+        );
+    }
+
+    #[test]
+    fn function_24_cnf_within_clause_limit() {
+        let Some(seg) = segment_by_block_id(
+            "benchmarks/wsouper/mux1_1.wasm",
+            15,
+            "function_24_block_0_0",
+        ) else {
+            return;
+        };
+        let r = rules();
+        let cfg = sat_cfg_split_15();
+        let profile = profile_sat(&seg, &r, &cfg).expect("profile_sat");
+        assert!(
+            profile.n_clauses < MAX_CNF_CLAUSES,
+            "CNF too large: {} clauses, n_ops={}, r={}",
+            profile.n_clauses,
+            profile.n_ops,
+            profile.r
+        );
+        assert!(
+            profile.n_ops < 90,
+            "expected pruned |OP|, got {}",
+            profile.n_ops
+        );
     }
 }

@@ -79,7 +79,63 @@ impl Canonizer {
     }
 
     pub fn values_equivalent(&mut self, a: &ValueExpr, b: &ValueExpr) -> bool {
-        self.canon(a) == self.canon(b)
+        if a.to_string() == b.to_string() {
+            return true;
+        }
+        if self.canon(a) == self.canon(b) {
+            return true;
+        }
+        self.joint_saturate_equivalent(a, b)
+    }
+
+    /// Add both expressions to the persistent e-graph, saturate once, and compare e-classes.
+    ///
+    /// Catches equivalences (e.g. commutative `add`) that separate `canon` calls may miss.
+    fn joint_saturate_equivalent(&mut self, a: &ValueExpr, b: &ValueExpr) -> bool {
+        let id_a = self.runner.egraph.add_expr(a);
+        let id_b = self.runner.egraph.add_expr(b);
+        if self.runner.egraph.find(id_a) == self.runner.egraph.find(id_b) {
+            self.unify_expr_cache(a, b, id_a);
+            return true;
+        }
+        self.runner.roots.push(id_a);
+        self.runner.roots.push(id_b);
+        let egraph = std::mem::take(&mut self.runner.egraph);
+        let roots = self.runner.roots.clone();
+        self.runner = Runner::default()
+            .with_iter_limit(EQSAT_ITER_LIMIT)
+            .with_node_limit(EQSAT_NODE_LIMIT)
+            .with_egraph(egraph)
+            .run(&self.rules);
+        self.runner.roots = roots;
+        let equivalent = self.runner.egraph.find(id_a) == self.runner.egraph.find(id_b);
+        if equivalent {
+            self.unify_expr_cache(a, b, id_a);
+        }
+        equivalent
+    }
+
+    /// After a joint saturation merge, point both expression strings at the same `CanonId`.
+    fn unify_expr_cache(&mut self, a: &ValueExpr, b: &ValueExpr, merged_root: Id) {
+        let class = usize::from(self.runner.egraph.find(merged_root));
+        let id = if let Some(&existing) = self.class_to_id.get(&class) {
+            existing
+        } else {
+            let extractor = Extractor::new(&self.runner.egraph, AstSize);
+            let (_, best) = extractor.find_best(merged_root);
+            let canon_str = best.to_string();
+            if let Some(&existing) = self.str_cache.get(&canon_str) {
+                existing
+            } else {
+                let id = self.next_id;
+                self.next_id += 1;
+                self.str_cache.insert(canon_str, id);
+                id
+            }
+        };
+        self.class_to_id.insert(class, id);
+        self.str_cache.insert(a.to_string(), id);
+        self.str_cache.insert(b.to_string(), id);
     }
 
     /// Residual goal key `⌈G⌉ = ⟨[c(s)], {x ↦ c(M[x]) | M[x] ≠ ★}⟩`.
@@ -192,5 +248,15 @@ mod tests {
         let mul = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
         let shl = parse_value_expr("(i32.shl (i32.add ?L0 1) 1)");
         assert_eq!(canon.canon(&mul), canon.canon(&shl));
+    }
+
+    #[test]
+    fn commutative_add_operands_equivalent_via_joint_saturation() {
+        let mut canon = Canonizer::new(rules());
+        let a = parse_value_expr("(i32.add (i32.sub ?L4 1) ?L1)");
+        let b = parse_value_expr("(i32.add ?L1 (i32.sub ?L4 1))");
+        assert!(canon.values_equivalent(&a, &b));
+        // After merge, both strings share one canon id.
+        assert_eq!(canon.canon(&a), canon.canon(&b));
     }
 }

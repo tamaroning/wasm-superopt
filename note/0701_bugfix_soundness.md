@@ -11,108 +11,146 @@ ewasmのSATは、タイムアウトしないならば、superstackと同じま�
 
 ---
 
-## 健全性チェック
+## 修正済み（2026-07-01）: OriginalUnsat / EncodeFailed
+
+[`src/optimize/sat.rs`](../src/optimize/sat.rs) に以下を実装。
+
+| 項目 | 内容 |
+|------|------|
+| **トレースエッジ注入** | `inject_trace_edges` — 元トレースの Binop/Unop/Const 遷移を E-graph とは独立に `ops` へマージ（OriginalUnsat 解消） |
+| **ローカル op  pruning** | `active_local_slots` — セグメントで使用するスロットのみ `Get`/`Set`/`Tee` を生成（`\|OP\|` 削減） |
+| **CNF 圧縮** | `classify_local_slots` + `pin_fixed_locals` — 不変ローカルの `locals_unchanged` を unit 節に短絡（EncodeFailed 解消） |
+| **診断細分化** | `OriginalWitnessMissingOp` / `OriginalWitnessUnsat`（旧 `OriginalUnsat`） |
+
+旧ギャップ 377 ブロックの `--classify-sat-gaps` 再診断: **OriginalWitnessMissingOp / OriginalWitnessUnsat / EncodeFailed は 0 件**（sign_test / mux1_1 とも）。
+
+---
+
+## 健全性チェック（修正後）
 
 **健全性バグ（誤って長い解を受理）は見つからなかった。**
 
 | 観点 | 結果 |
 |------|------|
-| ewasm が SS より短い | **301 / 302 件** — いずれも `no_solution`。ewasm は解を返せず SS のみ改善 |
-| ewasm が SS より長い（タイムアウトなし） | **113 / 135 件** — `outcome=optimal`。符号化内最適だが SS 解は探索空間外 |
-| ewasm が SS より長い（タイムアウト） | **166 / 102 件** — `non_optimal`（10s 打ち切り） |
-| ewasm が短い解を見つけたケース | **0 件** |
+| ewasm `no_solution` | **0 / 0 件**（sign_test / mux1_1） |
+| ewasm `non_optimal`（タイムアウト劣後解） | **0 / 0 件** |
+| ewasm が SS より短い | **0 件** |
+| ewasm が SS より長い（`outcome=optimal`） | **536 / 488 件** — 符号化内最適だが SS 解は探索空間外 |
 | checker が false の劣後ケース | **0 件** |
 
 ---
 
-## ベンチマーク概要
+## ベンチマーク概要（修正後）
 
 比較対象: **1251 / 1227** ブロック（`block_id` でマージ）
 
 | | sign_test | mux1_1 |
 |--|-----------|--------|
-| ewasm 削減率 | 124 / 12752 (**0.97%**) | 151 / 12292 (**1.23%**) |
+| ewasm 削減率 | 279 / 12752 (**2.19%**) | 286 / 12292 (**2.33%**) |
 | superstack 削減率 | 1184 / 12746 (**9.29%**) | 1055 / 12286 (**8.59%**) |
-| 削減量ギャップ（SS − ewasm） | **1060 命令** | **904 命令** |
-| SS と同じ（`optimized_length` 一致） | 671 | 688 |
-| ewasm `no_solution` | 290 | 302 |
-| ewasm が SS より長い | 279（+558 命令） | 237（+390 命令） |
+| 削減量ギャップ（SS − ewasm） | **909 命令** | **773 命令** |
+| SS と同じ（`optimized_length` 一致） | 715 | 739 |
+| ewasm `no_solution` | **0** | **0** |
+| ewasm が SS より長い | 536（+115 命令） | 488（+44 命令） |
+| ewasm が SS のみ改善（ewasm 0 削減） | 481 ブロック | 460 ブロック |
+
+`function_24` / `25`: 各 **280 ブロックすべて `optimal`**（削減合計 **20 命令**/ベンチ）。修正前は OriginalUnsat / EncodeFailed で無反応だった。
 
 ---
 
-## 削減量ギャップの主因
+## 削減量ギャップの主因（修正後）
 
-ewasm が SS より少なく削減した命令数（`saved_length` の差）を原因別に分解する。
+残ギャップ合計: sign_test **909** + mux1_1 **773** = **1682 命令**（`saved_length` 差の総和）。  
+ギャップがあるブロック: **536 / 488** 件（共通 `block_id` 上で SS がより多く削減したもの）。
 
-### 3 分類（`saved_length` ベース）
+### 2 分類（`saved_length` ベース）
 
-| 原因 | sign_test | mux1_1 | 合計 | 割合 |
-|------|-----------|--------|------|------|
-| **① `no_solution`**（ewasm は 0 削減、SS のみ改善） | 489 / 1060 | 514 / 904 | **1003** | **51%** |
-| **② segment timeout**（`non_optimal` で SS より長い解を返却） | 406 / 1060 | 209 / 904 | **615** | **31%** |
-| **③ 符号化の不完全性**（`optimal` だが SS より長い） | 152 / 1060 | 181 / 904 | **333** | **17%** |
+| 原因 | sign_test | mux1_1 | 合計 | 割合 | 意味 |
+|------|-----------|--------|------|------|------|
+| **① ewasm 0 削減・SS のみ改善** | 794 / 909（481 blk） | 729 / 773（460 blk） | **1523** | **91%** | SAT は `optimal` だが元長のまま。SS の短い解が探索空間外 |
+| **② ewasm も削減したが SS より短くない** | 115 / 909（55 blk） | 44 / 773（28 blk） | **159** | **9%** | 符号化内で短縮できたが SS 解には未到達 |
 
-**結論:** ギャップの過半数は ewasm が解を一切返せない `no_solution`（①）。次いで 10s セグメントタイムアウトによる劣後解の採用（②）が 3 割。
+**結論:** 残ギャップの **9 割超は ①**。ewasm は witness 可能になったが、**SS が見つける 1〜2 命令の短縮スケジュールを CNF 上まだ表現・探索できていない**。② は「部分的に追いついたが SS に届かない」ケース（中央値ギャップ 1 命令）。
 
-### ① `no_solution` の内訳（`--classify-sat-gaps` 再診断）
+### SS 解パターン別（ギャップ寄与・`solution_found` ヒューリスティック分類）
 
-SS が改善したが ewasm が追いつかなかったブロック（sign_test **376** / mux1_1 **377** 件）を診断:
+ギャップブロックについて SS の `solution_found` を分類し、寄与命令数を集計:
 
-| 診断 | sign_test | mux1_1 | 意味 |
-|------|-----------|--------|------|
-| **OriginalUnsat** | **199** | **200** | 符号化が元プログラムすら witness できない |
-| **EncodeFailed** | **104** | **104** | CNF 生成失敗（句数上限等。`n_ops≈125`, `r=38` が集中） |
-| **Solved + proven_optimal**（SS より長い） | **63** | **63** | SAT は動いたが SS 解は探索空間外 |
-| **Solved + timed_out** | **9** | **9** | 再診断時の SAT タイムアウト |
+| パターン | sign_test | mux1_1 | 合計 | 割合 | 典型 |
+|----------|-----------|--------|------|------|------|
+| **`tee` 融合・並べ替え** | 701 / 909（448 blk） | 709 / 773（453 blk） | **1410** | **84%** | `set`+`get` → `tee`、call 前後の spill 移動 |
+| **定数畳み込み・算術再構成** | 156 / 909（57 blk） | 32 / 773（11 blk） | **188** | **11%** | SS が畳んだ定数式が E-graph 語彙に無い／未到達 |
+| **`local.tee[-1]`（合成 scratch）** | 52 / 909（31 blk） | 32 / 773（24 blk） | **84** | **5%** | CSE 用仮想ローカル（ewasm は実在 slot のみ） |
 
-`no_solution` 寄与の **約 3 割は EncodeFailed**、**過半数は OriginalUnsat** が支配的。いずれも SAT がそもそも探索を開始できない／元トレースを満たせない系。
+※ 1 ブロックに複数パターンが混在しうるため、主タグで集計。詳細は [`0701_ewasm_bug.md`](0701_ewasm_bug.md)。
 
 ### 関数別の集中
 
-ギャップの **65〜76%** が `function_25` / `24` / `14` / `13` の 4 関数に集中:
+| 関数 | sign_test ギャップ | mux1_1 | ブロック数 | ewasm 削減（sign_test） | 支配パターン |
+|------|-------------------|--------|-----------|------------------------|-------------|
+| `function_25` | **237** | 237 | 134 | 14 | `tee` 融合（i64 mul/add/shr チェーン） |
+| `function_24` | **174** | 174 | 125 | 6 | 同上 |
+| `function_14` | **151** | 151 | 74 | 15 | `tee` 融合 + 比較/load 周り |
+| `function_111` | **126** | 4 | 45 / 2 | **100** | 定数畳み込み（call 引数系。修正後は ewasm も大幅削減） |
+| `function_13` | **95** | 95 | 66 | 1 | `tee` 融合 |
 
-| 関数 | sign_test ギャップ | 主因 |
-|------|-------------------|------|
-| `function_25` | 249（135 ブロック） | `no_solution` **211**、timeout 23 |
-| `function_24` | 180（126 ブロック） | `no_solution` **180**（全件） |
-| `function_14` | 161（76 ブロック） | 符号化不完全 **62**、no_solution 73、timeout 26 |
-| `function_111` | 190（53 ブロック） | timeout **188**（call 引数畳み込み系） |
+上位 5 関数で sign_test ギャップの **86%**（783 / 909）。`function_24` / `25` / `14` / `13` の 4 関数だけで **74%**（657 / 909）。
 
-`function_24` / `25` は 64bit 乗算加算チェーン（`i64.mul` / `i64.add` / `i64.shr_u`）の 15 命令セグメント。SS は定数畳み込み・`tee` 融合で 1〜3 命令削減するが、ewasm は OriginalUnsat / EncodeFailed で無反応。
+`function_24` / `25` は witness 修正後も **ブロックあたり中央値 1 命令**の SS 優位が残る（`tee` で 1 命令削減が典型）。ewasm 側も合計 20 命令削減に乗ったが、SS との差 411 命令/ベンチは依然最大。
 
-`function_111` / `109` / `113` は call 前後の引数畳み込み。10s タイムアウトでも SS より +6〜+8 命令長い解を返す（② の典型）。
+### ギャップの大きさ分布（sign_test）
 
-### ③ 符号化不完全性のパターン（SS 解 `solution_found` ベース）
+| ギャップ（命令） | ブロック数 |
+|-----------------|-----------|
+| 1 | **307** |
+| 2 | **160** |
+| ≥ 3 | **69**（最大 10） |
 
-| 原因 | sign_test | mux1_1 |
-|------|-----------|--------|
-| SS が `tee` で融合・並べ替え | 193 | 203 |
-| SS が `local.tee[-1]` を使用 | 21 | 14 |
-| その他 | 65 | 20 |
+**ほぼ全てが 1〜2 命令の微差。** 大きなアルゴリズム差ではなく、局所スケジュール（tee・畳み込み）の取りこぼしが積み上がっている。
 
-`optimal` 劣後に限ると tee 融合系が **97/113**（sign_test）、**122/135**（mux1_1）を占める。
+### 残ギャップのメカニズム（対応する未実装）
+
+| メカニズム | ギャップ寄与 | なぜ ewasm が届かないか |
+|-----------|-------------|------------------------|
+| **`tee` 融合スケジュール** | ~84% | `Tee` はアルファベットにあるが、SS 解の **命令順・call 前後の spill タイミング**が CNF で探索されない／`opaque_inputs_equivalent` が落ちる |
+| **E-graph 語彙外の定数畳み込み** | ~11% | フェーズ1 の `≡_R` が SS の畳み込み結果を生成しない → SAT ではその短い式が出現しない |
+| **合成 `tee[-1]`** | ~5% | `0..max_local` の実在 slot のみ。引数上書きを避ける scratch が無い（例: `function_41`） |
+| **部分到達（②）** | ~9% | より短い解はあるが SS 解と異なるスケジュール。チェッカー正規化で同一視できればさらに縮む余地 |
+
+### 修正前との対比（参考）
+
+| 指標 | 修正前 | 修正後 |
+|------|--------|--------|
+| `no_solution`（sign_test / mux1_1） | 290 / 302 | **0 / 0** |
+| classify OriginalUnsat | ~200 / ベンチ | **0** |
+| classify EncodeFailed | ~104 / ベンチ | **0** |
+| 削減量ギャップ | 1060 / 904 | **909 / 773** |
+| ewasm 削減量 | 124 / 151 | **279 / 286** |
+| ギャップ主因 | ① `no_solution` **51%** | ① SS のみ改善 **91%**（探索は動くが SS 解が空間外） |
 
 ---
 
 ## 修正の優先度
 
-| 優先度 | 項目 | ギャップ寄与 | 内容 |
-|--------|------|-------------|------|
-| **P1** | **OriginalUnsat** の符号化修正 | ① の **~53%**（~200 件/ベンチ） | 64bit 演算チェーンで元トレースが witness 不可。`function_24/25` が中心 |
-| **P1** | **EncodeFailed** / CNF 上限 | ① の **~28%**（~104 件/ベンチ） | `n_ops≈125`, `r=38` セグメントで CNF 膨張 |
-| **P1** | segment timeout / 劣後解の棄却 | ② **31%**（615 命令） | 10s 打ち切りで SS より長い解を返す。`function_111` 系が典型 |
-| **P1** | `opaque_inputs_equivalent` 正規化 | ③ の tee 融合系 | `i32.add` 等のオペランド順のみ異なる式を同一視 |
-| **P2** | 合成 scratch local（`tee[-1]`） | ③ の **21/14** 件 | `max_local+1` 以降に Tee スロット追加 |
-| **P3** | call 引数スケジュール | ② の `function_109/111/113` | call 前後のスタック畳み込み・並べ替え |
+| 優先度 | 項目 | 状態 | ギャップ寄与（目安） | 内容 |
+|--------|------|------|---------------------|------|
+| ~~**P1**~~ | ~~**OriginalUnsat** の符号化修正~~ | **完了** | （旧 ~51%） | `inject_trace_edges` |
+| ~~**P1**~~ | ~~**EncodeFailed** / CNF 上限~~ | **完了** | （旧 ~28% of no_solution） | `active_local_slots` + 不変ローカル短絡 |
+| **P1** | `opaque_inputs_equivalent` 正規化 | 未着手 | **~84%**（tee 融合） | `i32.add` 等のオペランド順のみ異なる式を同一視。① の最大単因 |
+| **P2** | 合成 scratch local（`tee[-1]`） | 未着手 | **~5%** | `max_local+1` 以降に Tee スロット追加 |
+| **P2** | E-graph 定数畳み込み拡張 | 未着手 | **~11%** | SS が使う畳み込み結果を語彙／規則に取り込む |
+| **P3** | call 引数スケジュール | 未着手 | `function_111` 中心 | call 前後のスタック畳み込み・並べ替え |
+| **P3** | segment timeout / 劣後解の棄却 | 要検討 | 現状 **0%** | 修正後 `non_optimal` 0。将来の保険 |
 
 ---
 
-## 実装順の推奨
+## 実装順の推奨（更新）
 
-1. **OriginalUnsat** — `function_24/25` の 64bit チェーン（ギャップ最大、全 no_solution）
-2. **EncodeFailed** — 同セグメントの CNF 上限
-3. **segment timeout 方針** — 劣後解を返さない／timeout 時は元プログラムを維持
-4. **チェッカー正規化 + 合成 local** — ③ の残り
+1. ~~**OriginalUnsat**~~ — 完了
+2. ~~**EncodeFailed**~~ — 完了
+3. **`opaque_inputs_equivalent` 正規化** — 残ギャップ **~84%**（tee 融合・並べ替え）
+4. **合成 `tee[-1]` + E-graph 畳み込み** — 残り **~16%**
+5. **call 引数スケジュール** — `function_111` 等の局所残差
 
 ---
 
@@ -122,10 +160,18 @@ SS が改善したが ewasm が追いつかなかったブロック（sign_test 
 uv run --project scripts wasm-bench-run --suite wsouper -j 20 --split 15 --segment-timeout 10 --ewasm-solver sat
 uv run --project scripts wasm-bench-plot --suite wsouper
 uv run --project scripts wasm-bench-classify-gaps --suite wsouper -j 20 --split 15 --segment-timeout 10
+cargo test function_2  # function_24/25 witness 回帰
 ```
 
 確認指標:
 
 - 削減量ギャップ（SS `saved_length` − ewasm `saved_length`）
-- `no_solution` 件数と classify の OriginalUnsat / EncodeFailed 比率
+- `no_solution` 件数と classify の OriginalWitnessMissingOp / EncodeFailed 比率
 - SS より長いブロック数
+
+**修正後の確認結果（上記 CSV）:**
+
+- `no_solution`: **0**
+- classify: **EncodeFailed / OriginalWitness* = 0**
+- checker false: **0**
+- 削減量ギャップ: sign_test **909**（修正前 1060）、mux1_1 **773**（修正前 904）
