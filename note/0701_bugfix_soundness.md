@@ -2,113 +2,130 @@ ewasmのSATは、タイムアウトしないならば、superstackと同じま�
 ベンチマークの結果を分析して、これに反するケースがないか確認してください。
 もし、反例があれば、ewasmのバグの原因を突き止めてください。
 
-# ewasm 健全性・ベンチギャップ修正の優先度
+# ewasm 健全性・ベンチギャップ分析
 
-更新データ: `bench-results/wsouper/raw/ewasm-{sign_test,mux1_1}.csv`（`--split 60`, segment timeout 5s）  
+更新データ: `bench-results/wsouper/raw/ewasm-{sign_test,mux1_1}.csv`（`--split 15`, segment timeout 10s）  
 詳細分析: [`0701_ewasm_bug.md`](0701_ewasm_bug.md)
 
 **設計不変条件:** SAT 失敗時に A* へフォールバックしてはならない。
 
 ---
 
-## ベンチマーク概要（更新後）
+## 健全性チェック
 
-比較対象: 759 / 760 ブロック（`block_id` でマージ）
+**健全性バグ（誤って長い解を受理）は見つからなかった。**
 
-| | sign_test | mux1_1 |
-|--|-----------|--------|
-| ewasm 削減率 | 20 / 12752 (**0.16%**) | 22 / 12294 (**0.18%**) |
-| superstack 削減率 | 1363 (**10.69%**) | 1244 (**10.12%**) |
-| **SS と同じ**（`optimized_length` 一致） | **559** | **569** |
-| **SS と同じ**（`saved_length` 一致） | **572** | **581** |
-| ewasm の方が短い（`optimized_length`） | 181 | 172 |
-| ewasm の方が長い（`optimized_length`） | **19**（+36 命令） | **19**（+36 命令） |
-| SS の方が多く削減（`saved_length`） | **168** | **162** |
-| ewasm の方が多く削減（`saved_length`） | 19 | 17 |
-| ewasm `no_solution` | **181** | **172** |
-
-`optimized_length` 一致 559/569 件のうち、ewasm outcome は `optimal` 551/561・`non_optimal` 8/8（いずれも SS と同長でタイムアウトなし）。
-
-両ベンチで **劣後 19 ブロック（`optimized_length` で SS より長い）は同一集合**（`function_106_block_7` の +7 を含む）。
+| 観点 | 結果 |
+|------|------|
+| ewasm が SS より短い | **301 / 302 件** — いずれも `no_solution`。ewasm は解を返せず SS のみ改善 |
+| ewasm が SS より長い（タイムアウトなし） | **113 / 135 件** — `outcome=optimal`。符号化内最適だが SS 解は探索空間外 |
+| ewasm が SS より長い（タイムアウト） | **166 / 102 件** — `non_optimal`（10s 打ち切り） |
+| ewasm が短い解を見つけたケース | **0 件** |
+| checker が false の劣後ケース | **0 件** |
 
 ---
 
-## ギャップの内訳
+## ベンチマーク概要
 
-### 1. `no_solution`（支配的）
+比較対象: **1251 / 1227** ブロック（`block_id` でマージ）
 
 | | sign_test | mux1_1 |
 |--|-----------|--------|
-| 件数 | 181 | 172 |
-| うち SS が改善したブロック | 149 | 143 |
-| SS 削減命令数（ewasm は 0） | **1307** | **1186** |
-| 全体ギャップに占める割合 | **≈97%** | **≈97%** |
+| ewasm 削減率 | 124 / 12752 (**0.97%**) | 151 / 12292 (**1.23%**) |
+| superstack 削減率 | 1184 / 12746 (**9.29%**) | 1055 / 12286 (**8.59%**) |
+| 削減量ギャップ（SS − ewasm） | **1060 命令** | **904 命令** |
+| SS と同じ（`optimized_length` 一致） | 671 | 688 |
+| ewasm `no_solution` | 290 | 302 |
+| ewasm が SS より長い | 279（+558 命令） | 237（+390 命令） |
 
-60 命令チャンクが中心（sign_test: 137 件で SS が 1072 命令削減、mux1_1: 128 件で 930 命令削減）。
+---
 
-`--classify-sat-gaps` 診断（timeout / `non_optimal` を除く）:
+## 削減量ギャップの主因
+
+ewasm が SS より少なく削減した命令数（`saved_length` の差）を原因別に分解する。
+
+### 3 分類（`saved_length` ベース）
+
+| 原因 | sign_test | mux1_1 | 合計 | 割合 |
+|------|-----------|--------|------|------|
+| **① `no_solution`**（ewasm は 0 削減、SS のみ改善） | 489 / 1060 | 514 / 904 | **1003** | **51%** |
+| **② segment timeout**（`non_optimal` で SS より長い解を返却） | 406 / 1060 | 209 / 904 | **615** | **31%** |
+| **③ 符号化の不完全性**（`optimal` だが SS より長い） | 152 / 1060 | 181 / 904 | **333** | **17%** |
+
+**結論:** ギャップの過半数は ewasm が解を一切返せない `no_solution`（①）。次いで 10s セグメントタイムアウトによる劣後解の採用（②）が 3 割。
+
+### ① `no_solution` の内訳（`--classify-sat-gaps` 再診断）
+
+SS が改善したが ewasm が追いつかなかったブロック（sign_test **376** / mux1_1 **377** 件）を診断:
 
 | 診断 | sign_test | mux1_1 | 意味 |
 |------|-----------|--------|------|
-| **EncodeFailed** | **98** | **92** | CNF 生成失敗（句数上限・encode タイムアウト等） |
-| **VocabBuildFailed** | **41** | **41** | 語彙 `|V| > MAX_VOCAB(64)` 等で構築失敗 |
-| **OriginalUnsat** | **10** | **10** | 符号化が元プログラムを witness できない |
-| **Solved + proven_optimal**（SSより長い） | **14** | **14** | 符号化内では最適だが SS 解は探索空間外 |
-| TooLong | **0** | **0** | — |
+| **OriginalUnsat** | **199** | **200** | 符号化が元プログラムすら witness できない |
+| **EncodeFailed** | **104** | **104** | CNF 生成失敗（句数上限等。`n_ops≈125`, `r=38` が集中） |
+| **Solved + proven_optimal**（SS より長い） | **63** | **63** | SAT は動いたが SS 解は探索空間外 |
+| **Solved + timed_out** | **9** | **9** | 再診断時の SAT タイムアウト |
 
-### 2. SAT は動いたが SS より長い（19 件）
+`no_solution` 寄与の **約 3 割は EncodeFailed**、**過半数は OriginalUnsat** が支配的。いずれも SAT がそもそも探索を開始できない／元トレースを満たせない系。
 
-| ewasm outcome | 件数 | 代表 block |
-|---------------|------|------------|
-| `optimal`（符号化内最適） | **14** | `41_block_4/5`, `34_block_2`, `17_block_0/3`, `18_block_22` 等 |
-| `non_optimal`（5s timeout） | **5** | `106_block_7`(+7), `58_block_9`, `16_block_0_1`, `19_block_18`, `96_block_8` |
+### 関数別の集中
 
-SS 解のパターン（19 件共通）:
+ギャップの **65〜76%** が `function_25` / `24` / `14` / `13` の 4 関数に集中:
 
-| 原因 | 件数 | 該当 |
-|------|------|------|
-| SS が `local.tee[-1]` を使用 | **10** | `41_block_4/5`, `42/43_block_2`, `61_block_4`, `69_block_1`, `17_block_0/3`, `58_block_9`, `106_block_7` |
-| SS が `tee`（実在 local）で融合・並べ替え | **8** | `34_block_2`, `94_block_2/8`, `32_block_9`, `14_block_0_19`, `19_block_18`, `96_block_8` 等 |
-| スタック直結（set/get 迂回不要） | **1** | `18_block_22` |
+| 関数 | sign_test ギャップ | 主因 |
+|------|-------------------|------|
+| `function_25` | 249（135 ブロック） | `no_solution` **211**、timeout 23 |
+| `function_24` | 180（126 ブロック） | `no_solution` **180**（全件） |
+| `function_14` | 161（76 ブロック） | 符号化不完全 **62**、no_solution 73、timeout 26 |
+| `function_111` | 190（53 ブロック） | timeout **188**（call 引数畳み込み系） |
+
+`function_24` / `25` は 64bit 乗算加算チェーン（`i64.mul` / `i64.add` / `i64.shr_u`）の 15 命令セグメント。SS は定数畳み込み・`tee` 融合で 1〜3 命令削減するが、ewasm は OriginalUnsat / EncodeFailed で無反応。
+
+`function_111` / `109` / `113` は call 前後の引数畳み込み。10s タイムアウトでも SS より +6〜+8 命令長い解を返す（② の典型）。
+
+### ③ 符号化不完全性のパターン（SS 解 `solution_found` ベース）
+
+| 原因 | sign_test | mux1_1 |
+|------|-----------|--------|
+| SS が `tee` で融合・並べ替え | 193 | 203 |
+| SS が `local.tee[-1]` を使用 | 21 | 14 |
+| その他 | 65 | 20 |
+
+`optimal` 劣後に限ると tee 融合系が **97/113**（sign_test）、**122/135**（mux1_1）を占める。
 
 ---
 
 ## 修正の優先度
 
-| 優先度 | 項目 | 対象件数 | 内容 |
-|--------|------|----------|------|
-| **P1** | `EncodeFailed` / CNF 上限 | classify **90〜98** / no_solution の大半 | 60 命令チャンクの CNF が `MAX_CNF_CLAUSES` 等で失敗。緩和・段階 encode・分割の見直し |
-| **P1** | `VocabBuildFailed` | classify **41** × 2 ベンチ | `MAX_VOCAB=64` 超過。語彙 pruning または上限引き上げ |
-| **P1** | 合成 scratch local（`tee[-1]` 相当） | 劣後 **10** / `optimal` **8** | `max_local+1` 以降に Tee スロット追加。fin では `★` 扱い |
-| **P1** | `opaque_inputs_equivalent` の可換演算正規化 | 劣後 **6〜8**（tee 融合系） | `i32.add` 等のオペランド順のみ異なる式を同一視 |
-| **P2** | `OriginalUnsat` の符号化修正 | classify **10** × 2 ベンチ | 例: `function_40_block_0`（3 命令）で witness 不可 |
-| **P3** | call 前後のスタック保持スケジュール | 劣後の一部 | `tee[5]` を call 後へ移す等、SS 解固有の並べ替え |
-| **P3** | スタック直結 | **1**（`18_block_22`） | `i64.load` → `i64.div_u` の local 迂回除去 |
-| **P4** | segment timeout 延長 | **5**（`non_optimal`） | 5s 打ち切り。`106_block_7` の +7 が最大 |
-| **P4** | `optimal` ラベルの修正 | 表示のみ | 符号化内最適とグローバル最適を区別（`statistics.rs`） |
+| 優先度 | 項目 | ギャップ寄与 | 内容 |
+|--------|------|-------------|------|
+| **P1** | **OriginalUnsat** の符号化修正 | ① の **~53%**（~200 件/ベンチ） | 64bit 演算チェーンで元トレースが witness 不可。`function_24/25` が中心 |
+| **P1** | **EncodeFailed** / CNF 上限 | ① の **~28%**（~104 件/ベンチ） | `n_ops≈125`, `r=38` セグメントで CNF 膨張 |
+| **P1** | segment timeout / 劣後解の棄却 | ② **31%**（615 命令） | 10s 打ち切りで SS より長い解を返す。`function_111` 系が典型 |
+| **P1** | `opaque_inputs_equivalent` 正規化 | ③ の tee 融合系 | `i32.add` 等のオペランド順のみ異なる式を同一視 |
+| **P2** | 合成 scratch local（`tee[-1]`） | ③ の **21/14** 件 | `max_local+1` 以降に Tee スロット追加 |
+| **P3** | call 引数スケジュール | ② の `function_109/111/113` | call 前後のスタック畳み込み・並べ替え |
 
 ---
 
 ## 実装順の推奨
 
-1. **P1 EncodeFailed + VocabBuildFailed** — `no_solution` 181/172 件の本体（60 命令チャンク）
-2. **P1 合成 local** — `41/42/43` 系・`106_block_7` など
-3. **P1 チェッカー正規化** — SAT が見つけても棄却される経路
-4. **P2 OriginalUnsat** — 短ブロックの即失敗
-5. **P3–P4** — 残件・UX
+1. **OriginalUnsat** — `function_24/25` の 64bit チェーン（ギャップ最大、全 no_solution）
+2. **EncodeFailed** — 同セグメントの CNF 上限
+3. **segment timeout 方針** — 劣後解を返さない／timeout 時は元プログラムを維持
+4. **チェッカー正規化 + 合成 local** — ③ の残り
 
 ---
 
 ## 検証
 
 ```bash
-uv run --project scripts wasm-bench-run --suite wsouper -j 20 --split 60 --segment-timeout 5
+uv run --project scripts wasm-bench-run --suite wsouper -j 20 --split 15 --segment-timeout 10 --ewasm-solver sat
 uv run --project scripts wasm-bench-plot --suite wsouper
-cargo run --release -- benchmarks/wsouper/sign_test.wasm --split 60 --classify-sat-gaps bench-results/wsouper/combined_blocks.csv
+uv run --project scripts wasm-bench-classify-gaps --suite wsouper -j 20 --split 15 --segment-timeout 10
 ```
 
 確認指標:
 
-- `no_solution` 件数（目標: EncodeFailed / VocabBuildFailed の減少）
-- SS より長いブロック数（timeout 除き 0 に近づける）
-- `reduction_by_benchmark.png` の削減率
+- 削減量ギャップ（SS `saved_length` − ewasm `saved_length`）
+- `no_solution` 件数と classify の OriginalUnsat / EncodeFailed 比率
+- SS より長いブロック数

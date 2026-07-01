@@ -190,7 +190,8 @@ pub fn statistics_row(result: &SegmentOptResult, canon: &mut Canonizer) -> Stati
                 saved,
             )
         } else {
-            (String::new(), 0, 0, initial_len, 0)
+            // No accepted model: final solution is the original block.
+            (String::new(), initial_len, initial_len, initial_len, 0)
         };
 
     StatisticsRow {
@@ -262,6 +263,30 @@ mod tests {
     fn block_id_matches_superstack_naming() {
         let seg = empty_segment(vec![]);
         assert_eq!(block_id(&seg), "function_0_block_0");
+    }
+
+    #[test]
+    fn no_solution_reports_original_length() {
+        use crate::synthesis::test_synthesis_rewrites;
+        let mut canon = Canonizer::new(test_synthesis_rewrites());
+        let segment = empty_segment(vec![SemOp::I32Add, SemOp::I32Mul]);
+        let initial_len = segment.original_len();
+        let row = statistics_row(
+            &SegmentOptResult {
+                segment,
+                optimized: None,
+                timed_out: false,
+                solver_time_secs: 0.0,
+                timeout_secs: 10,
+            },
+            &mut canon,
+        );
+        assert_eq!(row.outcome, "no_solution");
+        assert_eq!(row.final_solution_tag, "original");
+        assert_eq!(row.optimized_length, initial_len);
+        assert_eq!(row.optimized_n_instrs, initial_len);
+        assert_eq!(row.saved_length, 0);
+        assert!(row.solution_found.is_empty());
     }
 
     #[test]

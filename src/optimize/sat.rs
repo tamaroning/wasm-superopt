@@ -36,10 +36,23 @@ use egg::{Id, Runner};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-/// Max value-vocabulary size `|V|`. Core trace values fit in ≤64; extra slots for subtrees/saturation.
-const MAX_VOCAB: usize = 96;
+/// Minimum value-vocabulary size `|V|` (short straight-line chunks).
+const MIN_VOCAB: usize = 64;
+/// Hard cap on `|V|` — binop tables are `O(|V|²)` and CNF grows with `|V|`.
+const MAX_VOCAB_CAP: usize = 160;
+/// Extra slots beyond segment length for synthesis constants and saturation.
+const VOCAB_HEADROOM: usize = 20;
+
+/// Scale `|V|` with segment length so long unsplit chunks (e.g. `--split 60`) fit trace values.
+fn max_vocab_for_segment(segment: &StraightSegment) -> usize {
+    segment
+        .ops
+        .len()
+        .saturating_add(VOCAB_HEADROOM)
+        .clamp(MIN_VOCAB, MAX_VOCAB_CAP)
+}
 /// Abort CNF generation beyond this many clauses (heavy sign_test blocks exceed ~1.5M).
-const MAX_CNF_CLAUSES: usize = 2_000_000;
+const MAX_CNF_CLAUSES: usize = 8_000_000;
 /// Equivalence-saturation rounds for vocabulary expansion (`k_sat`).
 const K_SAT: usize = 2;
 /// Equality-saturation limits for the batched operation-result-table build.
@@ -56,17 +69,9 @@ fn stack_ty_of_expr(expr: &ValueExpr) -> Option<StackTy> {
     }
 }
 
-/// Types present in `V` or the original segment — used to prune the SAT op tables.
-fn types_in_segment_and_vocab(
-    segment: &StraightSegment,
-    vocab: &Vocab,
-) -> HashSet<StackTy> {
+/// Stack types referenced by the segment (ops + boundary states).
+fn types_in_segment(segment: &StraightSegment) -> HashSet<StackTy> {
     let mut types = HashSet::new();
-    for e in &vocab.reals {
-        if let Some(ty) = stack_ty_of_expr(e) {
-            types.insert(ty);
-        }
-    }
     for sem in &segment.ops {
         if let Some(ty) = const_stack_ty(sem) {
             types.insert(ty);
@@ -76,6 +81,53 @@ fn types_in_segment_and_vocab(
                 types.insert(t);
             }
             types.insert(v.push());
+        }
+    }
+    for e in segment
+        .init
+        .stack
+        .iter()
+        .chain(segment.fin.stack.iter())
+    {
+        if let Some(ty) = stack_ty_of_expr(e) {
+            types.insert(ty);
+        }
+    }
+    for req in segment
+        .init
+        .locals
+        .values()
+        .chain(segment.fin.locals.values())
+    {
+        if let LocalReq::Need(e) = req {
+            if let Some(ty) = stack_ty_of_expr(e) {
+                types.insert(ty);
+            }
+        }
+    }
+    types
+}
+
+/// Synthesis leaf constants limited to types that appear in the segment.
+fn synthesis_const_exprs_for_types(types: &HashSet<StackTy>) -> Vec<ValueExpr> {
+    synthesis_const_exprs()
+        .into_iter()
+        .filter(|e| {
+            stack_ty_of_expr(e)
+                .is_some_and(|ty| types.contains(&ty))
+        })
+        .collect()
+}
+
+/// Types present in `V` or the original segment — used to prune the SAT op tables.
+fn types_in_segment_and_vocab(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+) -> HashSet<StackTy> {
+    let mut types = types_in_segment(segment);
+    for e in &vocab.reals {
+        if let Some(ty) = stack_ty_of_expr(e) {
+            types.insert(ty);
         }
     }
     types
@@ -435,7 +487,7 @@ fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
 }
 
 fn build_vocab(segment: &StraightSegment, canon: &mut Canonizer, deadline: Instant) -> Option<(Vocab, usize)> {
-    build_vocab_with_limit(segment, canon, MAX_VOCAB, deadline)
+    build_vocab_with_limit(segment, canon, max_vocab_for_segment(segment), deadline)
 }
 
 fn try_insert_vocab(
@@ -473,10 +525,11 @@ fn build_vocab_with_limit(
     let mut reals: Vec<ValueExpr> = Vec::new();
     let mut canon_ids: Vec<CanonId> = Vec::new();
 
-    // Phase 1 — core vocabulary (trace + synthesis constants). These MUST all fit so
-    // the original sequence is representable (first descending solve is trivially SAT).
+    // Phase 1 — core vocabulary (trace + type-filtered synthesis constants). These MUST
+    // all fit so the original sequence is representable (first descending solve is SAT).
+    let types = types_in_segment(segment);
     let mut core: Vec<ValueExpr> = seeds;
-    core.extend(synthesis_const_exprs());
+    core.extend(synthesis_const_exprs_for_types(&types));
     dedup_by_string(&mut core);
 
     for e in &core {
@@ -1754,9 +1807,24 @@ pub fn solve_sat(
 mod tests {
     use super::*;
     use crate::synthesis::test_synthesis_rewrites;
+    use crate::wasm::{materialize_segments, parse_wasm_file, split_raw_segments};
 
     fn rules() -> Vec<egg::Rewrite<crate::lang::ValueLang, ()>> {
         test_synthesis_rewrites()
+    }
+
+    /// Phase-1 core vocabulary size (unique ≡_R classes) without subtree/saturation expansion.
+    fn core_vocab_size(segment: &StraightSegment, rules: &[egg::Rewrite<crate::lang::ValueLang, ()>]) -> usize {
+        let mut canon = Canonizer::new(rules.to_vec());
+        let limit = max_vocab_for_segment(segment);
+        build_vocab_with_limit(
+            segment,
+            &mut canon,
+            limit,
+            Instant::now() + std::time::Duration::from_secs(120),
+        )
+        .map(|(v, _)| v.n())
+        .expect("core vocab build")
     }
 
     #[test]
@@ -1771,4 +1839,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sign_test_split_60_core_vocab_within_dynamic_limit() {
+        let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
+        if !path.is_file() {
+            return;
+        }
+        let info = parse_wasm_file(path).expect("parse sign_test");
+        let raw = split_raw_segments(&info.segments, 60);
+        let segments = materialize_segments(&raw, 1);
+        let r = rules();
+        let mut max_core = 0usize;
+        let mut worst = String::new();
+        for seg in &segments {
+            let n = core_vocab_size(seg, &r);
+            if n > max_core {
+                max_core = n;
+                worst = crate::optimize::statistics::block_id(seg);
+            }
+            assert!(
+                n <= max_vocab_for_segment(seg),
+                "core |V|={n} exceeds limit {} for {}",
+                max_vocab_for_segment(seg),
+                crate::optimize::statistics::block_id(seg)
+            );
+        }
+        eprintln!("sign_test split=60: max core |V|={max_core} ({worst})");
+        assert!(max_core <= MAX_VOCAB_CAP);
+    }
+
+    #[test]
+    fn max_vocab_scales_with_segment_length() {
+        let wasm = wat::parse_str(
+            r#"(module (func (param i32) local.get 0 i32.const 1 i32.add))"#,
+        )
+        .unwrap();
+        let info = crate::wasm::parse_wasm_bytes(&wasm).unwrap();
+        let short = materialize_segments(&info.segments, 1).pop().unwrap();
+        assert_eq!(max_vocab_for_segment(&short), MIN_VOCAB);
+
+        let long_ops: Vec<SemOp> = (0..60)
+            .map(|_| SemOp::LocalGet(0))
+            .collect();
+        let long = StraightSegment {
+            ops: long_ops,
+            ..short.clone()
+        };
+        assert_eq!(max_vocab_for_segment(&long), 80);
+    }
 }
