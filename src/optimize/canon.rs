@@ -166,6 +166,33 @@ impl Canonizer {
         runner.egraph.id_to_expr(id)
     }
 
+    /// Partition `exprs` by ≡_R e-class after a single joint equality saturation.
+    ///
+    /// Returns one class id per expression (parallel to `exprs`). Used to close opaque
+    /// operand pins over the full equivalence class, not just per-call `canon()` ids.
+    pub fn equiv_partition(&self, exprs: &[ValueExpr]) -> Vec<usize> {
+        if exprs.is_empty() {
+            return Vec::new();
+        }
+        let mut runner = Runner::default()
+            .with_iter_limit(EQSAT_ITER_LIMIT)
+            .with_node_limit(EQSAT_NODE_LIMIT);
+        let ids: Vec<Id> = exprs.iter().map(|e| runner.egraph.add_expr(e)).collect();
+        let runner = runner.run(&self.rules);
+        let mut eclass_to_idx: HashMap<Id, usize> = HashMap::new();
+        let mut next = 0usize;
+        ids.iter()
+            .map(|id| {
+                let ec = runner.egraph.find(*id);
+                *eclass_to_idx.entry(ec).or_insert_with(|| {
+                    let idx = next;
+                    next += 1;
+                    idx
+                })
+            })
+            .collect()
+    }
+
     pub fn binop_decompositions(&self, expr: &ValueExpr) -> Vec<(InstKind, ValueExpr, ValueExpr)> {
         let runner = self.saturate(expr);
         let root = runner.roots[0];
@@ -248,6 +275,16 @@ mod tests {
         let mul = parse_value_expr("(i32.mul (i32.add ?L0 1) 2)");
         let shl = parse_value_expr("(i32.shl (i32.add ?L0 1) 1)");
         assert_eq!(canon.canon(&mul), canon.canon(&shl));
+    }
+
+    #[test]
+    fn commutative_add_operands_share_equiv_partition_class() {
+        let canon = Canonizer::new(rules());
+        let a = parse_value_expr("(i32.add (i32.sub ?L4 1) ?L1)");
+        let b = parse_value_expr("(i32.add ?L1 (i32.sub ?L4 1))");
+        let parts = canon.equiv_partition(&[a.clone(), b.clone()]);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], parts[1], "commutative add operands should share e-class");
     }
 
     #[test]

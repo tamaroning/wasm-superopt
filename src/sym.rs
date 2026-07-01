@@ -1,8 +1,9 @@
 //! Symbolic machine state and forward execution (shared by wasm parsing and optimization).
 
+use crate::al::eval_value_ast_concrete_sig;
 use crate::lang::{F32Bits, F64Bits, ValueLang};
-use crate::semantics::{sem_to_value_op, SemOp};
-use crate::value::ValueOp;
+use crate::semantics::{sem_to_value_op, SemOp, StackTy};
+use crate::value::{RuleSignature, ValueAst, ValueOp};
 use crate::wasm::{OpaqueMeta, SegmentBounds};
 use egg::{Id, RecExpr, Symbol};
 use std::collections::{BTreeMap, HashMap};
@@ -100,7 +101,81 @@ fn i64_const_expr(n: i64) -> ValueExpr {
     dst
 }
 
+fn int_literal_from_expr(expr: &ValueExpr) -> Option<(StackTy, i64)> {
+    match &expr[expr.root()] {
+        ValueLang::I32Const(c) => Some((StackTy::I32, *c as i64)),
+        ValueLang::I64Const(c) => Some((StackTy::I64, *c)),
+        _ => None,
+    }
+}
+
+fn int_literal_expr(ty: StackTy, value: i64) -> Option<ValueExpr> {
+    match ty {
+        StackTy::I32 => Some(i32_const_expr(value as i32)),
+        StackTy::I64 => Some(i64_const_expr(value)),
+        StackTy::F32 | StackTy::F64 => None,
+    }
+}
+
+fn constant_foldable_value_op(op: ValueOp) -> bool {
+    use ValueOp::*;
+    matches!(
+        op,
+        I32Add
+            | I32Sub
+            | I32Mul
+            | I32And
+            | I32Or
+            | I32Xor
+            | I32Shl
+            | I32ShrU
+            | I32ShrS
+            | I64Add
+            | I64Sub
+            | I64Mul
+            | I64And
+            | I64Or
+            | I64Xor
+            | I64Shl
+            | I64ShrU
+            | I64ShrS
+    )
+}
+
+fn fold_constant_value_op(vop: ValueOp, args: &[ValueExpr]) -> Option<ValueExpr> {
+    if !constant_foldable_value_op(vop) || args.len() != 2 {
+        return None;
+    }
+    let (a_ty, a_val) = int_literal_from_expr(&args[0])?;
+    let (b_ty, b_val) = int_literal_from_expr(&args[1])?;
+    let pops = vop.pops();
+    if pops.len() != 2 || pops[0] != a_ty || pops[1] != b_ty {
+        return None;
+    }
+    let ast = ValueAst::app(
+        vop,
+        vec![
+            ValueAst::const_ty(a_ty, a_val),
+            ValueAst::const_ty(b_ty, b_val),
+        ],
+    );
+    let sig = RuleSignature {
+        inputs: pops.to_vec(),
+        output: vop.push(),
+    };
+    let result = eval_value_ast_concrete_sig(&sig, &ast, &[]);
+    if result.trap {
+        None
+    } else {
+        int_literal_expr(vop.push(), result.value)
+    }
+}
+
 fn apply_value_op(vop: ValueOp, args: &[ValueExpr]) -> ValueExpr {
+    if let Some(folded) = fold_constant_value_op(vop, args) {
+        return folded;
+    }
+
     let mut dst = RecExpr::default();
     let mut memo = HashMap::new();
     let arg_ids: Vec<Id> = args
@@ -480,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn i64_add_builds_expr_tree_not_opaque() {
+    fn i64_add_constant_folds_not_opaque() {
         let bounds = SegmentBounds::new(1, 8);
         let mut m = SymMachine::function_entry(0, 1, bounds.max_stack);
         m.begin_segment();
@@ -489,8 +564,22 @@ mod tests {
         m.exec(&SemOp::Pure(crate::value::ValueOp::I64Add))
             .unwrap();
         let top = m.to_fin_state().stack.last().expect("top").to_string();
-        assert!(top.contains("i64.add"), "expected expr tree, got {top}");
+        assert_eq!(top, "3");
         assert!(!top.contains("?opaque_"), "i64.add must not be opaque: {top}");
+    }
+
+    #[test]
+    fn integer_constant_fold_handles_bitmask_shift_chain() {
+        let bounds = SegmentBounds::new(1, 8);
+        let mut m = SymMachine::function_entry(0, 1, bounds.max_stack);
+        m.begin_segment();
+        m.exec(&SemOp::I64Const(0)).unwrap();
+        m.exec(&SemOp::I64Const(4294967295)).unwrap();
+        m.exec(&SemOp::Pure(ValueOp::I64And)).unwrap();
+        m.exec(&SemOp::I64Const(1)).unwrap();
+        m.exec(&SemOp::Pure(ValueOp::I64Shl)).unwrap();
+        let top = m.to_fin_state().stack.last().expect("top").to_string();
+        assert_eq!(top, "0");
     }
 
     #[test]
