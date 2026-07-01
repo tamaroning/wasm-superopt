@@ -180,13 +180,7 @@ fn main() {
     eprintln!("materialized {} segment(s)", segments.len());
     let _ = io::stderr().flush();
 
-    let cfg = optimize::SearchConfig {
-        max_depth: cli.window,
-        timeout_secs: None,
-        direct_timeout: cli.direct_timeout && cli.segment_timeout.is_none(),
-        fixed_segment_timeout: cli.segment_timeout,
-        backend: cli.solver.into(),
-    };
+    let cfg = search_config_from_cli(&cli);
     let results = optimize::optimize_and_print_segments(
         &segments,
         &rules,
@@ -212,8 +206,19 @@ fn main() {
     let _ = io::stdout().flush();
 }
 
+fn search_config_from_cli(cli: &Cli) -> optimize::SearchConfig {
+    optimize::SearchConfig {
+        max_depth: cli.window,
+        timeout_secs: None,
+        direct_timeout: cli.direct_timeout && cli.segment_timeout.is_none(),
+        fixed_segment_timeout: cli.segment_timeout,
+        backend: cli.solver.into(),
+        max_sat_len: optimize::max_sat_len_for_split(cli.split),
+    }
+}
+
 fn run_sat_profile(path: &std::path::Path, cli: &Cli) {
-    use optimize::{SearchConfig, block_id, profile_sat};
+    use optimize::{block_id, profile_sat};
     use std::collections::HashMap;
     use wasm::{materialize_segments, split_raw_segments};
 
@@ -230,13 +235,7 @@ fn run_sat_profile(path: &std::path::Path, cli: &Cli) {
     let segments = materialize_segments(&raw, cli.jobs);
     let by_id: HashMap<String, _> = segments.iter().map(|s| (block_id(s), s)).collect();
 
-    let cfg = SearchConfig {
-        max_depth: cli.window,
-        timeout_secs: None,
-        direct_timeout: cli.direct_timeout && cli.segment_timeout.is_none(),
-        fixed_segment_timeout: cli.segment_timeout,
-        backend: cli.solver.into(),
-    };
+    let cfg = search_config_from_cli(cli);
 
     for want in &cli.sat_profile {
         let Some(seg) = by_id.get(want) else {
@@ -253,7 +252,7 @@ fn run_sat_profile(path: &std::path::Path, cli: &Cli) {
 
 fn run_classify_sat_gaps(path: &std::path::Path, csv_path: &std::path::Path, cli: &Cli) {
     use optimize::{
-        SearchConfig, classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv,
+        classify_sat_gaps_parallel, print_gap_summary, problem_blocks_from_csv,
     };
     use wasm::{materialize_segments, split_raw_segments};
 
@@ -281,13 +280,7 @@ fn run_classify_sat_gaps(path: &std::path::Path, csv_path: &std::path::Path, cli
     let syn = load_or_synthesize_rules(max_ast, max_arity, cli.random_tests, cli.jobs);
     let rules = synthesized_to_rewrites(&syn);
 
-    let cfg = SearchConfig {
-        max_depth: cli.window,
-        timeout_secs: None,
-        direct_timeout: cli.direct_timeout && cli.segment_timeout.is_none(),
-        fixed_segment_timeout: cli.segment_timeout,
-        backend: cli.solver.into(),
-    };
+    let cfg = search_config_from_cli(cli);
 
     let rows = classify_sat_gaps_parallel(&segments, &problem_ids, &rules, &cfg, cli.jobs);
     print_gap_summary(&rows);

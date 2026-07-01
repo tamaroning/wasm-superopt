@@ -21,7 +21,7 @@ pub use statistics::block_id;
 use search::solve_astar_traced;
 pub use search::{
     Backend, DEFAULT_MAX_DEPTH, DEFAULT_TIMEOUT_BASE_SECS, DIRECT_TIMEOUT_SECS, SearchConfig,
-    format_ops,
+    format_ops, max_sat_len_for_split,
 };
 pub use search_graph::SearchTrace;
 pub use statistics::{statistics_rows, write_statistics_csv};
@@ -93,8 +93,8 @@ pub fn optimize_segment_with_trace(
         };
     }
     let (result, trace) = if segment_cfg.backend == Backend::Sat {
-        // The SAT backend handles all segments (including side effects) directly; if
-        // it cannot improve/encode a segment it keeps the original (no A* fallback).
+        // SAT backend only. On failure (`ops = None`), do NOT fall back to A* —
+        // that would mix semantics and invalidate SuperStack-style statistics.
         (sat::solve_sat(segment, rules, &segment_cfg), None)
     } else {
         let mut trace = dump_search.map(|_| SearchTrace::default());

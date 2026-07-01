@@ -32,6 +32,19 @@ def _format_cmd(cmd: list[str]) -> str:
     return " ".join(f'"{part}"' if " " in part else part for part in cmd)
 
 
+def _parse_only_names(values: list[str] | None) -> set[str] | None:
+    """Split --only values on commas and whitespace (e.g. mux1_1,mux2_2 or mux1_1 mux2_2)."""
+    if not values:
+        return None
+    names: set[str] = set()
+    for value in values:
+        for part in value.split(","):
+            part = part.strip()
+            if part:
+                names.add(part)
+    return names or None
+
+
 def build_ewasm(*, console: Console, plain: bool) -> int:
     cmd = ["cargo", "build", "--release"]
     label = _format_cmd(cmd)
@@ -240,7 +253,12 @@ def main() -> int:
         help="Tools to run (default: suite-specific; wsouper uses ewasm + superstack SAT)",
     )
     parser.add_argument("--limit", type=int, default=0, help="Limit number of wasm files (0 = all)")
-    parser.add_argument("--only", nargs="*", help="Run only these benchmark basenames")
+    parser.add_argument(
+        "--only",
+        nargs="*",
+        metavar="NAME",
+        help="Run only these benchmark basenames (comma- or space-separated)",
+    )
     parser.add_argument(
         "--plain",
         action="store_true",
@@ -270,8 +288,8 @@ def main() -> int:
     (out_dir_path / ".keep").touch()
 
     wasm_files = sorted(bench_dir.glob("*.wasm"))
-    if args.only:
-        only = set(args.only)
+    only = _parse_only_names(args.only)
+    if only:
         wasm_files = [p for p in wasm_files if p.stem in only]
     if args.limit:
         wasm_files = wasm_files[: args.limit]

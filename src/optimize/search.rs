@@ -186,6 +186,18 @@ fn solution_forward_valid(
     is_grounded(&got, &segment.fin, bounds, canon)
 }
 
+/// Default SAT instruction-length cap when `--split 0` (no chunking).
+pub const DEFAULT_MAX_SAT_LEN: usize = 40;
+
+/// SAT encoding limit aligned with `--split` (chunk width); unsplit runs use [`DEFAULT_MAX_SAT_LEN`].
+pub fn max_sat_len_for_split(split: usize) -> usize {
+    if split > 0 {
+        split
+    } else {
+        DEFAULT_MAX_SAT_LEN
+    }
+}
+
 /// Solver backend for length minimization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Backend {
@@ -193,7 +205,8 @@ pub enum Backend {
     Astar,
     /// Descending Pure-SAT iteration (wasm_superopt_sat_encoding.md).
     ///
-    /// Encodes side effects directly (SuperStack-style); there is no A* fallback.
+    /// **Must not fall back to A* on failure.** Encoding errors, timeouts, and
+    /// `ops = None` from [`super::sat::solve_sat`] are final for this backend.
     #[default]
     Sat,
 }
@@ -218,6 +231,8 @@ pub struct SearchConfig {
     pub fixed_segment_timeout: Option<u64>,
     /// Solver backend (SAT by default).
     pub backend: Backend,
+    /// Max segment length for SAT encoding (`0` in segment → use [`DEFAULT_MAX_SAT_LEN`]).
+    pub max_sat_len: usize,
 }
 
 impl Default for SearchConfig {
@@ -228,6 +243,7 @@ impl Default for SearchConfig {
             direct_timeout: false,
             fixed_segment_timeout: None,
             backend: Backend::default(),
+            max_sat_len: DEFAULT_MAX_SAT_LEN,
         }
     }
 }
@@ -243,6 +259,7 @@ impl SearchConfig {
             direct_timeout: self.direct_timeout,
             fixed_segment_timeout: self.fixed_segment_timeout,
             backend: self.backend,
+            max_sat_len: self.max_sat_len,
         }
     }
 }

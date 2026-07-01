@@ -13,8 +13,12 @@
 //! uninterpreted instruction that consumes its operand values and produces fresh
 //! result symbols. `storage` ops must appear exactly once, non-storage opaque ops
 //! at most once, and the segment's dependency list (`deplist`) is enforced as a
-//! relative-order constraint between the corresponding steps. There is no A*
-//! fallback: if a segment cannot be encoded/improved, the original is kept.
+//! relative-order constraint between the corresponding steps.
+//!
+//! **Design invariant:** if SAT encoding or search fails (timeout, too long, CNF
+//! build failure, witness UNSAT, etc.), the optimizer **must not** fall back to
+//! the A* backend. The driver reports no model (`optimized = None`) and the
+//! segment is left unchanged in the output module.
 
 use super::canon::{CanonId, Canonizer};
 use super::search::{SearchConfig, SearchResult, solution_valid};
@@ -32,13 +36,10 @@ use egg::{Id, Runner};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-/// Max instruction-length upper bound `L` for SAT encoding; longer segments fall back.
-const MAX_SAT_LEN: usize = 40;
-/// Max value-vocabulary size `|V|`; larger problems fall back to A*.
-/// mux1_1 gap blocks need at most 53 base values (measured); 64 leaves headroom.
-const MAX_VOCAB: usize = 64;
-/// Abort CNF generation beyond this many clauses (heavy sign_test blocks exceed ~1M).
-const MAX_CNF_CLAUSES: usize = 1_500_000;
+/// Max value-vocabulary size `|V|`. Core trace values fit in ≤64; extra slots for subtrees/saturation.
+const MAX_VOCAB: usize = 96;
+/// Abort CNF generation beyond this many clauses (heavy sign_test blocks exceed ~1.5M).
+const MAX_CNF_CLAUSES: usize = 2_000_000;
 /// Equivalence-saturation rounds for vocabulary expansion (`k_sat`).
 const K_SAT: usize = 2;
 /// Equality-saturation limits for the batched operation-result-table build.
@@ -437,6 +438,26 @@ fn build_vocab(segment: &StraightSegment, canon: &mut Canonizer, deadline: Insta
     build_vocab_with_limit(segment, canon, MAX_VOCAB, deadline)
 }
 
+fn try_insert_vocab(
+    e: &ValueExpr,
+    canon: &mut Canonizer,
+    max_vocab: usize,
+    index_of_canon: &mut HashMap<CanonId, usize>,
+    reals: &mut Vec<ValueExpr>,
+    canon_ids: &mut Vec<CanonId>,
+) -> bool {
+    if reals.len() >= max_vocab {
+        return false;
+    }
+    let id = canon.canon(e);
+    if let std::collections::hash_map::Entry::Vacant(slot) = index_of_canon.entry(id) {
+        slot.insert(reals.len());
+        canon_ids.push(id);
+        reals.push(e.clone());
+    }
+    true
+}
+
 fn build_vocab_with_limit(
     segment: &StraightSegment,
     canon: &mut Canonizer,
@@ -452,38 +473,53 @@ fn build_vocab_with_limit(
     let mut reals: Vec<ValueExpr> = Vec::new();
     let mut canon_ids: Vec<CanonId> = Vec::new();
 
-    // Base vocabulary:
-    // values, plus the synthesis constants. These MUST all fit so that the original
-    // sequence is representable (the first descending solve is then trivially SAT).
-    let mut base: Vec<ValueExpr> = Vec::new();
-    for e in &seeds {
-        for sub in all_subtree_exprs(e) {
-            base.push(sub);
-        }
-    }
-    for e in synthesis_const_exprs() {
-        base.push(e);
-    }
-    dedup_by_string(&mut base);
+    // Phase 1 — core vocabulary (trace + synthesis constants). These MUST all fit so
+    // the original sequence is representable (first descending solve is trivially SAT).
+    let mut core: Vec<ValueExpr> = seeds;
+    core.extend(synthesis_const_exprs());
+    dedup_by_string(&mut core);
 
-    for e in &base {
+    for e in &core {
         if Instant::now() >= deadline {
             return None;
         }
-        let id = canon.canon(e);
-        if let std::collections::hash_map::Entry::Vacant(slot) = index_of_canon.entry(id) {
-            if reals.len() >= max_vocab {
-                return None; // base alone too large; let the caller fall back to A*
-            }
-            slot.insert(reals.len());
-            canon_ids.push(id);
-            reals.push(e.clone());
+        if !try_insert_vocab(
+            e,
+            canon,
+            max_vocab,
+            &mut index_of_canon,
+            &mut reals,
+            &mut canon_ids,
+        ) {
+            return None; // core alone exceeds |V| cap
         }
     }
 
-    // Equivalence saturation (best-effort, capped): pull in alternative arithmetic
-    // decompositions (mul/shl, …) and their operand constants so the SAT search can
-    // pick a shorter form. Capped so the encoding stays tractable.
+    // Phase 2 — subtree expansion (best-effort): dedupe by string before canon to avoid
+    // repeated e-graph work; stop at |V| cap without failing.
+    let mut subtree_candidates: Vec<ValueExpr> = Vec::new();
+    for e in &core {
+        subtree_candidates.extend(all_subtree_exprs(e));
+    }
+    dedup_by_string(&mut subtree_candidates);
+    for e in &subtree_candidates {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        if reals.len() >= max_vocab {
+            break;
+        }
+        let _ = try_insert_vocab(
+            e,
+            canon,
+            max_vocab,
+            &mut index_of_canon,
+            &mut reals,
+            &mut canon_ids,
+        );
+    }
+
+    // Phase 3 — equivalence saturation (best-effort, capped): mul/shl decompositions, etc.
     let mut frontier: Vec<ValueExpr> = reals.clone();
     'rounds: for _ in 0..K_SAT {
         if Instant::now() >= deadline {
@@ -499,18 +535,17 @@ fn build_vocab_with_limit(
                     .into_iter()
                     .chain(all_subtree_exprs(&e2))
                 {
-                    let id = canon.canon(&cand);
-                    if let std::collections::hash_map::Entry::Vacant(slot) =
-                        index_of_canon.entry(id)
-                    {
-                        if reals.len() >= max_vocab {
-                            break 'rounds;
-                        }
-                        slot.insert(reals.len());
-                        canon_ids.push(id);
-                        reals.push(cand.clone());
-                        next.push(cand);
+                    if !try_insert_vocab(
+                        &cand,
+                        canon,
+                        max_vocab,
+                        &mut index_of_canon,
+                        &mut reals,
+                        &mut canon_ids,
+                    ) {
+                        break 'rounds;
                     }
+                    next.push(cand);
                 }
             }
         }
@@ -994,18 +1029,20 @@ fn encode(
             }
         }
     }
-    // Relative-order constraints: for each `(before, after)`, forbid `after` at a step
-    // earlier-or-equal to `before` (i.e. `step(before) < step(after)`).
+    // Relative-order constraints: `step(before) < step(after)`.
+    // Equivalent to ∀ ia≤ib: ¬(after@ia ∧ before@ib), encoded in O(L) clauses per edge.
     for &(before, after) in &segment.dependencies {
         if past(&cnf) {
             return None;
         }
         if let (Some(&ob), Some(&oa)) = (op_index_of_id.get(&before), op_index_of_id.get(&after)) {
-            for ib in 1..=l {
-                for ia in 1..=ib {
-                    // `after` at step ia, `before` at step ib >= ia → violates order.
-                    cnf.add(vec![-dims.x(ia, oa), -dims.x(ib, ob)]);
+            cnf.add(vec![-dims.x(1, oa), -dims.x(1, ob)]);
+            for ia in 2..=l {
+                let mut clause = vec![-dims.x(ia, oa)];
+                for ib in 1..ia {
+                    clause.push(dims.x(ib, ob));
                 }
+                cnf.add(clause);
             }
         }
     }
@@ -1204,7 +1241,7 @@ pub fn profile_sat(
     cfg: &SearchConfig,
 ) -> Result<SatCnfProfile, &'static str> {
     let l_orig = segment.ops.len();
-    if l_orig == 0 || l_orig > MAX_SAT_LEN {
+    if l_orig == 0 || l_orig > cfg.max_sat_len {
         return Err("too_long");
     }
 
@@ -1357,10 +1394,10 @@ pub fn diagnose_sat(
     cfg: &SearchConfig,
 ) -> SatDiagnosis {
     let l_orig = segment.ops.len();
-    if l_orig == 0 || l_orig > MAX_SAT_LEN {
+    if l_orig == 0 || l_orig > cfg.max_sat_len {
         return SatDiagnosis::TooLong {
             l_orig,
-            max: MAX_SAT_LEN,
+            max: cfg.max_sat_len,
         };
     }
 
@@ -1570,9 +1607,8 @@ pub fn print_gap_summary(rows: &[SatGapRow]) {
 
 /// Solve a segment with descending Pure-SAT iteration (side effects included).
 ///
-/// Returns `ops = None` (and `timed_out = false`) when the encoding could not be
-/// built or no improving model was found; the caller then keeps the original
-/// sequence (there is no A* fallback).
+/// On any failure path, returns `ops = None`. The caller **must not** invoke A*
+/// as a fallback; [`super::optimize_segment_with_trace`] relies on this contract.
 pub fn solve_sat(
     segment: &StraightSegment,
     rules: &[egg::Rewrite<crate::lang::ValueLang, ()>],
@@ -1591,13 +1627,14 @@ pub fn solve_sat(
     };
 
     let l_orig = segment.ops.len();
+    // Hard failure: no model. Do not fall back to A* — see module-level invariant.
     let fail = || SearchResult {
         ops: None,
         timed_out: false,
         solver_time_secs: started.elapsed().as_secs_f64(),
     };
 
-    if l_orig == 0 || l_orig > MAX_SAT_LEN {
+    if l_orig == 0 || l_orig > cfg.max_sat_len {
         return fail();
     }
 
