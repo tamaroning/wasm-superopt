@@ -470,17 +470,25 @@ pub fn eval_expr(expr: &Expr, env: &mut Env) -> EvalResult<AlValue> {
         Expr::Mod(a, b) => {
             let an = nat_of(&eval_expr(a, env)?)?;
             let bn = nat_of(&eval_expr(b, env)?)?;
-            Ok(AlValue::Nat(if bn == 0 { 0 } else { an % bn }))
+            // `full_modulus` for i64 is 2^64, which overflows u64 `Nat` to 0.
+            // Wasm wrap semantics: reduce mod 2^N on N-bit values ≡ identity in u64.
+            Ok(AlValue::Nat(if bn == 0 { an } else { an % bn }))
         }
         Expr::Rem(a, b) => {
             let an = nat_of(&eval_expr(a, env)?)?;
             let bn = nat_of(&eval_expr(b, env)?)?;
-            Ok(AlValue::Nat(if bn == 0 { 0 } else { an % bn }))
+            Ok(AlValue::Nat(if bn == 0 { an } else { an % bn }))
         }
         Expr::Pow(a, b) => {
             let base = nat_of(&eval_expr(a, env)?)?;
             let exp = nat_of(&eval_expr(b, env)?)?;
-            Ok(AlValue::Nat(base.saturating_pow(exp as u32)))
+            // Spectec `2^N` for N=64 exceeds u64; carrier 0 means mod 2^64 (see Mod).
+            let out = if base == 2 && exp == 64 {
+                0
+            } else {
+                base.saturating_pow(exp as u32)
+            };
+            Ok(AlValue::Nat(out))
         }
         Expr::Shl(a, b) => {
             let an = nat_of(&eval_expr(a, env)?)?;
@@ -602,6 +610,24 @@ mod tests {
         ];
         let list = call_func("binop_", args).unwrap();
         assert!(list.is_empty_list_or_opt());
+    }
+
+    #[test]
+    fn i64_add_neg_one_plus_zero() {
+        let args = vec![
+            AlValue::NumType(NumType::I64),
+            AlValue::BinOp(WasmBinOp::Add),
+            AlValue::Nat((-1i64) as u64),
+            AlValue::Nat(0),
+        ];
+        let list = call_func("binop_", args).unwrap();
+        assert!(!list.is_empty_list_or_opt());
+        let v = list.choose_singleton().unwrap();
+        assert_eq!(
+            v.as_nat().map(|n| n as i64),
+            Some(-1i64),
+            "i64.add (-1) 0 should be -1"
+        );
     }
 
     #[test]

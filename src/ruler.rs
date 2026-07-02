@@ -510,6 +510,120 @@ mod tests {
     use crate::value::{RuleSignature, StackTy};
 
     #[test]
+    fn i64_add_zero_concrete_matches_symbol() {
+        use crate::al::eval_value_ast_concrete_sig;
+
+        let sig = RuleSignature {
+            inputs: vec![StackTy::I64],
+            output: StackTy::I64,
+        };
+        let sym = ValueAst::symbol(0);
+        let add0 = ValueAst::app(
+            ValueOp::I64Add,
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I64, 0)],
+        );
+        let xor0 = ValueAst::app(
+            ValueOp::I64Xor,
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I64, 0)],
+        );
+        for &v in &[0i64, 1, -1, 2, i64::MIN, i64::MAX] {
+            let inputs = vec![v];
+            let sym_r = eval_value_ast_concrete_sig(&sig, &sym, &inputs);
+            let add_r = eval_value_ast_concrete_sig(&sig, &add0, &inputs);
+            let xor_r = eval_value_ast_concrete_sig(&sig, &xor0, &inputs);
+            eprintln!(
+                "v={v:#x}: sym={:?} add={:?} xor={:?}",
+                sym_r, add_r, xor_r
+            );
+            assert_eq!(
+                (sym_r.trap, sym_r.value),
+                (add_r.trap, add_r.value),
+                "i64.add ?a 0 should equal ?a at v={v}"
+            );
+        }
+    }
+
+    #[test]
+    fn i64_add_zero_should_rewrite_to_symbol() {
+        use crate::al::z3_context;
+        use crate::value::{asts_valid_rewrite_random, asts_valid_rewrite_z3};
+
+        let sig = RuleSignature {
+            inputs: vec![StackTy::I64],
+            output: StackTy::I64,
+        };
+        let lhs = ValueAst::app(
+            ValueOp::I64Add,
+            vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I64, 0)],
+        );
+        let rhs = ValueAst::symbol(0);
+        let xor_rhs = ValueAst::app(
+            ValueOp::I64Xor,
+            vec![
+                ValueAst::const_ty(StackTy::I64, 0),
+                ValueAst::symbol(0),
+            ],
+        );
+        assert!(
+            asts_valid_rewrite_random(&sig, &lhs, &rhs, 100),
+            "i64.add ?a 0 should match ?a on random inputs"
+        );
+        let ctx = z3_context();
+        assert!(
+            asts_valid_rewrite_z3(&ctx, &sig, &lhs, &rhs),
+            "Z3 should prove i64.add ?a 0 = ?a"
+        );
+        assert!(
+            asts_valid_rewrite_z3(&ctx, &sig, &xor_rhs, &rhs),
+            "Z3 should prove i64.xor 0 ?a = ?a"
+        );
+    }
+
+    #[test]
+    fn i64_unary_signature_discovers_zero_add_identity() {
+        use crate::al::z3_context;
+        use std::collections::HashSet;
+
+        let sig = RuleSignature {
+            inputs: vec![StackTy::I64],
+            output: StackTy::I64,
+        };
+        let ctx = z3_context();
+        let mut proven = HashSet::new();
+        let mut rules = Vec::new();
+        let (pairs, z3) = discover_rules_for_signature(&sig, 3, 100, 1, &ctx, &mut proven, &mut rules);
+        eprintln!("i64 unary: {pairs} pairs, {z3} z3 queries, {} rules", rules.len());
+        for (lhs, rhs) in &rules {
+            if lhs.contains("add") && lhs.contains("0") {
+                eprintln!("  add-zero rule: {lhs} -> {rhs}");
+            }
+            if lhs.contains("xor") && lhs.contains("0") {
+                eprintln!("  xor-zero rule: {lhs} -> {rhs}");
+            }
+        }
+        assert!(
+            rules
+                .iter()
+                .any(|(lhs, rhs)| lhs == "(i64.add ?a 0)" && rhs == "?a"),
+            "expected (i64.add ?a 0) -> ?a, got add rules: {:?}",
+            rules
+                .iter()
+                .filter(|(l, _)| l.contains("add"))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            rules
+                .iter()
+                .any(|(lhs, rhs)| lhs == "(i64.xor 0 ?a)" && rhs == "?a"),
+            "expected (i64.xor 0 ?a) -> ?a for transitive identity, got xor rules: {:?}",
+            rules
+                .iter()
+                .filter(|(l, _)| l.contains("xor"))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn f32_signature_builds_float_terms() {
         let sig = RuleSignature {
             inputs: vec![StackTy::F32],

@@ -471,13 +471,32 @@ impl<'ctx> SymEval<'ctx> {
                 let bi = self.int_of_expr(b, env)?;
                 Ok(SymValue::Int(ai.div(&bi)))
             }
-            Expr::Mod(a, b) | Expr::Rem(a, b) => self.bv_binop(a, b, env, |x, y| x.bvurem(&y)),
+            Expr::Mod(a, b) | Expr::Rem(a, b) => {
+                let av = self.bv_of(&self.eval_expr(a, env)?)?;
+                let b_sym = self.eval_expr(b, env)?;
+                let zero_modulus = match &b_sym {
+                    SymValue::Meta(AlValue::Nat(0)) => true,
+                    SymValue::Bv(bv) => bv.as_u64() == Some(0),
+                    _ => false,
+                };
+                if zero_modulus {
+                    return Ok(SymValue::Bv(av));
+                }
+                let bv = self.bv_of(&b_sym)?;
+                let (av, bv) = self.align_bv_pair(av, bv);
+                Ok(SymValue::Bv(av.bvurem(&bv)))
+            }
             Expr::Pow(a, b) => {
                 let base = self.nat_u64(&self.eval_expr(a, env)?)?;
                 let exp = self.nat_u64(&self.eval_expr(b, env)?)?;
+                let val = if base == 2 && exp == 64 {
+                    0
+                } else {
+                    base.saturating_pow(exp as u32)
+                };
                 Ok(SymValue::Bv(BV::from_u64(
                     self.ctx,
-                    base.saturating_pow(exp as u32),
+                    val,
                     self.default_width(),
                 )))
             }

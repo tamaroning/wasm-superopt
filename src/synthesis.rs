@@ -31,7 +31,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 17;
+const RULES_CACHE_FORMAT_VERSION: u32 = 18;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
