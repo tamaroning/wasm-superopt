@@ -40,6 +40,11 @@ def load_data(path: Path, benchmark: str | None, exclude: list[str], max_length:
     df = df.dropna(subset=["initial_length", "solver_time_in_sec"])
     df = df[df["initial_length"] > 0]
     df["saved_length"] = df["saved_length"].clip(lower=0)
+    if "timeout" in df.columns:
+        timeout = pd.to_numeric(df["timeout"], errors="coerce")
+        df["timed_out"] = df["solver_time_in_sec"] >= timeout - 0.01
+    else:
+        df["timed_out"] = False
     df["improved"] = df["saved_length"] > 0
     df["reduction_pct"] = np.where(
         df["improved"],
@@ -300,6 +305,20 @@ def plot_improvement_rate_binned(df: pd.DataFrame, out: Path, bucket_width: int)
     plt.close(fig)
 
 
+def filter_blocks_without_timeouts(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop blocks where any tool hit the segment timeout (paired exclusion)."""
+    block_timed_out = df.groupby(["benchmark", "block_id"], sort=False)["timed_out"].transform("any")
+    return df.loc[~block_timed_out]
+
+
+def benchmarks_with_all_tools(df: pd.DataFrame) -> list[str]:
+    tools = sorted(df["tool"].unique())
+    if not tools:
+        return []
+    present = df.groupby("benchmark")["tool"].apply(lambda s: set(s.unique()))
+    return sorted(bench for bench, tool_set in present.items() if set(tools) <= tool_set)
+
+
 def benchmark_reduction_stats(df: pd.DataFrame) -> pd.DataFrame:
     grouped = (
         df.groupby(["benchmark", "tool"])
@@ -324,9 +343,20 @@ def benchmark_reduction_stats(df: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
-def plot_reduction_by_benchmark(df: pd.DataFrame, out: Path, suite_label: str) -> None:
-    grouped = benchmark_reduction_stats(df)
-    benchmarks = sorted(grouped["benchmark"].unique())
+def plot_reduction_by_benchmark(
+    df: pd.DataFrame,
+    out: Path,
+    suite_label: str,
+    *,
+    exclude_timeouts: bool = False,
+) -> None:
+    plot_df = filter_blocks_without_timeouts(df) if exclude_timeouts else df
+    if exclude_timeouts:
+        benchmarks = benchmarks_with_all_tools(plot_df)
+        plot_df = plot_df[plot_df["benchmark"].isin(benchmarks)]
+    else:
+        benchmarks = sorted(plot_df["benchmark"].unique())
+    grouped = benchmark_reduction_stats(plot_df)
     tools = sorted(grouped["tool"].unique())
     y = np.arange(len(benchmarks))
     bar_height = 0.8 / max(len(tools), 1)
@@ -362,7 +392,8 @@ def plot_reduction_by_benchmark(df: pd.DataFrame, out: Path, suite_label: str) -
     ax.set_yticklabels(benchmarks)
     ax.set_xlabel("Instructions reduced (%)")
     ax.set_ylabel("Benchmark")
-    ax.set_title(f"Instruction reduction by program ({suite_label})")
+    title_suffix = " (excluding segment timeouts on either tool)" if exclude_timeouts else ""
+    ax.set_title(f"Instruction reduction by program ({suite_label}){title_suffix}")
     ax.grid(True, axis="x", alpha=0.25)
     ax.legend(loc="lower right")
     fig.tight_layout()
@@ -532,6 +563,12 @@ def main() -> int:
     plot_improvement_rate_binned(df, out_dir_path / "improvement_rate_binned.png", args.bucket_width)
     plot_improvement_summary(df, out_dir_path / "improvement_summary.png", suite.label)
     plot_reduction_by_benchmark(df, out_dir_path / "reduction_by_benchmark.png", suite.label)
+    plot_reduction_by_benchmark(
+        df,
+        out_dir_path / "reduction_by_benchmark_no_timeout.png",
+        suite.label,
+        exclude_timeouts=True,
+    )
     write_summary_table(df, out_dir_path / "summary_by_tool.csv")
     write_benchmark_summary_table(df, out_dir_path / "summary_by_benchmark.csv")
 

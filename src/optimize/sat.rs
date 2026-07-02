@@ -38,7 +38,7 @@ use std::time::Instant;
 /// Minimum value-vocabulary size `|V|` (short straight-line chunks).
 const MIN_VOCAB: usize = 64;
 /// Hard cap on `|V|` — binop tables are `O(|V|²)` and CNF grows with `|V|`.
-const MAX_VOCAB_CAP: usize = 160;
+const MAX_VOCAB_CAP: usize = 500;
 /// Extra slots beyond segment length for synthesis constants and saturation.
 const VOCAB_HEADROOM: usize = 20;
 
@@ -669,78 +669,123 @@ fn merge_trace_witness_tables(
     Some(())
 }
 
-/// Merge pure-op table rows from single-step `set`→`tee` variant executions.
-fn merge_set_to_tee_witness_tables(
+/// Goal-oriented seeds: `fin` stack/local values and their subtrees (SuperStack-style).
+fn collect_fin_oriented_seed_exprs(segment: &StraightSegment) -> Vec<ValueExpr> {
+    let mut seeds = Vec::new();
+    for e in &segment.fin.stack {
+        seeds.push(e.clone());
+        seeds.extend(all_subtree_exprs(e));
+    }
+    for req in segment.fin.locals.values() {
+        if let LocalReq::Need(v) = req {
+            seeds.push(v.clone());
+            seeds.extend(all_subtree_exprs(v));
+        }
+    }
+    seeds
+}
+
+/// Close pure-op witness tables over all semantically defined pairs in `V` (Denali-style `T` closure).
+///
+/// Unlike trace-only witnesses, this lets SAT pick operand order and stack schedules whenever
+/// both operands and the result already live in `V` (modulo `≡_R`).
+fn merge_vocab_operational_witness_tables(
     segment: &StraightSegment,
     vocab: &Vocab,
     canon: &mut Canonizer,
     ops: &mut Vec<SatOp>,
+    deadline: Instant,
 ) -> Option<()> {
-    for (idx, op) in segment.ops.iter().enumerate() {
-        let SemOp::LocalSet(slot) = op else {
+    let n = vocab.n();
+    let binop_kinds = sat_binop_kinds_for(segment, vocab);
+    let unop_kinds = sat_unop_kinds_for(segment, vocab);
+
+    for kind in binop_kinds {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        let Some(sem) = sem_from_inst_kind(kind) else {
             continue;
         };
-        let mut variant: Vec<SemOp> = segment.ops.clone();
-        variant[idx] = SemOp::LocalTee(*slot);
-        let mut m = SymMachine::from_segment_entry(
-            segment.num_params,
-            &segment.bounds,
-            &segment.init,
-            segment.bounds.max_stack,
-        );
-        for o in &variant {
-            match o {
-                SemOp::I32Const(_)
-                | SemOp::I64Const(_)
-                | SemOp::F32Const(_)
-                | SemOp::F64Const(_) => {
-                    let expr = const_expr(o)?;
-                    let val = vocab.real_of_expr(canon, &expr)?;
-                    ensure_const_op(ops, o, val);
-                }
-                SemOp::LocalGet(_) | SemOp::LocalSet(_) | SemOp::LocalTee(_) | SemOp::Drop => {}
-                SemOp::I32Load { .. }
-                | SemOp::I32Store { .. }
-                | SemOp::Call { .. }
-                | SemOp::GlobalGet { .. }
-                | SemOp::GlobalSet { .. }
-                | SemOp::Opaque { .. } => {}
-                other => {
-                    let vop = sem_to_value_op(other)?;
-                    let kind = inst_kind_from_sem(other)?;
-                    if vop.pops().len() == 2 {
-                        let st = m.to_carried_init_state();
-                        let len = st.stack.len();
-                        if len < 2 {
-                            return None;
-                        }
-                        let a0_expr = st.stack[len - 1].clone();
-                        let a1_expr = st.stack[len - 2].clone();
-                        m.exec(o).ok()?;
-                        let st = m.to_carried_init_state();
-                        let res_expr = st.stack.last()?.clone();
-                        let a1 = vocab.real_of_expr(canon, &a1_expr)?;
-                        let a0 = vocab.real_of_expr(canon, &a0_expr)?;
-                        let res = vocab.real_of_expr(canon, &res_expr)?;
-                        merge_binop_edge(ops, kind, (a1, a0, res));
-                    } else {
-                        let st = m.to_carried_init_state();
-                        let len = st.stack.len();
-                        if len < 1 {
-                            return None;
-                        }
-                        let a_expr = st.stack[len - 1].clone();
-                        m.exec(o).ok()?;
-                        let st = m.to_carried_init_state();
-                        let res_expr = st.stack.last()?.clone();
-                        let a = vocab.real_of_expr(canon, &a_expr)?;
-                        let res = vocab.real_of_expr(canon, &res_expr)?;
-                        merge_unop_edge(ops, kind, (a, res));
-                    }
+        let Some(vop) = sem_to_value_op(&sem) else {
+            continue;
+        };
+        let pops = vop.pops();
+        if pops.len() != 2 {
+            continue;
+        }
+        let (ty1, ty0) = (pops[0], pops[1]);
+        for a1 in 0..n {
+            if Instant::now() >= deadline {
+                return None;
+            }
+            let e1 = &vocab.reals[a1];
+            if stack_ty_of_expr(e1) != Some(ty1) {
+                continue;
+            }
+            for a0 in 0..n {
+                let e0 = &vocab.reals[a0];
+                if stack_ty_of_expr(e0) != Some(ty0) {
                     continue;
                 }
+                let mut init = segment.init.clone();
+                init.stack = vec![e1.clone(), e0.clone()];
+                let mut m = SymMachine::from_segment_entry(
+                    segment.num_params,
+                    &segment.bounds,
+                    &init,
+                    segment.bounds.max_stack.max(2),
+                );
+                if m.exec(&sem).is_err() {
+                    continue;
+                }
+                let Some(res_expr) = m.to_fin_state().stack.last().cloned() else {
+                    continue;
+                };
+                if let Some(res) = vocab.real_of_expr(canon, &res_expr) {
+                    merge_binop_edge(ops, kind, (a1, a0, res));
+                }
             }
-            m.exec(o).ok()?;
+        }
+    }
+
+    for kind in unop_kinds {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        let Some(sem) = sem_from_inst_kind(kind) else {
+            continue;
+        };
+        let Some(vop) = sem_to_value_op(&sem) else {
+            continue;
+        };
+        let pops = vop.pops();
+        if pops.len() != 1 {
+            continue;
+        }
+        let ty = pops[0];
+        for a in 0..n {
+            let e = &vocab.reals[a];
+            if stack_ty_of_expr(e) != Some(ty) {
+                continue;
+            }
+            let mut init = segment.init.clone();
+            init.stack = vec![e.clone()];
+            let mut m = SymMachine::from_segment_entry(
+                segment.num_params,
+                &segment.bounds,
+                &init,
+                segment.bounds.max_stack.max(1),
+            );
+            if m.exec(&sem).is_err() {
+                continue;
+            }
+            let Some(res_expr) = m.to_fin_state().stack.last().cloned() else {
+                continue;
+            };
+            if let Some(res) = vocab.real_of_expr(canon, &res_expr) {
+                merge_unop_edge(ops, kind, (a, res));
+            }
         }
     }
     Some(())
@@ -791,42 +836,6 @@ fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
     (seeds, max_height)
 }
 
-/// Stack/local value-exprs reachable when individual `local.set` steps are replaced by `local.tee`.
-fn collect_set_to_tee_variant_seeds(segment: &StraightSegment) -> Vec<ValueExpr> {
-    let mut extra = Vec::new();
-    let push_state = |seeds: &mut Vec<ValueExpr>, st: &SymState| {
-        for e in &st.stack {
-            seeds.push(e.clone());
-        }
-        for req in st.locals.values() {
-            if let LocalReq::Need(v) = req {
-                seeds.push(v.clone());
-            }
-        }
-    };
-
-    for (idx, op) in segment.ops.iter().enumerate() {
-        let SemOp::LocalSet(slot) = op else {
-            continue;
-        };
-        let mut variant: Vec<SemOp> = segment.ops.clone();
-        variant[idx] = SemOp::LocalTee(*slot);
-        let mut m = SymMachine::from_segment_entry(
-            segment.num_params,
-            &segment.bounds,
-            &segment.init,
-            segment.bounds.max_stack,
-        );
-        for o in &variant {
-            if m.exec(o).is_err() {
-                break;
-            }
-            push_state(&mut extra, &m.to_fin_state());
-        }
-    }
-    extra
-}
-
 fn build_vocab(
     segment: &StraightSegment,
     canon: &mut Canonizer,
@@ -872,10 +881,10 @@ fn build_vocab_with_limit(
     let mut complete = true;
 
     // V = SubExpr(EqSat(SubExpr(seed))) where seed = trace + boundaries + opaque symbols
-    // + set→tee variant states + type-filtered synthesis constants.
+    // + fin-oriented values + type-filtered synthesis constants.
     let types = types_in_segment(segment);
     let mut core: Vec<ValueExpr> = seeds;
-    core.extend(collect_set_to_tee_variant_seeds(segment));
+    core.extend(collect_fin_oriented_seed_exprs(segment));
     core.extend(synthesis_const_exprs_for_types(&types));
     dedup_by_string(&mut core);
 
@@ -1135,7 +1144,7 @@ fn build_ops(
     }
 
     merge_trace_witness_tables(segment, vocab, canon, &mut ops)?;
-    merge_set_to_tee_witness_tables(segment, vocab, canon, &mut ops)?;
+    merge_vocab_operational_witness_tables(segment, vocab, canon, &mut ops, deadline)?;
     for op in ops.iter_mut() {
         if let SatOp::Binop { kind, edges } = op {
             symmetrize_commutative_binop_edges(*kind, edges);
@@ -2364,6 +2373,85 @@ pub fn solve_sat(
     }
 }
 
+/// Solve assuming the first NOP appears at step `first_nop_step` (length = `first_nop_step - 1`).
+#[cfg(test)]
+pub(crate) fn solve_at_length_with_h(
+    segment: &StraightSegment,
+    rules: &[egg::Rewrite<crate::lang::ValueLang, ()>],
+    cfg: &super::search::SearchConfig,
+    h: usize,
+    first_nop_step: usize,
+    deadline: Instant,
+) -> Option<SolveAtLengthResult> {
+    let l_orig = segment.ops.len();
+    if l_orig == 0 || first_nop_step == 0 || first_nop_step > l_orig {
+        return None;
+    }
+    let mut canon = Canonizer::new(rules.to_vec());
+    let (vocab, _) = build_vocab(segment, &mut canon, deadline)?;
+    let r = (segment.bounds.max_local as usize) + 1 + cfg.scratch_locals;
+    let ops = build_ops(segment, &vocab, &mut canon, rules, r, deadline)?;
+    let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
+    let cnf = encode(segment, &vocab, &ops, &mut dims, &mut canon, deadline)?;
+    let mut solver: Solver = Solver::new();
+    for clause in &cnf.clauses {
+        solver.add_clause(clause.iter().copied());
+    }
+    let remaining = |now: Instant| deadline.saturating_duration_since(now).as_secs_f32();
+    let nop = NOP_INDEX;
+    let assumption = dims.x(first_nop_step, nop);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Some(SolveAtLengthResult {
+                sat: false,
+                valid: false,
+                seq: None,
+                timed_out: true,
+            });
+        }
+        solver.set_callbacks(Some(Timeout::new(remaining(now).max(0.0))));
+        match solver.solve_with([assumption]) {
+            Some(true) => {
+                let seq = reconstruct(&solver, &dims, &ops);
+                let valid = forward_valid(&seq, segment, &mut canon);
+                if valid {
+                    return Some(SolveAtLengthResult {
+                        sat: true,
+                        valid: true,
+                        seq: Some(seq),
+                        timed_out: false,
+                    });
+                }
+                if !block_current_op_model(&mut solver, &dims) {
+                    return Some(SolveAtLengthResult {
+                        sat: true,
+                        valid: false,
+                        seq: None,
+                        timed_out: true,
+                    });
+                }
+            }
+            Some(false) => {
+                return Some(SolveAtLengthResult {
+                    sat: false,
+                    valid: false,
+                    seq: None,
+                    timed_out: false,
+                });
+            }
+            None => {
+                return Some(SolveAtLengthResult {
+                    sat: false,
+                    valid: false,
+                    seq: None,
+                    timed_out: true,
+                });
+            }
+        }
+    }
+}
+
 /// Solve at one step below `segment.ops.len()` with an explicit stack-height bound (diagnostics).
 #[cfg(test)]
 pub(crate) fn solve_at_length_minus_one_with_h(
@@ -3442,6 +3530,117 @@ mod tests {
     }
 
     #[test]
+    fn analyze_function_14_block_0_52_root_cause() {
+        use crate::optimize::search::{solution_valid, validate_solution_ops};
+        use crate::value::ValueOp;
+
+        let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
+        if !path.is_file() {
+            return;
+        }
+        let rules_v = rules();
+        let segments = load_wsouper_segments(12);
+        let seg = segments
+            .iter()
+            .find(|s| crate::optimize::statistics::block_id(s) == "function_14_block_0_52")
+            .expect("function_14_block_0_52");
+
+        // SuperStack 6-instr schedule (sign_test combined_blocks.csv).
+        let ss_ops = vec![
+            SemOp::LocalGet(7),
+            SemOp::LocalGet(13),
+            SemOp::Pure(ValueOp::I64Mul),
+            SemOp::I64Const(0),
+            SemOp::LocalSet(3),
+            SemOp::LocalSet(2),
+        ];
+
+        let mut canon = Canonizer::new(rules_v.clone());
+        eprintln!("orig len={} ops: {:?}", seg.original_len(), seg.ops);
+        eprintln!(
+            "SS solution_valid={} validate_solution_ops={}",
+            solution_valid(&ss_ops, seg, &mut canon),
+            validate_solution_ops(&ss_ops, seg)
+        );
+
+        let missing = vocab_missing_for_solution(seg, &rules_v, &ss_ops);
+        eprintln!("SS vocab missing ({}): {missing:?}", missing.len());
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(120);
+        let mut canon2 = Canonizer::new(rules_v.clone());
+        let (vocab, max_h) = build_vocab(seg, &mut canon2, deadline).expect("vocab");
+        let cfg = crate::optimize::search::SearchConfig {
+            backend: crate::optimize::search::Backend::Sat,
+            max_sat_len: 12,
+            scratch_locals: 1,
+            ..Default::default()
+        };
+        let h = stack_height_bound(max_h, seg, 1);
+        eprintln!("|V|={} max_h={max_h} H={h}", vocab.n());
+
+        for target_len in [6usize, 7] {
+            let probe = solve_at_length_with_h(
+                seg,
+                &rules_v,
+                &cfg.for_segment(seg),
+                h,
+                target_len + 1,
+                deadline,
+            );
+            eprintln!(
+                "probe L={target_len}: sat={} valid={} seq={:?}",
+                probe.as_ref().map(|p| p.sat).unwrap_or(false),
+                probe.as_ref().map(|p| p.valid).unwrap_or(false),
+                probe.as_ref().and_then(|p| p.seq.as_ref()),
+            );
+        }
+
+        let res = solve_sat(seg, &rules_v, &cfg.for_segment(seg));
+        eprintln!(
+            "solve_sat: len={:?} proven={} ops={:?}",
+            res.ops.as_ref().map(|o| o.len()),
+            res.proven_optimal,
+            res.ops
+        );
+
+        let r_ops = (seg.bounds.max_local as usize) + 1 + 1;
+        let mut canon3 = Canonizer::new(rules_v.clone());
+        let (vocab2, _) = build_vocab(seg, &mut canon3, deadline).expect("vocab");
+        let ops_sat = build_ops(seg, &vocab2, &mut canon3, &rules_v, r_ops, deadline).expect("ops");
+        let mut dims = Dims::new(seg.original_len(), h, r_ops, vocab2.n(), ops_sat.len());
+        let cnf = encode(seg, &vocab2, &ops_sat, &mut dims, &mut canon3, deadline).expect("encode");
+        let mut solver: Solver = Solver::new();
+        for clause in &cnf.clauses {
+            solver.add_clause(clause.iter().copied());
+        }
+        let ss_assumptions: Option<Vec<i32>> = ss_ops
+            .iter()
+            .enumerate()
+            .map(|(step, sem)| {
+                let o = sat_op_index_for_orig(&ops_sat, sem)?;
+                Some(dims.x(step + 1, o))
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|mut v| {
+                v.push(dims.x(7, NOP_INDEX));
+                v
+            });
+        match ss_assumptions {
+            Some(assumptions) => match solver.solve_with(assumptions.iter().copied()) {
+                Some(true) => eprintln!("SS witness @L=6: SAT"),
+                Some(false) => eprintln!("SS witness @L=6: UNSAT (encoding gap)"),
+                None => eprintln!("SS witness @L=6: timeout"),
+            },
+            None => eprintln!("SS witness: failed to map ops"),
+        }
+
+        assert!(
+            missing.is_empty(),
+            "SS schedule values should be representable in V"
+        );
+    }
+
+    #[test]
     fn gap_probe_csv_blocks() {
         use crate::optimize::canon::Canonizer;
         use crate::optimize::sat::{solve_at_length_minus_one_with_h, stack_height_bound};
@@ -3450,12 +3649,6 @@ mod tests {
         use crate::wasm::{materialize_segments, parse_wasm_file, split_raw_segments};
         use std::time::Instant;
 
-        let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
-        if !path.is_file() {
-            return;
-        }
-        let info = parse_wasm_file(path).expect("parse");
-        let segments = materialize_segments(&split_raw_segments(&info.segments, 12), 1);
         let rules = rules();
         let cfg = SearchConfig {
             backend: Backend::Sat,
@@ -3464,19 +3657,35 @@ mod tests {
             scratch_locals: 1,
             ..SearchConfig::default()
         };
-        // Representative CSV gap blocks; ss_len = SuperStack optimized_length.
-        let probes = [
-            ("function_14_block_0_13", 11),
-            ("function_25_block_0_10", 11),
-            ("function_24_block_0_75", 9),
-            ("function_24_block_0_101", 11),
-        ];
         let deadline = Instant::now() + std::time::Duration::from_secs(120);
-        for (bid, ss_len) in probes {
+
+        // (wasm path, block_id, SuperStack optimized_length)
+        let probes: Vec<(&str, &str, usize)> = vec![
+            ("benchmarks/wsouper/sign_test.wasm", "function_14_block_0_13", 11),
+            ("benchmarks/wsouper/sign_test.wasm", "function_25_block_0_10", 11),
+            ("benchmarks/wsouper/sign_test.wasm", "function_24_block_0_75", 9),
+            ("benchmarks/wsouper/sign_test.wasm", "function_24_block_0_101", 11),
+            ("benchmarks/wsouper/sign_test.wasm", "function_14_block_0_52", 6),
+            ("benchmarks/wsouper/sign_test.wasm", "function_24_block_0_7", 11),
+            (
+                "benchmarks/wsouper/mux1_1.wasm",
+                "function_24_block_0_109",
+                11,
+            ),
+        ];
+
+        for (wasm_path, bid, ss_len) in probes {
+            let path = std::path::Path::new(wasm_path);
+            if !path.is_file() {
+                eprintln!("skip {bid}: {wasm_path} not found");
+                continue;
+            }
+            let info = parse_wasm_file(path).expect("parse");
+            let segments = materialize_segments(&split_raw_segments(&info.segments, 12), 1);
             let seg = segments
                 .iter()
                 .find(|s| block_id(s) == bid)
-                .unwrap_or_else(|| panic!("{bid}"));
+                .unwrap_or_else(|| panic!("{bid} in {wasm_path}"));
             let scfg = cfg.for_segment(seg);
             let res = solve_sat(seg, &rules, &scfg);
             let mut canon = Canonizer::new(rules.clone());
@@ -3488,12 +3697,64 @@ mod tests {
                 seg.original_len(),
                 res.ops.as_ref().map(|o| o.len()),
                 res.proven_optimal,
-                seg.original_len() - 1,
+                seg.original_len().saturating_sub(1),
                 probe.as_ref().map(|p| p.sat).unwrap_or(false),
                 probe.as_ref().map(|p| p.valid).unwrap_or(false),
                 h,
                 vocab.n(),
             );
+        }
+    }
+
+    /// P2 acceptance: representative gap blocks should reach SuperStack length when possible.
+    #[test]
+    fn p2_schedule_gap_blocks_reach_superstack_length() {
+        use crate::optimize::search::{Backend, SearchConfig, solution_valid};
+        use crate::optimize::statistics::block_id;
+
+        let cases: Vec<(&str, &str, usize)> = vec![
+            ("benchmarks/wsouper/sign_test.wasm", "function_14_block_0_52", 6),
+            ("benchmarks/wsouper/sign_test.wasm", "function_24_block_0_7", 11),
+            (
+                "benchmarks/wsouper/mux1_1.wasm",
+                "function_24_block_0_109",
+                11,
+            ),
+        ];
+        let rules = rules();
+        let cfg = SearchConfig {
+            backend: Backend::Sat,
+            max_sat_len: 12,
+            fixed_segment_timeout: Some(60),
+            scratch_locals: 1,
+            ..SearchConfig::default()
+        };
+
+        for (wasm_path, bid, ss_len) in cases {
+            let path = std::path::Path::new(wasm_path);
+            if !path.is_file() {
+                continue;
+            }
+            let info = parse_wasm_file(path).expect("parse");
+            let segments = materialize_segments(&split_raw_segments(&info.segments, 12), 1);
+            let seg = segments
+                .iter()
+                .find(|s| block_id(s) == bid)
+                .expect(bid);
+            let res = solve_sat(seg, &rules, &cfg.for_segment(seg));
+            let got = res.ops.as_ref().map(|o| o.len());
+            eprintln!("{bid}: ss={ss_len} solve={got:?} proven={}", res.proven_optimal);
+            assert!(
+                got.is_some_and(|n| n <= ss_len),
+                "{bid}: expected len <= {ss_len}, got {got:?}"
+            );
+            if let Some(ops) = &res.ops {
+                let mut canon = Canonizer::new(rules.clone());
+                assert!(
+                    solution_valid(ops, seg, &mut canon),
+                    "{bid}: solution must be sound"
+                );
+            }
         }
     }
 }
