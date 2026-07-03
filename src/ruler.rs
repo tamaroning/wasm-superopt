@@ -372,10 +372,11 @@ pub fn discover_rules_for_signature(
             let before = rules_out.len();
             for (lhs_pat, rhs_pat) in new_rules {
                 let name = format!("syn-{}", rules_out.len());
+                use crate::value::pattern_from_typed_sexpr;
                 match Rewrite::<ValueLang, ()>::new(
                     name,
-                    lhs_pat.parse::<Pattern<ValueLang>>().expect("lhs pattern"),
-                    rhs_pat.parse::<Pattern<ValueLang>>().expect("rhs pattern"),
+                    pattern_from_typed_sexpr(&lhs_pat).expect("lhs pattern"),
+                    pattern_from_typed_sexpr(&rhs_pat).expect("rhs pattern"),
                 ) {
                     Ok(rw) => {
                         rewrites.push(rw);
@@ -604,8 +605,8 @@ mod tests {
         assert!(
             rules
                 .iter()
-                .any(|(lhs, rhs)| lhs == "(i64.add ?a 0)" && rhs == "?a"),
-            "expected (i64.add ?a 0) -> ?a, got add rules: {:?}",
+                .any(|(lhs, rhs)| lhs == "(i64.add ?a (i64.const 0))" && rhs == "?a"),
+            "expected (i64.add ?a (i64.const 0)) -> ?a, got add rules: {:?}",
             rules
                 .iter()
                 .filter(|(l, _)| l.contains("add"))
@@ -614,8 +615,8 @@ mod tests {
         assert!(
             rules
                 .iter()
-                .any(|(lhs, rhs)| lhs == "(i64.xor 0 ?a)" && rhs == "?a"),
-            "expected (i64.xor 0 ?a) -> ?a for transitive identity, got xor rules: {:?}",
+                .any(|(lhs, rhs)| lhs == "(i64.xor (i64.const 0) ?a)" && rhs == "?a"),
+            "expected (i64.xor (i64.const 0) ?a) -> ?a for transitive identity, got xor rules: {:?}",
             rules
                 .iter()
                 .filter(|(l, _)| l.contains("xor"))

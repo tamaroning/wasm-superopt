@@ -76,9 +76,10 @@ impl ValueAst {
         match self {
             Self::Symbol(i) => format!("?{}", (b'a' + *i as u8) as char),
             Self::Const { ty, value } => match ty {
+                StackTy::I32 => format!("(i32.const {value})"),
+                StackTy::I64 => format!("(i64.const {value})"),
                 StackTy::F32 => format!("{}", F32Bits::from_i64_carrier(*value)),
                 StackTy::F64 => format!("{}", F64Bits::from_i64_carrier(*value)),
-                _ => value.to_string(),
             },
             Self::App { op, args } => {
                 let name = op.pattern_name();

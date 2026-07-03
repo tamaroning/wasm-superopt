@@ -2,6 +2,8 @@
 
 **目的:** 直線的 WebAssembly コードの初期状態 $\mathit{init}$、最終状態 $\mathit{fin}$、およびオリジナルの命令列(長さ $L_{\mathrm{orig}}$)が与えられたとき、$\mathit{init}$ から $\mathit{fin}$ へ遷移する命令数最小の命令列を、命題充足性判定 (SAT) ソルバへの反復呼び出しのみで合成する手法を定める。後方探索や MaxSAT を用いず、$L_{\mathrm{orig}}$ から 1 ずつ減らす **降順 Pure-SAT 反復** で命令長を最小化する。タイムアウト時もそれまでに発見された最短解を出力できる。
 
+**実装状態（2026-07-02）:** 本仕様の ewasm 実装は **seed-closed SAT 符号化**（§2.1, §2.3）と **$\equiv_R$ e-class 閉包**（§2.3.1, §5.3, §11.3）を採用済み。Souper ベンチ（`wsouper`）では SuperStack と全体削減率がほぼ同等。残ギャップは `sign_test` / `mux1_1` の **11 blocks / 11 命令**（いずれも `function_24/25` の 1 命令 tee/stack-hold 差）に縮小（[`0701_bugfix_soundness.md`](0701_bugfix_soundness.md)）。手法分析は [`0701_suboptimal_cause.md`](0701_suboptimal_cause.md) を参照。
+
 ---
 
 ## A. 背景と動機
@@ -100,31 +102,35 @@ $R$ は $\mathit{init}$, $\mathit{fin}$, $\sigma_{\mathrm{orig}}$ に現れる�
 
 SAT 帰着の前に、エンコーディングで使う値の有限集合 $V$ を確定する。
 
-### 2.1 飽和手続き
+### 2.1 飽和手続き（seed-closed 構築）
+
+実装では語彙を **$V = \mathrm{SubExpr}(\mathrm{EqSat}(\mathrm{SubExpr}(\mathit{seed})))$** として構築する。$\mathit{seed}$ はオリジナルトレースだけでなく境界・ゴール由来の式も含む。
 
 ```
-V ← ∅
-1. (起点) init.stack の全要素、init.local の非★要素を V に追加
-2. (起点) fin.stack の全要素、fin.local の非★要素を V に追加
-3. (部分式) V に含まれる各値について、その全ての部分式を V に追加
-4. (オリジナル) オリジナル命令列を init から記号実行し、各ステップで
-   出現する全ての中間値(スタックトップ・ローカル内容)を V に追加
-   - 記号実行中、引数が concrete integer literal の pure op は deterministic に
-     constant fold してよい（例: `i32.const 7; i32.const 40; i32.mul` → `280`）
-   - これは `V × V` の定数閉包ではなく、オリジナルトレース上で実際に現れる
-     seed を正規化する処理である
-5. (等価表現) V に含まれる各値 v について、≡_R で v と同値な全ての
-   表現を k_sat 回まで再帰的に展開し、生じた新たな部分式も V に追加
-6. (定数) 関連する小定数(0, 1, 2, -1 など)と、ステップ 4 の記号実行で
-   concrete fold された定数も V に追加
-7. (特殊シンボル) ⊥, ★ を V に追加
+seed ← ∅
+1. (トレース) init/fin 境界とオリジナル命令列の記号実行で現れる全中間値を seed に追加
+2. (境界) init.stack / init.local / fin.stack / fin.local の非★要素を seed に追加
+3. (不透明) 全 opaque 命令の in/out シンボルを seed に追加
+4. (ゴール指向 seed) fin 由来の記号要素（部分式）を seed に追加
+5. (合成定数) セグメントに現れる型に対応する小定数（0, 1, 2, -1 等）を seed に追加
+6. (任意 witness) SuperStack 解など外部 witness の中間式を seed に追加してよい
+
+sub0 ← 全 seed の部分式の和集合
+sat  ← joint equality saturation（≡_R）を sub0 全体に一度適用
+closure ← sat 後の全式の部分式の和集合
+V ← closure を canon 代表で dedup した実値集合（|V| 上限あり）
+equiv_class ← V 上の joint ≡_R 同値類分割
 ```
 
-ステップ 4 はオリジナル命令列が SAT エンコーディング上で必ず実行可能(初回 SAT 呼び出しが必ず SAT を返す)であることを保証する。降順反復方式(§6)の前提条件となる。
+ステップ 1–3 によりオリジナル命令列が $L_{\mathrm{orig}}$ で必ず表現可能（初回 SAT、§6.5）。ステップ 4–5 はゴール指向語彙（§11.8 方向 C）への第一歩であり、トレースに無い定数畳み込み等を補う。
 
-> **実装メモ:** constant folding は rewrite rule や `V × V` の online closure としてではなく、記号実行 seed の生成時に行う。全定数ペアの閉包を `V` や演算テーブルへ追加すると、語彙・CNF が膨らみ timeout が増えるため避ける。対象はまず trap しない整数演算（`add/sub/mul/and/or/xor/shl/shr`）に限定する。
+$|V|$ が上限に達した場合は `encoding_complete = false` とし、そのセグメントでは `proven_optimal` を付けない（§6.4, §7.2）。
 
-> **注意（§7.5）:** ステップ 4–5 は**オリジナルトレースの閉包**を主とする。tee 融合などでオリジナルに無い中間スタックラベルが必要になる短縮は、$k_{\mathrm{sat}}$ の増加だけでは補えないことがある。§10・§11.8 の語彙拡張を参照。
+> **実装メモ:** constant folding は rewrite rule や $V \times V$ の online closure としてではなく、記号実行 seed の生成時に行う。全定数ペアの閉包を $V$ や演算テーブルへ追加すると、語彙・CNF が膨らみ timeout が増えるため避ける。対象はまず trap しない整数演算（`add/sub/mul/and/or/xor/shl/shr`）に限定する。
+
+> **typed zero identity（2026-07-02）:** `joint_saturate` の前に、Wasm 型付き定数に依存する恒等式（例: `(i64.add 0 x) ≡ x`, `(i64.and 0 x) ≡ 0`）を明示正規化する。`rules-ast3.cache` にルールがあっても `ValueLang` の `I64Const(0)` と pattern の bare `0` がずれると同値化されない場合があり、ゼロ畳み込み + tee 融合の典型ブロッカーになる。
+
+> **注意（§7.5）:** ステップ 1–6 は**トレース＋境界＋fin seed の閉包**を主とする。tee 融合などでオリジナルに無い中間スタックラベルが必要になる短縮は、$k_{\mathrm{sat}}$ の増加だけでは補えないことがある。§10・§11.8 の語彙拡張を参照。
 
 ### 2.2 正規代表 $c(\cdot)$
 
@@ -132,7 +138,7 @@ $\equiv_R$ による同値関係で $V$ を分割し、各同値類から代表 
 
 以下、$V$ の要素は全て同値類代表とみなす。同値な複数の表現は 1 つの $v \in V$ に同定される。
 
-### 2.3 演算結果テーブル
+### 2.3 演算結果テーブル（構造抽出）
 
 各単項演算 $\circ$ と $v \in V$ について
 $$T_\circ(v) \;=\; c(\circ(v)) \quad \text{(}V \text{ の外なら未定義)}$$
@@ -140,7 +146,9 @@ $$T_\circ(v) \;=\; c(\circ(v)) \quad \text{(}V \text{ の外なら未定義)}$$
 各二項演算 $\oplus$ と $(v_1, v_2) \in V \times V$ について
 $$T_\oplus(v_1, v_2) \;=\; c(\oplus(v_1, v_2)) \quad \text{(}V \text{ の外なら未定義)}$$
 
-これらは SAT 呼び出し前に一度だけ計算しておく定数テーブル。$T$ が未定義の入力ペアは、対応する SAT 節を生成しない(すなわち、その遷移は禁止される)。
+**構築手順（実装）:** $T$ は $V \times V$ の全候補に対する online 適用ではなく、**$V$ 内に既に存在する構文木の分解**から edge を抽出する。すなわち $v \in V$ の根が $\oplus$ なら子 $(v_1, v_0)$ から $(v_1, v_0) \mapsto v$ を得る。オリジナルトレースの witness 実行と operational witness から追加 edge をマージする。
+
+edge 集合は $\equiv_R$ 同値類（`equiv_class`）で拡張し、可換 $\oplus$ については $(v_1, v_0)$ と $(v_0, v_1)$ の両方を含める（§2.3.1）。$T$ が未定義の入力ペアは CNF 上禁止される（§5.3）。
 
 **算術等価性の吸収:** たとえば `mul` と `shl` で同じ結果に到達する場合、$T_{\mathrm{mul}}(L \ll 1, 4) = T_{\mathrm{shl}}(L \ll 1, 2)$ となる。SAT 探索はどちらの命令を選んでも同じ語彙要素に到達するため、§7 の「算術分岐」の効果が自動的に得られる。
 
@@ -293,21 +301,21 @@ $$x_{i,\oplus} \;\to\; y_{i,H-1,\bot} = 1$$
 
 $T_\oplus(v_1, v_0)$ が未定義のペアについては $y_{i-1,1,v_1} \wedge y_{i-1,0,v_0}$ の組合せ自体を $x_{i,\oplus}$ のもとで禁止する。
 
-**可換演算の operand pair 閉包:** §2.3.1 に従い、$\oplus$ が可換なら $T_\oplus$ 構築時に $(v_1, v_0)$ と $(v_0, v_1)$ の**両方**を許可する。正節（入力 → 結果）と禁止節（許可されていない pair の排除）の**両方**を同じ双方向 edge 集合から生成する。禁止節だけ緩めて正節を追加しないと、逆向き入力に対する結果制約が欠落する。
+**可換演算の operand pair 閉包:** §2.3.1 に従い、$\oplus$ が可換なら $T_\oplus$ 構築時に $(v_1, v_0)$ と $(v_0, v_1)$ の**両方**を許可する。正節（入力 → 結果）は `equiv_class` 単位で生成し、禁止節は許可されていない $(\mathrm{ec}_1, \mathrm{ec}_0)$ ペアを排除する。
 
-#### 実装: $\top$ sink による全域関数化（2026-07-01）
+**Get/Set/Tee の $\equiv_R$ 転送（2026-07-02）:** $\mathrm{get}_x$, $\mathrm{set}_x$, $\mathrm{tee}_x$ のスタック↔ローカル転送は、特定インデックスの一致ではなく **同値類一致**（`pin_transfer_equiv`）で符号化する。$V$ に同一 $\equiv_R$ 類の別表現が複数載っている場合に効く。
 
-疎な $T_\oplus/T_\circ$（e-graph 由来の valid-edge リスト）だけでは、第1オペランドがエッジを持たないクラスで結果セル $y_{i,0,\cdot}$ が `exactly_one` 以外に無拘束になり、**擬似モデル**（でたらめな算術で最終クラスに合わせた列）が指数的に湧く。CEGAR 型の後段精緻化では組み合わせ爆発のため実用的でない。
+#### 実装: pure op の部分関数化と $\top$ 遮断（2026-07-02）
 
-**対策:** スタック値ドメインに語彙外 sink $\top$（index $n+1$、$\bot$ は $n$）を追加し、演算を**全域関数**として符号化する。
+疎な $T_\oplus/T_\circ$（e-graph 由来の valid-edge リスト）だけでは、第1オペランドがエッジを持たないクラスで結果セル $y_{i,0,\cdot}$ が `exactly_one` 以外に無拘束になり、**擬似モデル**（でたらめな算術で最終クラスに合わせた列）が指数的に湧く。
 
-- **正節:** 既存の sparse edge $(v_1, v_0) \mapsto v_{\mathrm{res}}$ を維持（同一対に複数 rep がある場合は最小 index に dedup）
-- **per-$v_1$ domain 節（全 $v_1 \in V$）:** $x_{i,\oplus} \wedge y_{i-1,1,v_1} \wedge \neg\bigvee_{v_0 \in S_{v_1}} y_{i-1,0,v_0} \;\to\; y_{i,0,\top}$（$S_{v_1}=\emptyset$ なら常に $\top$ へ）
-- **吸収節:** $x_{i,\oplus} \wedge y_{i-1,1,\top} \;\to\; y_{i,0,\top}$
-- **単項演算:** 既存の無条件 domain 節に $\vee y_{i,0,\top}$ を追記
-- **$\top$ 遮断:** $\mathrm{set}_x/\mathrm{tee}_x$ は $y_{i-1,0,\top}=0$ を要求（ローカルへ $\top$ を書かない）。境界・opaque オペランドは real のみ pin するため $\top$ はゴールに到達不能
+**対策（現行）:** pure op を**部分関数**として符号化し、$\top$ による結果への吸収は行わない。
 
-これにより「抽象で目標クラスに到達 $\Leftrightarrow$ 真に正しい $\equiv_R$ 値を計算」が成り立ち、擬似モデルは源流で排除される。節数は per-$v_1$ domain（$O(L \cdot |\oplus| \cdot |V|)$）に抑え、素朴な $|V|^2$ 正節×$L$ より大幅に小さい。
+- **正節:** sparse edge $(v_1, v_0) \mapsto v_{\mathrm{res}}$ を `equiv_class` 単位で展開（同一対に複数 rep がある場合は結果クラスを OR）
+- **禁止節:** 許可されていない $(\mathrm{ec}_1, \mathrm{ec}_0)$ ペアのスタック配置を $x_{i,\oplus}$ のもとで排除。第1オペランドクラスに edge が無い場合は天端 $\mathrm{stack}[1]$ も禁止
+- **$\top$ 遮断:** スタック値ドメインに語彙外 sink $\top$（index $n+1$）を持つが、pure op の結果へは流さない。$\mathrm{set}_x/\mathrm{tee}_x$ は $y_{i-1,0,\top}=0$ を要求（ローカルへ $\top$ を書かない）。境界・opaque オペランドは real のみ pin するため $\top$ はゴールに到達不能
+
+降順反復中に SAT モデルが前方検証に失敗した場合（invalid model）、同じ長さで **blocking clause** を追加して再探索する（§6.2）。これにより擬似モデルは同長で排除される。
 
 ### 5.4 NOP 伝播
 
@@ -347,50 +355,53 @@ def minimize_length_descending(phi, L_orig):
     """
     phi: §5.1–§5.4 の全制約を含む CNF (上界 L = L_orig でエンコード)
     L_orig: オリジナル命令列の長さ
-    戻り値: 最短長 L*, 対応する命令列
+    戻り値: 最短長 L*, 対応する命令列, proven_optimal
     """
     solver = IncrementalSATSolver()
     solver.add_clauses(phi)
 
     # ステップ 1: 上界 L_orig での充足性確認
-    # オリジナル命令列が解として含まれているはずなので SAT
     result = solver.solve(assumptions=[])
     if result != SAT:
-        # 語彙 V またはパラメータ H, R に不備
         raise EncodingError("L_orig での SAT が失敗。語彙やパラメータを見直すこと")
 
     best_model = solver.get_model()
     L_star = L_orig
+    proven_optimal = False
+    saw_invalid_model = False
 
     # ステップ 2: 1 ずつ減らしながら降下
     ell = L_orig - 1
     while ell >= 0:
-        # 「長さ ell 以下の解は存在するか?」を問う
-        # NOP 伝播により x_{ell+1, NOP} = 1 で位置 ell+1 以降が全 NOP
         assumptions = [x[ell + 1, NOP]]
-        result = solver.solve(assumptions=assumptions)
-
-        if result == SAT:
-            best_model = solver.get_model()
-            L_star = ell
-            ell -= 1
-        else:
-            # UNSAT: 長さ ell 以下では実現不可能。1 つ前の L_star が最適
-            break
-
-    instructions = reconstruct(best_model, L_star)
-    return L_star, instructions
-
-
-def reconstruct(model, L_star):
-    """SAT 解から命令列を抽出(NOP を除く)"""
-    seq = []
-    for i in range(1, L_star + 1):
-        for o in OP:
-            if model[x[i, o]] == 1 and o != NOP:
-                seq.append(o)
+        while True:
+            result = solver.solve(assumptions=assumptions)
+            if result == SAT:
+                seq = reconstruct(solver.get_model(), ell)
+                if forward_valid(seq):  # 前方実行 + opaque 入力の ≡_R 検証
+                    best_model = solver.get_model()
+                    L_star = ell
+                    ell -= 1
+                    break
+                # invalid model: 同じ長さで blocking clause を追加して再試行
+                saw_invalid_model = True
+                if not block_current_op_model(solver):
+                    break  # timeout / solver failure
+            elif result == UNSAT:
+                proven_optimal = True
+                ell = -1  # 外側ループ終了
                 break
-    return seq
+            else:  # TIMEOUT
+                break
+
+    proven_optimal = (
+        proven_optimal
+        and encoding_complete  # |V| cap 等で語彙が不完全でない
+        and not saw_invalid_model
+        and not timed_out
+    )
+    instructions = reconstruct(best_model, L_star)
+    return L_star, instructions, proven_optimal
 ```
 
 ### 6.3 この方式の利点
@@ -400,6 +411,7 @@ def reconstruct(model, L_star):
 | **初回呼び出しが自明に SAT** | $L_{\mathrm{orig}}$ がそのまま解。UNSAT 判定の難しさを初期化段階で回避 |
 | **常に有効な解を保持** | 反復のどの時点で止めても $\mathit{best\_model}$ は実行可能な命令列を表す |
 | **タイムアウト耐性** | 時間切れで打ち切っても、それまでに得られた最短解を出力できる |
+| **invalid model 排除** | SAT モデルを前方検証し、失敗時は blocking clause で同長再探索（§5.3） |
 | **incremental SAT との相性** | 制約本体は不変、assumption のみ変化。学習節が累積する |
 | **早期終了** | UNSAT が 1 回出れば停止。二分探索より呼び出し回数が多い場合があるが、各呼び出しが SAT で完結する間は速いことが多い |
 
@@ -439,7 +451,14 @@ def minimize_length_with_timeout(phi, L_orig, time_budget):
     return L_star, instructions, is_proven_optimal
 ```
 
-`is_proven_optimal` は「真に最適であることが証明できた」場合のみ True。タイムアウトの場合は False(さらに短縮可能な可能性が残る)。
+`is_proven_optimal` は「真に最適であることが証明できた」場合のみ True。次のいずれかが成立すると False:
+
+- セグメントタイムアウトで打ち切った
+- $|V|$ 上限等で `encoding_complete = false`
+- invalid model を検出した（blocking 後も同長で再探索が必要だった）
+- UNSAT 判定に至る前に solver が TIMEOUT を返した
+
+ベンチマーク集計では、セグメントタイムアウト（`solver_time_in_sec ≥ timeout`）したブロックを除外した削減率も併記すると、符号化内で実際に短縮できた割合が見やすい（`reduction_by_benchmark_no_timeout.png`）。
 
 ### 6.5 オリジナル命令列の SAT 表現可能性
 
@@ -486,7 +505,7 @@ def minimize_length_with_timeout(phi, L_orig, time_budget):
 - (下界) 長さ $L^* - 1$ 以下の問い合わせが UNSAT であったため、語彙 $V$ で表現可能な長さ $L^* - 1$ 以下の命令列は存在しない
 - (語彙の十分性) $V$ がオリジナル命令列の中間値を含み、かつ $\equiv_R$ で閉じていれば、エンコーディングは関連する全ての等価表現を網羅する
 
-タイムアウトで打ち切った場合は、$L^*$ は「**$L^*$ 以下の長さで実現可能であることが確認された最良値**」にとどまる(真の最適とは限らない)。
+タイムアウトで打ち切った場合は、$L^*$ は「**$L^*$ 以下の長さで実現可能であることが確認された最良値**」にとどまる(真の最適とは限らない)。`encoding_complete = false` や invalid model 検出時も同様に、$L^*$ は符号化内の暫定最良値であり `proven_optimal` は付けない。
 
 ### 7.3 最適性の限界
 
@@ -522,7 +541,11 @@ def minimize_length_with_timeout(phi, L_orig, time_budget):
 - オリジナルトレースに無かった中間スタック構成を経由するデータフロー（語彙 $V$ 不足）
 - 不透明命令のオペランドが、元 $\mathit{in}[k]$ と $\equiv_R$ 同値だが構造が異なる経路
 
-**緩和済み:** pure 可換 binop（`add` 等）について、命令並べ替え後のスタック operand 順反転は §2.3.1 の $T_\oplus$ 双方向化で表現可能。
+**緩和済み（2026-07-02）:**
+
+- pure 可換 binop（`add` 等）について、命令並べ替え後のスタック operand 順反転は §2.3.1 の $T_\oplus$ 双方向化 + e-class 正節で表現可能
+- `local.tee` による局所融合と call 前後 spill 変更の**大部分**（旧 residual 223 blocks → 11 blocks）。残りは `function_24/25` の 1 命令 tee/stack-hold 差（[`0701_bugfix_soundness.md`](0701_bugfix_soundness.md)）
+- typed zero identity（`(i64.add 0 x) ≡ x` 等）による定数畳み込み + tee 融合（`function_14_block_0_52`）
 
 ### 7.5 tee 融合・spill スケジュール変更の表現限界（既知のギャップ）
 
@@ -586,6 +609,7 @@ $V$ と $T$ の構築は SAT 呼び出しの前に一度だけ行う:
 - $\mathit{fin}$ から到達不可能なローカル番号
 - $\mathit{fin}$ の部分式・$\mathit{init}$ の構成要素のいずれにも含まれない値
 - 引数が $V$ に含まれないため $T$ が常に未定義になる演算
+- **到達可能性 pruning（実装）:** 境界・witness から forward/backward に到達可能なスタック値インデックス以外の $y_{i,j,v}$ を固定 false にする
 
 これらは最適性に影響しない(到達不可能な選択肢を消すだけ)。
 
@@ -718,7 +742,7 @@ $$x_{i,\mathit{op}} \;\to\; y_{i-1,k,\,\mathit{in}[k]} = 1 \qquad (k = 0, \ldots
 
 ここで $\mathit{in}[k]$ は $V$ 内の**特定の代表元インデックス**である。実装では同一 $\equiv_R$ 類に属する別インデックスも許容する緩和（$\mathit{equiv}(v) = \{ v' \in V \mid c(v') = c(v) \}$）を入れてよいが、**$V$ に無い式や、$\mathit{in}[k]$ と $\equiv_R$ 同値だが構造が異なる式**までは自動的には許されない。
 
-> **実装（2026-07-01）:** `build_vocab` 終端で `reals` 全体の joint saturation から `equiv_class` を計算し、`encode_opaque` のオペランド許容集合は `canon_ids` ではなく `equiv_class` 一致で閉じる（再検証 `values_equivalent` と整合）。$V$ に同一類の別表現が複数載っている場合にのみ効く。
+> **実装（2026-07-02）:** `build_vocab` 終端で `reals` 全体の joint saturation から `equiv_class` を計算する。`encode_opaque` のオペランド許容集合は `canon_ids` ではなく `equiv_class` 一致で閉じる（再検証 `values_equivalent` と整合）。pure binop/unop の正節も同様に e-class 単位で生成する（§5.3）。
 
 > **既知のギャップ（§7.5, §11.8）:** `local.tee` によるスケジュール変更後、**pure 可換 binop** の operand 順反転は §2.3.1 で $T_\oplus$ 側に閉じる。**load / call 等の不透明命令**では、実行上は同値でも元トレースの $\mathit{in}[k]$ と異なる構文木になりうる。後者は §11.3 の要求が探索空間を過剰に狭め、tee 融合解を表現不能にしうる。対処は §11.8 を参照。
 
@@ -762,9 +786,9 @@ A\* が依存順序を解の受理時に事後検証するのに対し、SAT は
 
 - 前方記号実行で $\mathit{init} \to \mathit{fin}$ 接地を確認（§7.1 と同じ）
 - $\mathit{storage\_ops\_preserved}$（各 storage が 1 回）と $\mathit{ops\_respect\_dependencies}$（$\mathit{deplist}$ 順序）を確認
-- **（推奨）各不透明命令の実際の入力式が、元セグメントの記録と $\equiv_R$ で一致すること**を確認
+- **各不透明命令の実際の入力式が、元セグメントの記録と $\equiv_R$ で一致すること**を確認
 
-を行い、満たさないモデルは棄却する。
+を行い、満たさないモデルは棄却する。実装では降順反復の内側ループ（§6.2）でこの検証を行い、失敗時は blocking clause を追加して同長で再探索する。
 
 §11.3–§11.5 の制約が完全かつ再検証の前提が符号化と一致していれば、再検証は常に成立する。ただし再検証が「元 $\mathit{in}[k]$ の文字列」と「実行トレース上の式」の $\equiv_R$ 一致を別途要求する場合、**符号化が許した候補が再検証で落ちる**、あるいは**符号化自体がスケジュール変更後の同値入力を表現できない**ことがある（§7.5, §11.8）。このとき §7.2 の $L^*$ は符号化内最適にとどまる。
 
@@ -791,12 +815,21 @@ A\* が依存順序を解の受理時に事後検証するのに対し、SAT は
 
 | 項目 | 状態 |
 | --- | --- |
-| 可換 binop の $T_\oplus$ 双方向化（§2.3.1） | **採用済み**。`tee` + 命令並べ替えでスタック operand 順が反転する cat A 型（pure-local block）の主要ブロッカーを解消 |
-| Get/Set/Tee 境界の $\equiv_R$ 許容 | 部分採用。転送境界の e-class 統合 |
-| 多段 `tee` 融合（2 命令以上の同時融合） | 未解決（bucket C）。別途 witness / 語彙拡張が必要 |
-| ゴール指向語彙（方向 C） | 未着手 |
+| seed-closed 語彙 $V = \mathrm{SubExpr}(\mathrm{EqSat}(\mathrm{SubExpr}(\mathit{seed})))$（§2.1） | **採用済み** |
+| 構造抽出による $T_\oplus/T_\circ$ edge（§2.3） | **採用済み**。$V \times V$ online 適用は使わない |
+| pure op の部分関数化 + $\top$ 遮断（§5.3） | **採用済み**。$\top$ 結果吸収は廃止 |
+| invalid model blocking（§6.2） | **採用済み** |
+| 可換 binop の operand pair 双方向化 + e-class 正節（§2.3.1） | **採用済み** |
+| Get/Set/Tee の $\equiv_R$ 転送（§5.3） | **採用済み** |
+| opaque オペランドの e-class 許容（§11.3） | **採用済み** |
+| typed zero identity 正規化（§2.1） | **採用済み**。`function_14_block_0_52` 型の 7→6 gap を解消 |
+| `proven_optimal` の条件分離（§6.4, 方向 F） | **採用済み** |
+| Souper ベンチ全体削減率 vs SuperStack | **ほぼ同等**（`wsouper` 全 benchmark） |
+| 残 SS ギャップ（`sign_test` / `mux1_1`） | **11 blocks / 11 命令**（すべて 1 命令差、`function_24/25` の tee/stack-hold） |
+| 多段 `tee` 融合（2 命令以上の同時融合） | 大部分 resolved。残りは上記 11 blocks |
+| ゴール指向語彙（方向 C） | 未着手（fin seed は部分採用） |
 
-優先順は **B（可換 operand 閉包）→ A（$\equiv_R$ 網羅化）→ C・D**、実務的 **E**、正直さ **F**。可換 binop 双方向化は B の第一歩であり、$\equiv_R$ ルールに可換律があっても自動では効かない点（§2.3.1）に注意。詳細な現象分析は [`0701_suboptimal_cause.md`](0701_suboptimal_cause.md) §5 を参照。
+優先順は **B（e-class 閉包）→ A（$\equiv_R$ 網羅化）→ C・D**、実務的 **E**、正直さ **F**。可換 binop 双方向化は B の第一歩であり、$\equiv_R$ ルールに可換律があっても自動では効かない点（§2.3.1）に注意。詳細な現象分析・ベンチ結果は [`0701_suboptimal_cause.md`](0701_suboptimal_cause.md) §5、[`0701_bugfix_soundness.md`](0701_bugfix_soundness.md) を参照。
 
 ---
 
@@ -804,8 +837,9 @@ A\* が依存順序を解の受理時に事後検証するのに対し、SAT は
 
 SAT エンコーディングの完全性を保証するため、以下が全て揃っていることを実装時に確認する:
 
-- [ ] §2.3: 各 $\circ, \oplus$ の $T$ テーブル構築
-- [ ] §2.3.1: 可換 $\oplus$ について $(v_1,v_0)$ と $(v_0,v_1)$ の双方向 edge
+- [ ] §2.1: seed-closed 語彙構築（trace + boundary + fin seed + joint eqsat）
+- [ ] §2.3: 構造分解からの $T$ edge 抽出（$V \times V$ online 適用なし）
+- [ ] §2.3.1: 可換 $\oplus$ について $(v_1,v_0)$ と $(v_0,v_1)$ の双方向 edge + e-class 正節
 - [ ] §5.1: 各 $i$ で命令一意性($\sum_o x_{i,o} = 1$)
 - [ ] §5.1: 各 $(i, j)$ でスタック値一意性
 - [ ] §5.1: 各 $(i, r)$ でローカル値一意性
@@ -816,8 +850,11 @@ SAT エンコーディングの完全性を保証するため、以下が全て�
 - [ ] §5.3: $\mathrm{NOP}$ の状態保存
 - [ ] §5.3: 各 $\mathrm{const}_c$ の遷移
 - [ ] §5.3: 各 $\mathrm{get}_x, \mathrm{set}_x, \mathrm{tee}_x$ の遷移
-- [ ] §5.3: 各単項演算 $\circ$ の遷移（$\top$-sink 全域化: domain 節に $\vee y_{i,0,\top}$）
-- [ ] §5.3: 各二項演算 $\oplus$ の遷移（$\top$-sink 全域化: per-$v_1$ domain + 吸収節、sparse 正節 dedup）
+- [ ] §5.3: 各単項演算 $\circ$ の遷移（部分関数: 許可 operand ec のみ正節、それ以外禁止）
+- [ ] §5.3: 各二項演算 $\oplus$ の遷移（部分関数: 許可 $(\mathrm{ec}_1,\mathrm{ec}_0)$ のみ正節、$\top$ 結果吸収なし）
+- [ ] §5.3: Get/Set/Tee の `pin_transfer_equiv`（$\equiv_R$ 転送）
+- [ ] §5.3: $\top$ 遮断（set/tee が $\top$ をローカルへ書かない）
+- [ ] §6.2: invalid model の blocking clause 再探索
 - [ ] §5.3: 全非 $\mathrm{set}/\mathrm{tee}$ 命令のローカル不変
 - [ ] §5.4: NOP 伝播
 - [ ] §11.3: 各不透明命令のオペランド要求・結果生成・スタックシフト・オーバーフロー防止

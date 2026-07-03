@@ -791,6 +791,58 @@ fn merge_vocab_operational_witness_tables(
     Some(())
 }
 
+/// Forward-execute `ops` on `segment` entry, collecting stack/local value expressions.
+fn collect_forward_seed_exprs(
+    segment: &StraightSegment,
+    ops: &[SemOp],
+) -> Option<(Vec<ValueExpr>, usize)> {
+    let mut seeds = Vec::new();
+    let mut max_height = 0usize;
+
+    let push_state = |seeds: &mut Vec<ValueExpr>, st: &SymState, max_h: &mut usize| {
+        *max_h = (*max_h).max(st.stack.len());
+        for e in &st.stack {
+            seeds.push(e.clone());
+        }
+        for req in st.locals.values() {
+            if let LocalReq::Need(v) = req {
+                seeds.push(v.clone());
+            }
+        }
+    };
+
+    push_state(&mut seeds, &segment.init, &mut max_height);
+
+    let mut bounds = segment.bounds;
+    for op in ops {
+        if let SemOp::LocalGet(s) | SemOp::LocalSet(s) | SemOp::LocalTee(s) = op {
+            bounds.max_local = bounds.max_local.max(*s);
+        }
+    }
+
+    let mut m = SymMachine::from_segment_entry(
+        segment.num_params,
+        &bounds,
+        &segment.init,
+        bounds.max_stack,
+    );
+    push_state(&mut seeds, &m.to_fin_state(), &mut max_height);
+    for op in ops {
+        m.exec(op).ok()?;
+        push_state(&mut seeds, &m.to_fin_state(), &mut max_height);
+    }
+
+    Some((seeds, max_height))
+}
+
+/// Seeds from an optional greedy / external witness program (A-2).
+fn collect_witness_seed_exprs(
+    segment: &StraightSegment,
+    witness_ops: &[SemOp],
+) -> Option<(Vec<ValueExpr>, usize)> {
+    collect_forward_seed_exprs(segment, witness_ops)
+}
+
 /// Forward-execute the original ops, collecting all stack/local values and the max stack height.
 fn collect_seed_exprs(segment: &StraightSegment) -> (Vec<ValueExpr>, usize) {
     let mut seeds = Vec::new();
@@ -840,8 +892,20 @@ fn build_vocab(
     segment: &StraightSegment,
     canon: &mut Canonizer,
     deadline: Instant,
+    witness_ops: Option<&[SemOp]>,
 ) -> Option<(Vocab, usize)> {
-    build_vocab_with_limit(segment, canon, max_vocab_for_segment(segment), deadline)
+    let (extra_seeds, extra_max_height) = match witness_ops {
+        Some(ops) => collect_witness_seed_exprs(segment, ops).unwrap_or((Vec::new(), 0)),
+        None => (Vec::new(), 0),
+    };
+    build_vocab_with_limit(
+        segment,
+        canon,
+        max_vocab_for_segment(segment),
+        deadline,
+        &extra_seeds,
+        extra_max_height,
+    )
 }
 
 fn try_insert_vocab(
@@ -869,11 +933,14 @@ fn build_vocab_with_limit(
     canon: &mut Canonizer,
     max_vocab: usize,
     deadline: Instant,
+    extra_seeds: &[ValueExpr],
+    extra_max_height: usize,
 ) -> Option<(Vocab, usize)> {
     if Instant::now() >= deadline {
         return None;
     }
     let (seeds, max_height) = collect_seed_exprs(segment);
+    let max_height = max_height.max(extra_max_height);
 
     let mut index_of_canon: HashMap<CanonId, usize> = HashMap::new();
     let mut reals: Vec<ValueExpr> = Vec::new();
@@ -881,9 +948,10 @@ fn build_vocab_with_limit(
     let mut complete = true;
 
     // V = SubExpr(EqSat(SubExpr(seed))) where seed = trace + boundaries + opaque symbols
-    // + fin-oriented values + type-filtered synthesis constants.
+    // + fin-oriented values + type-filtered synthesis constants + optional witness intermediates.
     let types = types_in_segment(segment);
     let mut core: Vec<ValueExpr> = seeds;
+    core.extend(extra_seeds.iter().cloned());
     core.extend(collect_fin_oriented_seed_exprs(segment));
     core.extend(synthesis_const_exprs_for_types(&types));
     dedup_by_string(&mut core);
@@ -1240,14 +1308,9 @@ fn sem_eq_const(a: &SemOp, b: &SemOp) -> bool {
     }
 }
 
-fn original_witness_assumptions(
-    segment: &StraightSegment,
-    ops: &[SatOp],
-    dims: &Dims,
-) -> Option<Vec<i32>> {
+fn witness_assumptions(ops: &[SatOp], dims: &Dims, witness_ops: &[SemOp]) -> Option<Vec<i32>> {
     Some(
-        segment
-            .ops
+        witness_ops
             .iter()
             .map(|sem| sat_op_index_for_orig(ops, sem))
             .collect::<Option<Vec<_>>>()?
@@ -1256,6 +1319,14 @@ fn original_witness_assumptions(
             .map(|(step, o)| dims.x(step + 1, o))
             .collect(),
     )
+}
+
+fn original_witness_assumptions(
+    segment: &StraightSegment,
+    ops: &[SatOp],
+    dims: &Dims,
+) -> Option<Vec<i32>> {
+    witness_assumptions(ops, dims, &segment.ops)
 }
 
 /// NOP is always the first entry of the instruction alphabet.
@@ -1340,6 +1411,333 @@ fn encode_unop_positive_equiv(
             cnf.add(clause);
         }
     }
+}
+
+/// Bitset over real value indices `0..n` for reachability analysis (§8.5 / B-1).
+#[derive(Clone, Debug, Default)]
+struct ValueBitSet {
+    bits: Vec<bool>,
+}
+
+impl ValueBitSet {
+    fn new(n: usize) -> Self {
+        Self {
+            bits: vec![false; n],
+        }
+    }
+
+    fn set(&mut self, v: usize) {
+        if v < self.bits.len() {
+            self.bits[v] = true;
+        }
+    }
+
+    fn test(&self, v: usize) -> bool {
+        self.bits.get(v).copied().unwrap_or(false)
+    }
+
+    fn union(&mut self, other: &Self) {
+        for (a, b) in self.bits.iter_mut().zip(other.bits.iter()) {
+            *a |= *b;
+        }
+    }
+
+    fn set_with_equiv(&mut self, v: usize, vocab: &Vocab) {
+        for eq in equiv_reals(vocab, v) {
+            self.set(eq);
+        }
+    }
+}
+
+/// Forward/backward value reachability at each step (conservative over-approximation).
+#[derive(Clone, Debug)]
+struct ReachabilityPrune {
+    forward: Vec<ValueBitSet>,
+    backward: Vec<ValueBitSet>,
+    pruned_y_literals: usize,
+}
+
+fn seed_init_values(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    canon: &mut Canonizer,
+    h: usize,
+    r: usize,
+    pool: &mut ValueBitSet,
+    local_pool: &mut [ValueBitSet],
+) -> Option<()> {
+    for j in 0..h {
+        if let Some(e) = stack_expr_at(&segment.init, j) {
+            let v = vocab.real_of_expr(canon, e)?;
+            pool.set_with_equiv(v, vocab);
+        }
+    }
+    for rr in 0..r {
+        if let Some(LocalReq::Need(v)) = segment.init.locals.get(&(rr as u32)) {
+            let idx = vocab.real_of_expr(canon, v)?;
+            pool.set_with_equiv(idx, vocab);
+            local_pool[rr].set_with_equiv(idx, vocab);
+        }
+    }
+    Some(())
+}
+
+fn seed_fin_values(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    canon: &mut Canonizer,
+    h: usize,
+    r: usize,
+    goal: &mut ValueBitSet,
+) -> Option<()> {
+    for j in 0..h {
+        if let Some(e) = stack_expr_at(&segment.fin, j) {
+            let v = vocab.real_of_expr(canon, e)?;
+            goal.set_with_equiv(v, vocab);
+        }
+    }
+    for rr in 0..r {
+        if rr as u32 > segment.bounds.max_local {
+            continue;
+        }
+        match segment.fin.locals.get(&(rr as u32)) {
+            Some(LocalReq::Need(v)) => {
+                let idx = vocab.real_of_expr(canon, v)?;
+                goal.set_with_equiv(idx, vocab);
+            }
+            None => {
+                if let Some(LocalReq::Need(v)) = segment.init.locals.get(&(rr as u32)) {
+                    let idx = vocab.real_of_expr(canon, v)?;
+                    goal.set_with_equiv(idx, vocab);
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(())
+}
+
+fn compute_forward_reachability(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    ops: &[SatOp],
+    canon: &mut Canonizer,
+    l: usize,
+    h: usize,
+    r: usize,
+) -> Option<Vec<ValueBitSet>> {
+    let n = vocab.n();
+    let mut forward = vec![ValueBitSet::new(n); l + 1];
+    let mut pool = ValueBitSet::new(n);
+    let mut local_pool = vec![ValueBitSet::new(n); r];
+    seed_init_values(segment, vocab, canon, h, r, &mut pool, &mut local_pool)?;
+    forward[0] = pool.clone();
+
+    for step in 1..=l {
+        let mut new_pool = pool.clone();
+        for op in ops {
+            match op {
+                SatOp::Const { val, .. } => new_pool.set_with_equiv(*val, vocab),
+                SatOp::Get(slot) => {
+                    let slot = *slot as usize;
+                    if slot < r {
+                        new_pool.union(&local_pool[slot]);
+                    }
+                }
+                SatOp::Set(slot) | SatOp::Tee(slot) => {
+                    let slot = *slot as usize;
+                    if slot < r {
+                        local_pool[slot].union(&pool);
+                    }
+                }
+                SatOp::Unop { edges, .. } => {
+                    for &(a, res) in edges {
+                        if pool.test(a) {
+                            new_pool.set_with_equiv(res, vocab);
+                        }
+                    }
+                }
+                SatOp::Binop { edges, .. } => {
+                    for &(a1, a0, res) in edges {
+                        if pool.test(a1) && pool.test(a0) {
+                            new_pool.set_with_equiv(res, vocab);
+                        }
+                    }
+                }
+                SatOp::Opaque { out_reals, .. } => {
+                    for &v in out_reals {
+                        new_pool.set_with_equiv(v, vocab);
+                    }
+                }
+                SatOp::Nop | SatOp::Drop => {}
+            }
+        }
+        for op in ops {
+            if let SatOp::Set(slot) | SatOp::Tee(slot) = op {
+                let slot = *slot as usize;
+                if slot < r {
+                    local_pool[slot].union(&pool);
+                }
+            }
+        }
+        pool = new_pool;
+        forward[step] = pool.clone();
+    }
+    Some(forward)
+}
+
+fn apply_inverse_step(
+    vocab: &Vocab,
+    ops: &[SatOp],
+    pool: &mut ValueBitSet,
+) {
+    for op in ops {
+        match op {
+            SatOp::Unop { edges, .. } => {
+                let mut preds = Vec::new();
+                for &(a, res) in edges {
+                    if pool.test(res) {
+                        preds.push(a);
+                    }
+                }
+                for a in preds {
+                    pool.set_with_equiv(a, vocab);
+                }
+            }
+            SatOp::Binop { edges, .. } => {
+                let mut preds = Vec::new();
+                for &(a1, a0, res) in edges {
+                    if pool.test(res) {
+                        preds.push((a1, a0));
+                    }
+                }
+                for (a1, a0) in preds {
+                    pool.set_with_equiv(a1, vocab);
+                    pool.set_with_equiv(a0, vocab);
+                }
+            }
+            SatOp::Opaque { in_reals, out_reals, .. } => {
+                let mut need_inputs = false;
+                for &res in out_reals {
+                    if pool.test(res) {
+                        need_inputs = true;
+                        break;
+                    }
+                }
+                if need_inputs {
+                    for &inp in in_reals {
+                        pool.set_with_equiv(inp, vocab);
+                    }
+                }
+            }
+            SatOp::Get(slot) => {
+                // Conservative: any value in pool might be read from a local.
+                let _ = slot;
+            }
+            SatOp::Const { val, .. } => {
+                let _ = val;
+            }
+            _ => {}
+        }
+    }
+}
+
+fn compute_backward_reachability(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    ops: &[SatOp],
+    canon: &mut Canonizer,
+    l: usize,
+    h: usize,
+    r: usize,
+) -> Option<Vec<ValueBitSet>> {
+    let n = vocab.n();
+    let mut backward = vec![ValueBitSet::new(n); l + 1];
+    seed_fin_values(segment, vocab, canon, h, r, &mut backward[l])?;
+
+    for op in ops {
+        if let SatOp::Opaque { in_reals, .. } = op {
+            for &inp in in_reals {
+                backward[l].set_with_equiv(inp, vocab);
+            }
+        }
+    }
+
+    for i in (0..l).rev() {
+        backward[i] = backward[i + 1].clone();
+        apply_inverse_step(vocab, ops, &mut backward[i]);
+        for rr in 0..r {
+            if let Some(LocalReq::Need(v)) = segment.init.locals.get(&(rr as u32)) {
+                if let Some(idx) = vocab.real_of_expr(canon, v) {
+                    backward[i].set_with_equiv(idx, vocab);
+                }
+            }
+        }
+        for j in 0..h {
+            if let Some(e) = stack_expr_at(&segment.init, j) {
+                if let Some(v) = vocab.real_of_expr(canon, e) {
+                    backward[i].set_with_equiv(v, vocab);
+                }
+            }
+        }
+    }
+    Some(backward)
+}
+
+fn compute_reachability_prune(
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    ops: &[SatOp],
+    dims: &Dims,
+    canon: &mut Canonizer,
+) -> Option<ReachabilityPrune> {
+    let l = dims.l;
+    let h = dims.h;
+    let r = dims.r;
+    let n = dims.n;
+    let forward = compute_forward_reachability(segment, vocab, ops, canon, l, h, r)?;
+    let backward = compute_backward_reachability(segment, vocab, ops, canon, l, h, r)?;
+
+    let mut pruned_y_literals = 0usize;
+    for i in 0..=l {
+        for v in 0..n {
+            if !forward[i].test(v) || !backward[i].test(v) {
+                pruned_y_literals += h;
+            }
+        }
+    }
+
+    Some(ReachabilityPrune {
+        forward,
+        backward,
+        pruned_y_literals,
+    })
+}
+
+fn apply_reachability_pruning(
+    cnf: &mut Cnf,
+    segment: &StraightSegment,
+    vocab: &Vocab,
+    ops: &[SatOp],
+    dims: &Dims,
+    canon: &mut Canonizer,
+) -> Option<usize> {
+    let prune = compute_reachability_prune(segment, vocab, ops, dims, canon)?;
+    let l = dims.l;
+    let h = dims.h;
+    let n = dims.n;
+    let mut applied = 0usize;
+    for i in 0..=l {
+        for j in 0..h {
+            for v in 0..n {
+                if !prune.forward[i].test(v) || !prune.backward[i].test(v) {
+                    cnf.unit(-dims.y(i, j, v));
+                    applied += 1;
+                }
+            }
+        }
+    }
+    Some(applied)
 }
 
 /// Emit all consistency, boundary, semantics, and NOP-propagation clauses.
@@ -1636,6 +2034,9 @@ fn encode(
     if past(&cnf) {
         return None;
     }
+
+    let _pruned_y = apply_reachability_pruning(&mut cnf, segment, vocab, ops, dims, canon)?;
+
     Some(cnf)
 }
 
@@ -1814,6 +2215,8 @@ pub struct SatCnfProfile {
     pub encode_ms: f64,
     pub add_clauses_ms: f64,
     pub witness_ms: f64,
+    /// Stack `y` literals fixed to false by reachability pruning (B-1).
+    pub pruned_y_literals: usize,
     pub diagnosis: SatDiagnosis,
 }
 
@@ -1833,8 +2236,8 @@ impl SatCnfProfile {
             self.n_opaque_ops
         );
         eprintln!(
-            "  CNF: {} vars, {} clauses (max width {})",
-            self.n_vars, self.n_clauses, self.max_clause_len
+            "  CNF: {} vars, {} clauses (max width {}), pruned_y={}",
+            self.n_vars, self.n_clauses, self.max_clause_len, self.pruned_y_literals
         );
         eprintln!(
             "  time: vocab={:.1}ms ops={:.1}ms encode={:.1}ms add_clauses={:.1}ms witness={:.1}ms",
@@ -1862,7 +2265,7 @@ pub fn profile_sat(
 
     let t0 = Instant::now();
     let mut canon = Canonizer::new(rules.to_vec());
-    let (vocab, max_height) = build_vocab(segment, &mut canon, deadline).ok_or("vocab")?;
+    let (vocab, max_height) = build_vocab(segment, &mut canon, deadline, None).ok_or("vocab")?;
     let vocab_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let t1 = Instant::now();
@@ -1898,6 +2301,9 @@ pub fn profile_sat(
     let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
     let cnf = encode(segment, &vocab, &ops, &mut dims, &mut canon, deadline).ok_or("encode")?;
     let encode_ms = t2.elapsed().as_secs_f64() * 1000.0;
+    let pruned_y_literals = compute_reachability_prune(segment, &vocab, &ops, &dims, &mut canon)
+        .map(|p| p.pruned_y_literals)
+        .unwrap_or(0);
     let n_vars = (dims.next_var - 1) as usize;
     let n_clauses = cnf.clauses.len();
     let max_clause_len = cnf.clauses.iter().map(|c| c.len()).max().unwrap_or(0);
@@ -1957,6 +2363,7 @@ pub fn profile_sat(
         encode_ms,
         add_clauses_ms,
         witness_ms,
+        pruned_y_literals,
         diagnosis,
     })
 }
@@ -2008,7 +2415,7 @@ pub fn diagnose_sat(
     let deadline = Instant::now() + std::time::Duration::from_secs(timeout);
 
     let mut canon = Canonizer::new(rules.to_vec());
-    let Some((vocab, max_height)) = build_vocab(segment, &mut canon, deadline) else {
+    let Some((vocab, max_height)) = build_vocab(segment, &mut canon, deadline, None) else {
         return SatDiagnosis::VocabBuildFailed;
     };
 
@@ -2223,6 +2630,16 @@ pub fn solve_sat(
     rules: &[egg::Rewrite<crate::lang::ValueLang, ()>],
     cfg: &SearchConfig,
 ) -> SearchResult {
+    solve_sat_with_witness(segment, rules, cfg, None)
+}
+
+/// Like [`solve_sat`], but optionally seeds vocabulary / upper bound from `witness_ops` (A-2).
+pub(crate) fn solve_sat_with_witness(
+    segment: &StraightSegment,
+    rules: &[egg::Rewrite<crate::lang::ValueLang, ()>],
+    cfg: &SearchConfig,
+    witness_ops: Option<&[SemOp]>,
+) -> SearchResult {
     let started = Instant::now();
     let timeout = cfg
         .timeout_secs
@@ -2250,7 +2667,7 @@ pub fn solve_sat(
     }
 
     let mut canon = Canonizer::new(rules.to_vec());
-    let Some((vocab, max_height)) = build_vocab(segment, &mut canon, deadline) else {
+    let Some((vocab, max_height)) = build_vocab(segment, &mut canon, deadline, witness_ops) else {
         if timed_out_now() {
             return timeout_result();
         }
@@ -2323,11 +2740,20 @@ pub fn solve_sat(
         }
     };
 
+    if let Some(w_ops) = witness_ops {
+        if w_ops.len() < l_orig && forward_valid(w_ops, segment, &mut canon) {
+            best = Some(w_ops.to_vec());
+        }
+    }
+
     let mut timed_out = false;
     let mut proven_optimal = false;
     let mut saw_invalid_model = false;
     let encoding_complete = vocab.complete;
-    let mut ell = l_orig as isize - 1;
+    let mut ell = best
+        .as_ref()
+        .map(|b| b.len() as isize - 1)
+        .unwrap_or(l_orig as isize - 1);
     'lengths: while ell >= 0 {
         loop {
             let now = Instant::now();
@@ -2388,7 +2814,7 @@ pub(crate) fn solve_at_length_with_h(
         return None;
     }
     let mut canon = Canonizer::new(rules.to_vec());
-    let (vocab, _) = build_vocab(segment, &mut canon, deadline)?;
+    let (vocab, _) = build_vocab(segment, &mut canon, deadline, None)?;
     let r = (segment.bounds.max_local as usize) + 1 + cfg.scratch_locals;
     let ops = build_ops(segment, &vocab, &mut canon, rules, r, deadline)?;
     let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
@@ -2466,7 +2892,7 @@ pub(crate) fn solve_at_length_minus_one_with_h(
         return None;
     }
     let mut canon = Canonizer::new(rules.to_vec());
-    let (vocab, _) = build_vocab(segment, &mut canon, deadline)?;
+    let (vocab, _) = build_vocab(segment, &mut canon, deadline, None)?;
     let r = (segment.bounds.max_local as usize) + 1 + cfg.scratch_locals;
     let ops = build_ops(segment, &vocab, &mut canon, rules, r, deadline)?;
     let mut dims = Dims::new(l_orig, h, r, vocab.n(), ops.len());
@@ -2563,6 +2989,8 @@ mod tests {
             &mut canon,
             limit,
             Instant::now() + std::time::Duration::from_secs(120),
+            &[],
+            0,
         )
         .map(|(v, _)| v.n())
         .expect("core vocab build")
@@ -2656,7 +3084,7 @@ mod tests {
         let deadline = Instant::now() + std::time::Duration::from_secs(120);
         let seg = segments.first().expect("nonempty");
         let mut canon = Canonizer::new(rules_v);
-        let (vocab, _) = build_vocab(seg, &mut canon, deadline).unwrap();
+        let (vocab, _) = build_vocab(seg, &mut canon, deadline, None).unwrap();
         assert_eq!(vocab.equiv_class.len(), vocab.reals.len());
         for (i, ec) in vocab.equiv_class.iter().enumerate() {
             assert_eq!(*ec, vocab.equiv_class[i]);
@@ -2837,6 +3265,90 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reachability_pruning_preserves_original_witness() {
+        let segments = load_wsouper_segments(12);
+        let rules_v = rules();
+        let cfg = SearchConfig::default();
+        for seg in segments.iter().filter(|s| !s.ops.is_empty()).take(30) {
+            let diag = diagnose_sat(seg, &rules_v, &cfg.for_segment(seg));
+            assert!(
+                !matches!(diag, SatDiagnosis::OriginalWitnessUnsat),
+                "B-1 pruning broke witness on func {} {}: {diag:?}",
+                seg.func_index,
+                seg.label()
+            );
+        }
+    }
+
+    #[test]
+    fn reachability_pruning_prunes_y_literals() {
+        let segments = load_wsouper_segments(12);
+        let rules_v = rules();
+        let seg = find_residual_gap_segment(&segments, 14);
+        let scfg = SearchConfig::default().for_segment(&seg);
+        let prof = profile_sat(&seg, &rules_v, &scfg).expect("profile");
+        assert!(
+            prof.pruned_y_literals > 0,
+            "expected stack y pruning on function_14 gap block"
+        );
+        assert!(
+            !matches!(prof.diagnosis, SatDiagnosis::OriginalWitnessUnsat),
+            "{:?}",
+            prof.diagnosis
+        );
+    }
+
+    #[test]
+    fn witness_seed_covers_superstack_solution_vocab() {
+        let segments = load_wsouper_segments(12);
+        let seg = find_residual_gap_segment(&segments, 14);
+        let rules_v = rules();
+        let ss_ops = ss_solution_14_block_0_76(&seg);
+        let mut canon = Canonizer::new(rules_v.to_vec());
+        let deadline = Instant::now() + std::time::Duration::from_secs(120);
+        let (witness_seeds, witness_h) =
+            collect_witness_seed_exprs(&seg, &ss_ops).expect("witness seeds");
+        let base = core_vocab_size(&seg, &rules_v);
+        let (vocab, _) = build_vocab_with_limit(
+            &seg,
+            &mut canon,
+            max_vocab_for_segment(&seg),
+            deadline,
+            &witness_seeds,
+            witness_h,
+        )
+        .expect("vocab with witness");
+        assert!(vocab.n() >= base);
+        let missing = vocab_missing_for_solution(&seg, &rules_v, &ss_ops, Some(&ss_ops));
+        assert!(
+            missing.is_empty(),
+            "witness-seeded vocab should cover SS intermediates: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn solve_sat_with_witness_accepts_shorter_upper_bound() {
+        let segments = load_wsouper_segments(12);
+        let seg = find_residual_gap_segment(&segments, 14);
+        let rules_v = rules();
+        let scfg = SearchConfig {
+            timeout_secs: Some(60),
+            ..SearchConfig::default()
+        }
+        .for_segment(&seg);
+        let ss_ops = ss_solution_14_block_0_76(&seg);
+        let res = solve_sat_with_witness(&seg, &rules_v, &scfg, Some(&ss_ops));
+        let got = res.ops.expect("witness-seeded SAT should return a model");
+        assert!(
+            got.len() <= ss_ops.len(),
+            "witness upper bound should start descent from SS length (got {} vs ss {})",
+            got.len(),
+            ss_ops.len()
+        );
+        assert!(solution_valid(&got, &seg, &mut Canonizer::new(rules_v.to_vec())));
+    }
+
     fn load_wsouper_segments(split: usize) -> Vec<StraightSegment> {
         let path = std::path::Path::new("benchmarks/wsouper/sign_test.wasm");
         let info = parse_wasm_file(path).expect("parse sign_test");
@@ -2938,13 +3450,14 @@ mod tests {
         segment: &StraightSegment,
         rules: &[egg::Rewrite<crate::lang::ValueLang, ()>],
         ops: &[SemOp],
+        witness_ops: Option<&[SemOp]>,
     ) -> Vec<String> {
         use crate::sym::{LocalReq, SymMachine};
         use crate::wasm::SegmentBounds;
 
         let deadline = Instant::now() + std::time::Duration::from_secs(120);
         let mut canon = Canonizer::new(rules.to_vec());
-        let (vocab, _) = build_vocab(segment, &mut canon, deadline).expect("vocab");
+        let (vocab, _) = build_vocab(segment, &mut canon, deadline, witness_ops).expect("vocab");
         let mut max_local = segment.bounds.max_local;
         for op in ops {
             if let SemOp::LocalGet(s) | SemOp::LocalSet(s) | SemOp::LocalTee(s) = op {
@@ -3050,11 +3563,11 @@ mod tests {
         );
 
         assert!(
-            vocab_missing_for_solution(&seg14, &rules_v, &ss14).is_empty(),
+            vocab_missing_for_solution(&seg14, &rules_v, &ss14, Some(&ss14)).is_empty(),
             "vocabulary should already cover SS 14 intermediates"
         );
         assert!(
-            vocab_missing_for_solution(&seg24, &rules_v, &ss24).is_empty(),
+            vocab_missing_for_solution(&seg24, &rules_v, &ss24, Some(&ss24)).is_empty(),
             "vocabulary should already cover SS 24 intermediates"
         );
 
@@ -3176,7 +3689,7 @@ mod tests {
         let rules_v = rules();
         let deadline = Instant::now() + std::time::Duration::from_secs(120);
         let mut canon = Canonizer::new(rules_v);
-        let (vocab, _) = build_vocab(seg, &mut canon, deadline).expect("vocab");
+        let (vocab, _) = build_vocab(seg, &mut canon, deadline, None).expect("vocab");
         let c280 = parse_value_expr("280");
         let c160 = parse_value_expr("160");
         assert!(
@@ -3269,6 +3782,7 @@ mod tests {
             seg,
             &mut canon,
             Instant::now() + std::time::Duration::from_secs(120),
+            None,
         )
         .expect("vocab");
         assert!(
@@ -3336,12 +3850,12 @@ mod tests {
             validate_solution_ops(&ss_ops, seg)
         );
 
-        let missing = vocab_missing_for_solution(seg, &rules_v, &ss_ops);
+        let missing = vocab_missing_for_solution(seg, &rules_v, &ss_ops, Some(&ss_ops));
         eprintln!("SS vocab missing ({}): {missing:?}", missing.len());
 
         let deadline = Instant::now() + std::time::Duration::from_secs(120);
         let mut canon2 = Canonizer::new(rules_v.clone());
-        let (vocab, max_h) = build_vocab(seg, &mut canon2, deadline).expect("vocab");
+        let (vocab, max_h) = build_vocab(seg, &mut canon2, deadline, None).expect("vocab");
         let cfg = crate::optimize::search::SearchConfig {
             backend: crate::optimize::search::Backend::Sat,
             max_sat_len: 12,
@@ -3385,7 +3899,7 @@ mod tests {
 
         // Compare stack cell V-indices at shr step
         let mut canon3 = Canonizer::new(rules_v.clone());
-        let (vocab2, _) = build_vocab(seg, &mut canon3, deadline).expect("vocab");
+        let (vocab2, _) = build_vocab(seg, &mut canon3, deadline, None).expect("vocab");
         let mut idx_at = |ops: &[SemOp], step: usize| -> Option<(usize, String)> {
             let mut m = SymMachine::from_segment_entry(
                 seg.num_params,
@@ -3563,12 +4077,12 @@ mod tests {
             validate_solution_ops(&ss_ops, seg)
         );
 
-        let missing = vocab_missing_for_solution(seg, &rules_v, &ss_ops);
+        let missing = vocab_missing_for_solution(seg, &rules_v, &ss_ops, Some(&ss_ops));
         eprintln!("SS vocab missing ({}): {missing:?}", missing.len());
 
         let deadline = Instant::now() + std::time::Duration::from_secs(120);
         let mut canon2 = Canonizer::new(rules_v.clone());
-        let (vocab, max_h) = build_vocab(seg, &mut canon2, deadline).expect("vocab");
+        let (vocab, max_h) = build_vocab(seg, &mut canon2, deadline, None).expect("vocab");
         let cfg = crate::optimize::search::SearchConfig {
             backend: crate::optimize::search::Backend::Sat,
             max_sat_len: 12,
@@ -3605,7 +4119,7 @@ mod tests {
 
         let r_ops = (seg.bounds.max_local as usize) + 1 + 1;
         let mut canon3 = Canonizer::new(rules_v.clone());
-        let (vocab2, _) = build_vocab(seg, &mut canon3, deadline).expect("vocab");
+        let (vocab2, _) = build_vocab(seg, &mut canon3, deadline, None).expect("vocab");
         let ops_sat = build_ops(seg, &vocab2, &mut canon3, &rules_v, r_ops, deadline).expect("ops");
         let mut dims = Dims::new(seg.original_len(), h, r_ops, vocab2.n(), ops_sat.len());
         let cnf = encode(seg, &vocab2, &ops_sat, &mut dims, &mut canon3, deadline).expect("encode");
@@ -3689,7 +4203,7 @@ mod tests {
             let scfg = cfg.for_segment(seg);
             let res = solve_sat(seg, &rules, &scfg);
             let mut canon = Canonizer::new(rules.clone());
-            let (vocab, max_h) = build_vocab(seg, &mut canon, deadline).expect("vocab");
+            let (vocab, max_h) = build_vocab(seg, &mut canon, deadline, None).expect("vocab");
             let h = stack_height_bound(max_h, seg, 1);
             let probe = solve_at_length_minus_one_with_h(seg, &rules, &scfg, h, deadline);
             eprintln!(

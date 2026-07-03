@@ -176,12 +176,13 @@ impl Canonizer {
         if exprs.is_empty() {
             return Vec::new();
         }
+        let exprs: Vec<ValueExpr> = exprs.to_vec();
         let mut runner = Runner::default()
             .with_iter_limit(EQSAT_ITER_LIMIT)
             .with_node_limit(EQSAT_NODE_LIMIT);
         let ids: Vec<Id> = exprs.iter().map(|e| runner.egraph.add_expr(e)).collect();
         let runner = runner.run(&self.rules);
-        let mut out: Vec<ValueExpr> = exprs.to_vec();
+        let mut out: Vec<ValueExpr> = exprs;
         let mut seen = HashSet::new();
         for id in ids {
             let ec = runner.egraph.find(id);
@@ -198,6 +199,7 @@ impl Canonizer {
         if exprs.is_empty() {
             return Vec::new();
         }
+        let exprs: Vec<ValueExpr> = exprs.to_vec();
         let mut runner = Runner::default()
             .with_iter_limit(EQSAT_ITER_LIMIT)
             .with_node_limit(EQSAT_NODE_LIMIT);
@@ -322,5 +324,22 @@ mod tests {
         assert!(canon.values_equivalent(&a, &b));
         // After merge, both strings share one canon id.
         assert_eq!(canon.canon(&a), canon.canon(&b));
+    }
+
+    #[test]
+    fn i64_zero_identities_fold_via_synthesized_rules() {
+        let mut canon = Canonizer::new(rules());
+        let mul = parse_value_expr("(i64.mul ?L7 ?L13)");
+        let add_zero = parse_value_expr("(i64.add 0 (i64.mul ?L7 ?L13))");
+        let and_zero = parse_value_expr("(i64.and 0 ?L7)");
+        let zero = {
+            let mut e = RecExpr::default();
+            e.add(ValueLang::I64Const(0));
+            e
+        };
+
+        assert!(canon.values_equivalent(&mul, &add_zero));
+        assert_eq!(canon.canon(&mul), canon.canon(&add_zero));
+        assert!(canon.values_equivalent(&and_zero, &zero));
     }
 }

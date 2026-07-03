@@ -31,7 +31,7 @@ fn rules_cache_path(max_ast_size: usize) -> PathBuf {
     PathBuf::from(format!("rules-ast{max_ast_size}.cache"))
 }
 
-const RULES_CACHE_FORMAT_VERSION: u32 = 18;
+const RULES_CACHE_FORMAT_VERSION: u32 = 19;
 
 /// AST size used in integration tests (≈ old `max_seq_len` 2).
 #[cfg(test)]
@@ -256,8 +256,9 @@ pub fn synthesized_to_rewrites(rules: &[SynthesizedRule]) -> Vec<Rewrite<ValueLa
 }
 
 fn parse_rewrite(name: &str, lhs: &str, rhs: &str) -> Result<Rewrite<ValueLang, ()>, String> {
-    let lhs_pat: Pattern<ValueLang> = lhs.parse().map_err(|e| format!("lhs {lhs}: {e}"))?;
-    let rhs_pat: Pattern<ValueLang> = rhs.parse().map_err(|e| format!("rhs {rhs}: {e}"))?;
+    use crate::value::pattern_from_typed_sexpr;
+    let lhs_pat = pattern_from_typed_sexpr(lhs)?;
+    let rhs_pat = pattern_from_typed_sexpr(rhs)?;
     Rewrite::new(name.to_string(), lhs_pat, rhs_pat).map_err(|e| e.to_string())
 }
 
@@ -300,7 +301,7 @@ mod tests {
             ValueOp::I32Mul,
             vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 2)],
         );
-        assert_eq!(mul.to_pattern(), "(i32.mul ?a 2)");
+        assert_eq!(mul.to_pattern(), "(i32.mul ?a (i32.const 2))");
         assert!(!mul.to_pattern().contains("stack"));
     }
 
@@ -327,7 +328,7 @@ mod tests {
             ValueOp::I32Sub,
             vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I32, 1)],
         );
-        assert_eq!(sub.to_pattern(), "(i32.sub ?a 1)");
+        assert_eq!(sub.to_pattern(), "(i32.sub ?a (i32.const 1))");
     }
 
     #[test]
@@ -351,7 +352,7 @@ mod tests {
             ValueOp::I64Mul,
             vec![ValueAst::symbol(0), ValueAst::const_ty(StackTy::I64, 2)],
         );
-        assert_eq!(mul.to_pattern(), "(i64.mul ?a 2)");
+        assert_eq!(mul.to_pattern(), "(i64.mul ?a (i64.const 2))");
     }
 
     #[test]
@@ -388,5 +389,28 @@ mod tests {
         );
         assert!(!is_directed_ast_pair(&short, &long));
         assert!(is_directed_ast_pair(&long, &short));
+    }
+
+    #[test]
+    fn all_cached_rules_compile_to_rewrites() {
+        let rules = test_synthesized_rules();
+        let rewrites = synthesized_to_rewrites(rules);
+        assert_eq!(
+            rules.len(),
+            rewrites.len(),
+            "some cached rules failed parse_rewrite"
+        );
+    }
+
+    #[test]
+    fn i64_add_zero_rewrite_folds_in_runner() {
+        use crate::value::parse_value_expr;
+        use egg::{AstSize, Extractor, Runner};
+        let rewrites = test_synthesis_rewrites();
+        let expr = parse_value_expr("(i64.add 0 (i64.mul ?L7 ?L13))");
+        let runner = Runner::default().with_expr(&expr).run(&rewrites);
+        let ext = Extractor::new(&runner.egraph, AstSize);
+        let (_, best) = ext.find_best(runner.roots[0]);
+        assert_eq!(best.to_string(), "(i64.mul ?L7 ?L13)");
     }
 }

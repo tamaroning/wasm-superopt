@@ -2,6 +2,7 @@
 
 mod ast;
 mod ops;
+mod typed_parse;
 
 pub use crate::semantics::StackTy;
 pub use ast::{
@@ -10,6 +11,7 @@ pub use ast::{
 pub use ops::{
     RuleSignature, ValueOp, enumerate_signatures, f32_bits_to_i64, f64_bits_to_i64, is_reachable,
 };
+pub use typed_parse::{parse_typed_sexpr, pattern_from_typed_sexpr};
 
 use crate::al::asts_valid_rewrite_z3 as al_asts_valid_rewrite_z3;
 use crate::al::eval_value_ast_concrete_sig;
@@ -236,5 +238,5 @@ impl AstEvalSignature {
 
 /// Parse a s-expression into a [`ValueLang`] DAG (used by symbolic forward execution).
 pub fn parse_value_expr(s: &str) -> RecExpr<ValueLang> {
-    s.parse().expect("invalid ValueLang RecExpr")
+    parse_typed_sexpr(s).expect("invalid ValueLang RecExpr")
 }

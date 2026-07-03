@@ -1,13 +1,13 @@
 {
-  "format_version": 18,
+  "format_version": 19,
   "max_ast_size": 3,
   "max_arity": 3,
   "random_tests": 100,
   "rules": [
     {
       "name": "syn-0",
-      "lhs": "(i32.rotr ?a 0)",
-      "rhs": "?a",
+      "lhs": "(i32.mul ?a (i32.const 0))",
+      "rhs": "(i32.const 0)",
       "signature": {
         "inputs": [
           "I32"
@@ -17,8 +17,8 @@
     },
     {
       "name": "syn-1",
-      "lhs": "(i32.xor 0 ?a)",
-      "rhs": "?a",
+      "lhs": "(i32.or ?a (i32.const -1))",
+      "rhs": "(i32.const -1)",
       "signature": {
         "inputs": [
           "I32"
@@ -28,8 +28,8 @@
     },
     {
       "name": "syn-2",
-      "lhs": "(i32.rotl 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i32.mul ?a (i32.const 1))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -39,8 +39,8 @@
     },
     {
       "name": "syn-3",
-      "lhs": "(i32.mul ?a 0)",
-      "rhs": "0",
+      "lhs": "(i32.xor (i32.const 2) ?a)",
+      "rhs": "(i32.xor ?a (i32.const 2))",
       "signature": {
         "inputs": [
           "I32"
@@ -50,8 +50,8 @@
     },
     {
       "name": "syn-4",
-      "lhs": "(i32.rotl 1 ?a)",
-      "rhs": "(i32.shl 1 ?a)",
+      "lhs": "(i32.mul (i32.const 2) ?a)",
+      "rhs": "(i32.mul ?a (i32.const 2))",
       "signature": {
         "inputs": [
           "I32"
@@ -61,8 +61,8 @@
     },
     {
       "name": "syn-5",
-      "lhs": "(i32.mul ?a 1)",
-      "rhs": "?a",
+      "lhs": "(i32.add (i32.const 1) ?a)",
+      "rhs": "(i32.add ?a (i32.const 1))",
       "signature": {
         "inputs": [
           "I32"
@@ -72,8 +72,8 @@
     },
     {
       "name": "syn-6",
-      "lhs": "(i32.shr_u ?a 0)",
-      "rhs": "?a",
+      "lhs": "(i32.or (i32.const -1) ?a)",
+      "rhs": "(i32.const -1)",
       "signature": {
         "inputs": [
           "I32"
@@ -83,8 +83,8 @@
     },
     {
       "name": "syn-7",
-      "lhs": "(i32.add 1 ?a)",
-      "rhs": "(i32.add ?a 1)",
+      "lhs": "(i32.rotr (i32.const -1) ?a)",
+      "rhs": "(i32.const -1)",
       "signature": {
         "inputs": [
           "I32"
@@ -94,8 +94,8 @@
     },
     {
       "name": "syn-8",
-      "lhs": "(i32.or 0 ?a)",
-      "rhs": "?a",
+      "lhs": "(i32.or (i32.const 2) ?a)",
+      "rhs": "(i32.or ?a (i32.const 2))",
       "signature": {
         "inputs": [
           "I32"
@@ -105,8 +105,8 @@
     },
     {
       "name": "syn-9",
-      "lhs": "(i32.mul ?a 2)",
-      "rhs": "(i32.shl ?a 1)",
+      "lhs": "(i32.xor (i32.const -1) ?a)",
+      "rhs": "(i32.xor ?a (i32.const -1))",
       "signature": {
         "inputs": [
           "I32"
@@ -116,8 +116,8 @@
     },
     {
       "name": "syn-10",
-      "lhs": "(i32.rotl -1 ?a)",
-      "rhs": "-1",
+      "lhs": "(i32.and (i32.const 0) ?a)",
+      "rhs": "(i32.const 0)",
       "signature": {
         "inputs": [
           "I32"
@@ -127,8 +127,8 @@
     },
     {
       "name": "syn-11",
-      "lhs": "(i32.mul 1 ?a)",
-      "rhs": "?a",
+      "lhs": "(i32.add (i32.const -1) ?a)",
+      "rhs": "(i32.add ?a (i32.const -1))",
       "signature": {
         "inputs": [
           "I32"
@@ -138,8 +138,8 @@
     },
     {
       "name": "syn-12",
-      "lhs": "(i32.xor 1 ?a)",
-      "rhs": "(i32.xor ?a 1)",
+      "lhs": "(i32.and (i32.const 2) ?a)",
+      "rhs": "(i32.and ?a (i32.const 2))",
       "signature": {
         "inputs": [
           "I32"
@@ -149,8 +149,8 @@
     },
     {
       "name": "syn-13",
-      "lhs": "(i32.wrap_i64 (i64.extend_i32_s ?a))",
-      "rhs": "?a",
+      "lhs": "(i32.or (i32.const 1) ?a)",
+      "rhs": "(i32.or ?a (i32.const 1))",
       "signature": {
         "inputs": [
           "I32"
@@ -160,8 +160,8 @@
     },
     {
       "name": "syn-14",
-      "lhs": "(i32.rotr 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i32.shr_s (i32.const 0) ?a)",
+      "rhs": "(i32.const 0)",
       "signature": {
         "inputs": [
           "I32"
@@ -171,7 +171,7 @@
     },
     {
       "name": "syn-15",
-      "lhs": "(i32.shr_s ?a 0)",
+      "lhs": "(i32.xor ?a (i32.const 0))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -182,7 +182,7 @@
     },
     {
       "name": "syn-16",
-      "lhs": "(i32.wrap_i64 (i64.extend_i32_u ?a))",
+      "lhs": "(i32.shl ?a (i32.const 0))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -193,8 +193,8 @@
     },
     {
       "name": "syn-17",
-      "lhs": "(i32.mul 2 ?a)",
-      "rhs": "(i32.mul ?a 2)",
+      "lhs": "(i32.add ?a (i32.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -204,7 +204,7 @@
     },
     {
       "name": "syn-18",
-      "lhs": "(i32.and ?a -1)",
+      "lhs": "(i32.and ?a (i32.const -1))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -215,8 +215,8 @@
     },
     {
       "name": "syn-19",
-      "lhs": "(i32.rotr -1 ?a)",
-      "rhs": "-1",
+      "lhs": "(i32.mul (i32.const 0) ?a)",
+      "rhs": "(i32.const 0)",
       "signature": {
         "inputs": [
           "I32"
@@ -226,7 +226,7 @@
     },
     {
       "name": "syn-20",
-      "lhs": "(i32.xor ?a 0)",
+      "lhs": "(i32.shr_s ?a (i32.const 0))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -237,8 +237,8 @@
     },
     {
       "name": "syn-21",
-      "lhs": "(i32.and 2 ?a)",
-      "rhs": "(i32.and ?a 2)",
+      "lhs": "(i32.or ?a (i32.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -248,7 +248,7 @@
     },
     {
       "name": "syn-22",
-      "lhs": "(i32.rotl ?a 0)",
+      "lhs": "(i32.mul (i32.const 1) ?a)",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -259,8 +259,8 @@
     },
     {
       "name": "syn-23",
-      "lhs": "(i32.xor -1 ?a)",
-      "rhs": "(i32.xor ?a -1)",
+      "lhs": "(i32.and (i32.const -1) ?a)",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -270,8 +270,8 @@
     },
     {
       "name": "syn-24",
-      "lhs": "(i32.rotl ?a 1)",
-      "rhs": "(i32.rotr ?a -1)",
+      "lhs": "(i32.shr_u ?a (i32.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -281,8 +281,8 @@
     },
     {
       "name": "syn-25",
-      "lhs": "(i32.xor 2 ?a)",
-      "rhs": "(i32.xor ?a 2)",
+      "lhs": "(i32.add (i32.const 2) ?a)",
+      "rhs": "(i32.add ?a (i32.const 2))",
       "signature": {
         "inputs": [
           "I32"
@@ -292,8 +292,8 @@
     },
     {
       "name": "syn-26",
-      "lhs": "(i32.shr_s 1 ?a)",
-      "rhs": "(i32.shr_u 1 ?a)",
+      "lhs": "(i32.rotl (i32.const -1) ?a)",
+      "rhs": "(i32.const -1)",
       "signature": {
         "inputs": [
           "I32"
@@ -303,8 +303,8 @@
     },
     {
       "name": "syn-27",
-      "lhs": "(i32.and ?a 0)",
-      "rhs": "0",
+      "lhs": "(i32.rotl ?a (i32.const -1))",
+      "rhs": "(i32.rotr ?a (i32.const 1))",
       "signature": {
         "inputs": [
           "I32"
@@ -314,7 +314,7 @@
     },
     {
       "name": "syn-28",
-      "lhs": "(i32.and -1 ?a)",
+      "lhs": "(i32.rotr ?a (i32.const 0))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -325,8 +325,8 @@
     },
     {
       "name": "syn-29",
-      "lhs": "(i32.add -1 ?a)",
-      "rhs": "(i32.add ?a -1)",
+      "lhs": "(i32.rotl ?a (i32.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -336,8 +336,8 @@
     },
     {
       "name": "syn-30",
-      "lhs": "(i32.or ?a 0)",
-      "rhs": "?a",
+      "lhs": "(i32.shr_s (i32.const 2) ?a)",
+      "rhs": "(i32.shr_u (i32.const 2) ?a)",
       "signature": {
         "inputs": [
           "I32"
@@ -347,62 +347,7 @@
     },
     {
       "name": "syn-31",
-      "lhs": "(i32.or 2 ?a)",
-      "rhs": "(i32.or ?a 2)",
-      "signature": {
-        "inputs": [
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-32",
-      "lhs": "(i32.and 0 ?a)",
-      "rhs": "0",
-      "signature": {
-        "inputs": [
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-33",
-      "lhs": "(i32.shr_u 0 ?a)",
-      "rhs": "0",
-      "signature": {
-        "inputs": [
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-34",
-      "lhs": "(i32.or ?a -1)",
-      "rhs": "-1",
-      "signature": {
-        "inputs": [
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-35",
-      "lhs": "(i32.mul 0 ?a)",
-      "rhs": "0",
-      "signature": {
-        "inputs": [
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-36",
-      "lhs": "(i32.shl ?a 0)",
+      "lhs": "(i32.or (i32.const 0) ?a)",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -412,9 +357,64 @@
       }
     },
     {
+      "name": "syn-32",
+      "lhs": "(i32.rotl (i32.const 1) ?a)",
+      "rhs": "(i32.shl (i32.const 1) ?a)",
+      "signature": {
+        "inputs": [
+          "I32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-33",
+      "lhs": "(i32.mul (i32.const -1) ?a)",
+      "rhs": "(i32.mul ?a (i32.const -1))",
+      "signature": {
+        "inputs": [
+          "I32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-34",
+      "lhs": "(i32.shl (i32.const 0) ?a)",
+      "rhs": "(i32.const 0)",
+      "signature": {
+        "inputs": [
+          "I32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-35",
+      "lhs": "(i32.shr_u (i32.const 0) ?a)",
+      "rhs": "(i32.const 0)",
+      "signature": {
+        "inputs": [
+          "I32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-36",
+      "lhs": "(i32.and ?a (i32.const 0))",
+      "rhs": "(i32.const 0)",
+      "signature": {
+        "inputs": [
+          "I32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
       "name": "syn-37",
-      "lhs": "(i32.or 1 ?a)",
-      "rhs": "(i32.or ?a 1)",
+      "lhs": "(i32.xor (i32.const 0) ?a)",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -424,8 +424,8 @@
     },
     {
       "name": "syn-38",
-      "lhs": "(i32.shr_s 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i32.wrap_i64 (i64.extend_i32_u ?a))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -435,8 +435,8 @@
     },
     {
       "name": "syn-39",
-      "lhs": "(i32.mul -1 ?a)",
-      "rhs": "(i32.mul ?a -1)",
+      "lhs": "(i32.add (i32.const 0) ?a)",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I32"
@@ -446,8 +446,8 @@
     },
     {
       "name": "syn-40",
-      "lhs": "(i32.add 2 ?a)",
-      "rhs": "(i32.add ?a 2)",
+      "lhs": "(i32.rotl ?a (i32.const 1))",
+      "rhs": "(i32.rotr ?a (i32.const -1))",
       "signature": {
         "inputs": [
           "I32"
@@ -457,8 +457,8 @@
     },
     {
       "name": "syn-41",
-      "lhs": "(i32.rotl ?a -1)",
-      "rhs": "(i32.rotr ?a 1)",
+      "lhs": "(i32.mul ?a (i32.const 2))",
+      "rhs": "(i32.shl ?a (i32.const 1))",
       "signature": {
         "inputs": [
           "I32"
@@ -468,8 +468,8 @@
     },
     {
       "name": "syn-42",
-      "lhs": "(i32.shl 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i32.xor (i32.const 1) ?a)",
+      "rhs": "(i32.xor ?a (i32.const 1))",
       "signature": {
         "inputs": [
           "I32"
@@ -479,8 +479,8 @@
     },
     {
       "name": "syn-43",
-      "lhs": "(i32.or -1 ?a)",
-      "rhs": "-1",
+      "lhs": "(i32.rotr (i32.const 0) ?a)",
+      "rhs": "(i32.const 0)",
       "signature": {
         "inputs": [
           "I32"
@@ -490,8 +490,8 @@
     },
     {
       "name": "syn-44",
-      "lhs": "(i32.shr_s 2 ?a)",
-      "rhs": "(i32.shr_u 2 ?a)",
+      "lhs": "(i32.rotl (i32.const 0) ?a)",
+      "rhs": "(i32.const 0)",
       "signature": {
         "inputs": [
           "I32"
@@ -501,7 +501,7 @@
     },
     {
       "name": "syn-45",
-      "lhs": "(i32.add 0 ?a)",
+      "lhs": "(i32.wrap_i64 (i64.extend_i32_s ?a))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -512,8 +512,8 @@
     },
     {
       "name": "syn-46",
-      "lhs": "(i32.add ?a 0)",
-      "rhs": "?a",
+      "lhs": "(i32.shr_s (i32.const 1) ?a)",
+      "rhs": "(i32.shr_u (i32.const 1) ?a)",
       "signature": {
         "inputs": [
           "I32"
@@ -523,8 +523,8 @@
     },
     {
       "name": "syn-47",
-      "lhs": "(i64.add 0 ?a)",
-      "rhs": "?a",
+      "lhs": "(i64.rotr (i64.const 0) ?a)",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -534,8 +534,8 @@
     },
     {
       "name": "syn-48",
-      "lhs": "(i64.shr_u ?a 0)",
-      "rhs": "?a",
+      "lhs": "(i64.rotl (i64.const 0) ?a)",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -545,8 +545,8 @@
     },
     {
       "name": "syn-49",
-      "lhs": "(i64.add 2 ?a)",
-      "rhs": "(i64.add ?a 2)",
+      "lhs": "(i64.or ?a (i64.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I64"
@@ -556,8 +556,8 @@
     },
     {
       "name": "syn-50",
-      "lhs": "(i64.xor 2 ?a)",
-      "rhs": "(i64.xor ?a 2)",
+      "lhs": "(i64.xor (i64.const -1) ?a)",
+      "rhs": "(i64.xor ?a (i64.const -1))",
       "signature": {
         "inputs": [
           "I64"
@@ -567,8 +567,8 @@
     },
     {
       "name": "syn-51",
-      "lhs": "(i64.shl 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i64.shr_u ?a (i64.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I64"
@@ -578,8 +578,8 @@
     },
     {
       "name": "syn-52",
-      "lhs": "(i64.and -1 ?a)",
-      "rhs": "?a",
+      "lhs": "(i64.mul ?a (i64.const 0))",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -589,8 +589,8 @@
     },
     {
       "name": "syn-53",
-      "lhs": "(i64.rotl 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i64.shr_s (i64.const 0) ?a)",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -600,51 +600,7 @@
     },
     {
       "name": "syn-54",
-      "lhs": "(i64.and ?a 0)",
-      "rhs": "0",
-      "signature": {
-        "inputs": [
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-55",
-      "lhs": "(i64.or -1 ?a)",
-      "rhs": "-1",
-      "signature": {
-        "inputs": [
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-56",
-      "lhs": "(i64.mul ?a 0)",
-      "rhs": "0",
-      "signature": {
-        "inputs": [
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-57",
-      "lhs": "(i64.xor -1 ?a)",
-      "rhs": "(i64.xor ?a -1)",
-      "signature": {
-        "inputs": [
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-58",
-      "lhs": "(i64.shl ?a 0)",
+      "lhs": "(i64.shr_s ?a (i64.const 0))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -654,8 +610,52 @@
       }
     },
     {
+      "name": "syn-55",
+      "lhs": "(i64.and (i64.const -1) ?a)",
+      "rhs": "?a",
+      "signature": {
+        "inputs": [
+          "I64"
+        ],
+        "output": "I64"
+      }
+    },
+    {
+      "name": "syn-56",
+      "lhs": "(i64.xor (i64.const 2) ?a)",
+      "rhs": "(i64.xor ?a (i64.const 2))",
+      "signature": {
+        "inputs": [
+          "I64"
+        ],
+        "output": "I64"
+      }
+    },
+    {
+      "name": "syn-57",
+      "lhs": "(i64.mul (i64.const 2) ?a)",
+      "rhs": "(i64.shl ?a (i64.const 1))",
+      "signature": {
+        "inputs": [
+          "I64"
+        ],
+        "output": "I64"
+      }
+    },
+    {
+      "name": "syn-58",
+      "lhs": "(i64.mul (i64.const -1) ?a)",
+      "rhs": "(i64.mul ?a (i64.const -1))",
+      "signature": {
+        "inputs": [
+          "I64"
+        ],
+        "output": "I64"
+      }
+    },
+    {
       "name": "syn-59",
-      "lhs": "(i64.and ?a -1)",
+      "lhs": "(i64.xor (i64.const 0) ?a)",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -666,7 +666,7 @@
     },
     {
       "name": "syn-60",
-      "lhs": "(i64.xor ?a 0)",
+      "lhs": "(i64.mul (i64.const 1) ?a)",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -677,8 +677,8 @@
     },
     {
       "name": "syn-61",
-      "lhs": "(i64.rotr 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i64.mul (i64.const 0) ?a)",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -688,8 +688,8 @@
     },
     {
       "name": "syn-62",
-      "lhs": "(i64.shr_u 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i64.and (i64.const 0) ?a)",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -699,8 +699,8 @@
     },
     {
       "name": "syn-63",
-      "lhs": "(i64.rotl -1 ?a)",
-      "rhs": "(i64.rotr -1 ?a)",
+      "lhs": "(i64.add (i64.const 0) ?a)",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I64"
@@ -710,8 +710,8 @@
     },
     {
       "name": "syn-64",
-      "lhs": "(i64.mul 2 ?a)",
-      "rhs": "(i64.mul ?a 2)",
+      "lhs": "(i64.shl ?a (i64.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I64"
@@ -721,8 +721,8 @@
     },
     {
       "name": "syn-65",
-      "lhs": "(i64.and 2 ?a)",
-      "rhs": "(i64.and ?a 2)",
+      "lhs": "(i64.xor ?a (i64.const 0))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I64"
@@ -732,8 +732,8 @@
     },
     {
       "name": "syn-66",
-      "lhs": "(i64.or 1 ?a)",
-      "rhs": "(i64.or ?a 1)",
+      "lhs": "(i64.rotl ?a (i64.const 1))",
+      "rhs": "(i64.rotr ?a (i64.const -1))",
       "signature": {
         "inputs": [
           "I64"
@@ -743,8 +743,8 @@
     },
     {
       "name": "syn-67",
-      "lhs": "(i64.shr_s 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i64.and (i64.const 1) ?a)",
+      "rhs": "(i64.and ?a (i64.const 1))",
       "signature": {
         "inputs": [
           "I64"
@@ -754,7 +754,7 @@
     },
     {
       "name": "syn-68",
-      "lhs": "(i64.mul 1 ?a)",
+      "lhs": "(i64.mul ?a (i64.const 1))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -765,8 +765,8 @@
     },
     {
       "name": "syn-69",
-      "lhs": "(i64.or ?a 0)",
-      "rhs": "?a",
+      "lhs": "(i64.shr_s (i64.const -1) ?a)",
+      "rhs": "(i64.const -1)",
       "signature": {
         "inputs": [
           "I64"
@@ -776,8 +776,8 @@
     },
     {
       "name": "syn-70",
-      "lhs": "(i64.shr_s -1 ?a)",
-      "rhs": "-1",
+      "lhs": "(i64.add (i64.const 2) ?a)",
+      "rhs": "(i64.add ?a (i64.const 2))",
       "signature": {
         "inputs": [
           "I64"
@@ -787,8 +787,8 @@
     },
     {
       "name": "syn-71",
-      "lhs": "(i64.shr_s 1 ?a)",
-      "rhs": "(i64.shr_u 1 ?a)",
+      "lhs": "(i64.xor (i64.const 1) ?a)",
+      "rhs": "(i64.xor ?a (i64.const 1))",
       "signature": {
         "inputs": [
           "I64"
@@ -798,8 +798,8 @@
     },
     {
       "name": "syn-72",
-      "lhs": "(i64.xor 0 ?a)",
-      "rhs": "?a",
+      "lhs": "(i64.rotl ?a (i64.const -1))",
+      "rhs": "(i64.rotr ?a (i64.const 1))",
       "signature": {
         "inputs": [
           "I64"
@@ -809,7 +809,7 @@
     },
     {
       "name": "syn-73",
-      "lhs": "(i64.add ?a 0)",
+      "lhs": "(i64.add ?a (i64.const 0))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -820,7 +820,7 @@
     },
     {
       "name": "syn-74",
-      "lhs": "(i64.shr_s ?a 0)",
+      "lhs": "(i64.and ?a (i64.const -1))",
       "rhs": "?a",
       "signature": {
         "inputs": [
@@ -831,8 +831,8 @@
     },
     {
       "name": "syn-75",
-      "lhs": "(i64.add -1 ?a)",
-      "rhs": "(i64.add ?a -1)",
+      "lhs": "(i64.or (i64.const 0) ?a)",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "I64"
@@ -842,8 +842,8 @@
     },
     {
       "name": "syn-76",
-      "lhs": "(i64.mul -1 ?a)",
-      "rhs": "(i64.mul ?a -1)",
+      "lhs": "(i64.or (i64.const 1) ?a)",
+      "rhs": "(i64.or ?a (i64.const 1))",
       "signature": {
         "inputs": [
           "I64"
@@ -853,8 +853,8 @@
     },
     {
       "name": "syn-77",
-      "lhs": "(i64.and 1 ?a)",
-      "rhs": "(i64.and ?a 1)",
+      "lhs": "(i64.shr_u (i64.const 0) ?a)",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -864,8 +864,8 @@
     },
     {
       "name": "syn-78",
-      "lhs": "(i64.add 1 ?a)",
-      "rhs": "(i64.add ?a 1)",
+      "lhs": "(i64.or ?a (i64.const -1))",
+      "rhs": "(i64.const -1)",
       "signature": {
         "inputs": [
           "I64"
@@ -875,8 +875,8 @@
     },
     {
       "name": "syn-79",
-      "lhs": "(i64.mul 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i64.rotl ?a (i64.const 0))",
+      "rhs": "(i64.rotr ?a (i64.const 0))",
       "signature": {
         "inputs": [
           "I64"
@@ -886,8 +886,8 @@
     },
     {
       "name": "syn-80",
-      "lhs": "(i64.rotl ?a -1)",
-      "rhs": "(i64.rotr ?a 1)",
+      "lhs": "(i64.mul ?a (i64.const 2))",
+      "rhs": "(i64.shl ?a (i64.const 1))",
       "signature": {
         "inputs": [
           "I64"
@@ -897,8 +897,8 @@
     },
     {
       "name": "syn-81",
-      "lhs": "(i64.rotl ?a 0)",
-      "rhs": "(i64.rotr ?a 0)",
+      "lhs": "(i64.and ?a (i64.const 0))",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -908,8 +908,8 @@
     },
     {
       "name": "syn-82",
-      "lhs": "(i64.or ?a -1)",
-      "rhs": "-1",
+      "lhs": "(i64.shr_s (i64.const 1) ?a)",
+      "rhs": "(i64.shr_u (i64.const 1) ?a)",
       "signature": {
         "inputs": [
           "I64"
@@ -919,8 +919,8 @@
     },
     {
       "name": "syn-83",
-      "lhs": "(i64.rotl ?a 1)",
-      "rhs": "(i64.rotr ?a -1)",
+      "lhs": "(i64.and (i64.const 2) ?a)",
+      "rhs": "(i64.and ?a (i64.const 2))",
       "signature": {
         "inputs": [
           "I64"
@@ -930,8 +930,8 @@
     },
     {
       "name": "syn-84",
-      "lhs": "(i64.or 0 ?a)",
-      "rhs": "?a",
+      "lhs": "(i64.shl (i64.const 0) ?a)",
+      "rhs": "(i64.const 0)",
       "signature": {
         "inputs": [
           "I64"
@@ -941,8 +941,8 @@
     },
     {
       "name": "syn-85",
-      "lhs": "(i64.xor 1 ?a)",
-      "rhs": "(i64.xor ?a 1)",
+      "lhs": "(i64.or (i64.const 2) ?a)",
+      "rhs": "(i64.or ?a (i64.const 2))",
       "signature": {
         "inputs": [
           "I64"
@@ -952,8 +952,8 @@
     },
     {
       "name": "syn-86",
-      "lhs": "(i64.and 0 ?a)",
-      "rhs": "0",
+      "lhs": "(i64.or (i64.const -1) ?a)",
+      "rhs": "(i64.const -1)",
       "signature": {
         "inputs": [
           "I64"
@@ -963,8 +963,8 @@
     },
     {
       "name": "syn-87",
-      "lhs": "(i64.mul ?a 1)",
-      "rhs": "?a",
+      "lhs": "(i64.shr_s (i64.const 2) ?a)",
+      "rhs": "(i64.shr_u (i64.const 2) ?a)",
       "signature": {
         "inputs": [
           "I64"
@@ -974,8 +974,8 @@
     },
     {
       "name": "syn-88",
-      "lhs": "(i64.shr_s 2 ?a)",
-      "rhs": "(i64.shr_u 2 ?a)",
+      "lhs": "(i64.rotl (i64.const -1) ?a)",
+      "rhs": "(i64.rotr (i64.const -1) ?a)",
       "signature": {
         "inputs": [
           "I64"
@@ -985,160 +985,6 @@
     },
     {
       "name": "syn-89",
-      "lhs": "(i64.or 2 ?a)",
-      "rhs": "(i64.or ?a 2)",
-      "signature": {
-        "inputs": [
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-90",
-      "lhs": "(i64.mul ?a 2)",
-      "rhs": "(i64.shl ?a 1)",
-      "signature": {
-        "inputs": [
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-91",
-      "lhs": "(f32.gt 1.0 ?a)",
-      "rhs": "(f32.lt ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-92",
-      "lhs": "(f32.le ?a 1.0)",
-      "rhs": "(f32.lt ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-93",
-      "lhs": "(f32.ge 1.0 ?a)",
-      "rhs": "(f32.lt ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-94",
-      "lhs": "(f32.ge ?a 1.0)",
-      "rhs": "(f32.le 1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-95",
-      "lhs": "(f32.gt -1.0 ?a)",
-      "rhs": "(f32.lt ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-96",
-      "lhs": "(f32.ge ?a -1.0)",
-      "rhs": "(f32.le -1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-97",
-      "lhs": "(f32.ge ?a 2.0)",
-      "rhs": "(f32.le 2.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-98",
-      "lhs": "(f32.ne 0.0 ?a)",
-      "rhs": "(f32.ne ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-99",
-      "lhs": "(f32.ge 0.0 ?a)",
-      "rhs": "(f32.le ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-100",
-      "lhs": "(f32.gt 0.0 ?a)",
-      "rhs": "(f32.lt ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-101",
-      "lhs": "(f32.ne 1.0 ?a)",
-      "rhs": "(f32.ne ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-102",
-      "lhs": "(f32.eq 1.0 ?a)",
-      "rhs": "(f32.eq ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-103",
       "lhs": "(f32.eq 2.0 ?a)",
       "rhs": "(f32.eq ?a 2.0)",
       "signature": {
@@ -1149,9 +995,9 @@
       }
     },
     {
-      "name": "syn-104",
-      "lhs": "(f32.ge -1.0 ?a)",
-      "rhs": "(f32.le ?a -1.0)",
+      "name": "syn-90",
+      "lhs": "(f32.gt 1.0 ?a)",
+      "rhs": "(f32.lt ?a 1.0)",
       "signature": {
         "inputs": [
           "F32"
@@ -1160,9 +1006,9 @@
       }
     },
     {
-      "name": "syn-105",
-      "lhs": "(f32.gt ?a 0.0)",
-      "rhs": "(f32.lt 0.0 ?a)",
+      "name": "syn-91",
+      "lhs": "(f32.ge 1.0 ?a)",
+      "rhs": "(f32.gt 2.0 ?a)",
       "signature": {
         "inputs": [
           "F32"
@@ -1171,9 +1017,9 @@
       }
     },
     {
-      "name": "syn-106",
-      "lhs": "(f32.le 2.0 ?a)",
-      "rhs": "(f32.lt 1.0 ?a)",
+      "name": "syn-92",
+      "lhs": "(f32.ge ?a 1.0)",
+      "rhs": "(f32.le 1.0 ?a)",
       "signature": {
         "inputs": [
           "F32"
@@ -1182,62 +1028,7 @@
       }
     },
     {
-      "name": "syn-107",
-      "lhs": "(f32.gt 2.0 ?a)",
-      "rhs": "(f32.lt ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-108",
-      "lhs": "(f32.gt ?a 1.0)",
-      "rhs": "(f32.le 2.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-109",
-      "lhs": "(f32.ge ?a 0.0)",
-      "rhs": "(f32.le 0.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-110",
-      "lhs": "(f32.eq -1.0 ?a)",
-      "rhs": "(f32.eq ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-111",
-      "lhs": "(f32.ne -1.0 ?a)",
-      "rhs": "(f32.ne ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-112",
+      "name": "syn-93",
       "lhs": "(f32.ge 2.0 ?a)",
       "rhs": "(f32.le ?a 2.0)",
       "signature": {
@@ -1248,7 +1039,51 @@
       }
     },
     {
-      "name": "syn-113",
+      "name": "syn-94",
+      "lhs": "(f32.gt -1.0 ?a)",
+      "rhs": "(f32.lt ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-95",
+      "lhs": "(f32.ge ?a 2.0)",
+      "rhs": "(f32.gt ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-96",
+      "lhs": "(f32.ge 0.0 ?a)",
+      "rhs": "(f32.le ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-97",
+      "lhs": "(f32.gt ?a 1.0)",
+      "rhs": "(f32.le 2.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-98",
       "lhs": "(f32.gt ?a 2.0)",
       "rhs": "(f32.lt 2.0 ?a)",
       "signature": {
@@ -1259,29 +1094,7 @@
       }
     },
     {
-      "name": "syn-114",
-      "lhs": "(f32.gt ?a -1.0)",
-      "rhs": "(f32.lt -1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-115",
-      "lhs": "(f32.eq 0.0 ?a)",
-      "rhs": "(f32.eq ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-116",
+      "name": "syn-99",
       "lhs": "(f32.ne 2.0 ?a)",
       "rhs": "(f32.ne ?a 2.0)",
       "signature": {
@@ -1292,9 +1105,196 @@
       }
     },
     {
-      "name": "syn-117",
-      "lhs": "(f32.neg (f32.neg ?a))",
+      "name": "syn-100",
+      "lhs": "(f32.eq 1.0 ?a)",
+      "rhs": "(f32.eq ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-101",
+      "lhs": "(f32.ne -1.0 ?a)",
+      "rhs": "(f32.ne ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-102",
+      "lhs": "(f32.ge ?a -1.0)",
+      "rhs": "(f32.le -1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-103",
+      "lhs": "(f32.eq -1.0 ?a)",
+      "rhs": "(f32.eq ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-104",
+      "lhs": "(f32.gt ?a 0.0)",
+      "rhs": "(f32.lt 0.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-105",
+      "lhs": "(f32.ge ?a 0.0)",
+      "rhs": "(f32.le 0.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-106",
+      "lhs": "(f32.gt 0.0 ?a)",
+      "rhs": "(f32.lt ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-107",
+      "lhs": "(f32.eq 0.0 ?a)",
+      "rhs": "(f32.eq ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-108",
+      "lhs": "(f32.le 2.0 ?a)",
+      "rhs": "(f32.lt 1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-109",
+      "lhs": "(f32.gt 2.0 ?a)",
+      "rhs": "(f32.le ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-110",
+      "lhs": "(f32.le ?a 1.0)",
+      "rhs": "(f32.lt ?a 2.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-111",
+      "lhs": "(f32.ne 0.0 ?a)",
+      "rhs": "(f32.ne ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-112",
+      "lhs": "(f32.ne 1.0 ?a)",
+      "rhs": "(f32.ne ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-113",
+      "lhs": "(f32.gt ?a -1.0)",
+      "rhs": "(f32.lt -1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-114",
+      "lhs": "(f32.ge -1.0 ?a)",
+      "rhs": "(f32.le ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-115",
+      "lhs": "(f32.ceil (f32.ceil ?a))",
+      "rhs": "(f32.ceil ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-116",
+      "lhs": "(f32.div ?a 1.0)",
       "rhs": "?a",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-117",
+      "lhs": "(f32.copysign ?a -1.0)",
+      "rhs": "(f32.neg (f32.abs ?a))",
       "signature": {
         "inputs": [
           "F32"
@@ -1304,8 +1304,8 @@
     },
     {
       "name": "syn-118",
-      "lhs": "(f32.sub ?a 0.0)",
-      "rhs": "?a",
+      "lhs": "(f32.add 1.0 ?a)",
+      "rhs": "(f32.sub ?a -1.0)",
       "signature": {
         "inputs": [
           "F32"
@@ -1315,8 +1315,8 @@
     },
     {
       "name": "syn-119",
-      "lhs": "(f32.mul 1.0 ?a)",
-      "rhs": "?a",
+      "lhs": "(f32.add ?a -1.0)",
+      "rhs": "(f32.sub ?a 1.0)",
       "signature": {
         "inputs": [
           "F32"
@@ -1326,8 +1326,8 @@
     },
     {
       "name": "syn-120",
-      "lhs": "(f32.abs (f32.abs ?a))",
-      "rhs": "(f32.abs ?a)",
+      "lhs": "(f32.mul ?a 1.0)",
+      "rhs": "?a",
       "signature": {
         "inputs": [
           "F32"
@@ -1337,8 +1337,8 @@
     },
     {
       "name": "syn-121",
-      "lhs": "(f32.copysign ?a 2.0)",
-      "rhs": "(f32.abs ?a)",
+      "lhs": "(f32.add -1.0 ?a)",
+      "rhs": "(f32.sub ?a 1.0)",
       "signature": {
         "inputs": [
           "F32"
@@ -1348,8 +1348,8 @@
     },
     {
       "name": "syn-122",
-      "lhs": "(f32.ceil (f32.ceil ?a))",
-      "rhs": "(f32.ceil ?a)",
+      "lhs": "(f32.min -1.0 ?a)",
+      "rhs": "(f32.min ?a -1.0)",
       "signature": {
         "inputs": [
           "F32"
@@ -1370,160 +1370,6 @@
     },
     {
       "name": "syn-124",
-      "lhs": "(f32.neg (f32.trunc ?a))",
-      "rhs": "(f32.trunc (f32.neg ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-125",
-      "lhs": "(f32.add 2.0 ?a)",
-      "rhs": "(f32.add ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-126",
-      "lhs": "(f32.trunc (f32.floor ?a))",
-      "rhs": "(f32.floor ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-127",
-      "lhs": "(f32.nearest (f32.neg ?a))",
-      "rhs": "(f32.neg (f32.nearest ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-128",
-      "lhs": "(f32.add -1.0 ?a)",
-      "rhs": "(f32.sub ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-129",
-      "lhs": "(f32.abs (f32.nearest ?a))",
-      "rhs": "(f32.nearest (f32.abs ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-130",
-      "lhs": "(f32.floor (f32.ceil ?a))",
-      "rhs": "(f32.ceil ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-131",
-      "lhs": "(f32.nearest (f32.nearest ?a))",
-      "rhs": "(f32.nearest ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-132",
-      "lhs": "(f32.floor (f32.abs ?a))",
-      "rhs": "(f32.trunc (f32.abs ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-133",
-      "lhs": "(f32.max 2.0 ?a)",
-      "rhs": "(f32.max ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-134",
-      "lhs": "(f32.mul 0.0 ?a)",
-      "rhs": "(f32.mul ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-135",
-      "lhs": "(f32.mul ?a 1.0)",
-      "rhs": "?a",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-136",
-      "lhs": "(f32.floor (f32.sqrt ?a))",
-      "rhs": "(f32.trunc (f32.sqrt ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-137",
-      "lhs": "(f32.copysign ?a 1.0)",
-      "rhs": "(f32.abs ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-138",
       "lhs": "(f32.floor (f32.nearest ?a))",
       "rhs": "(f32.nearest ?a)",
       "signature": {
@@ -1534,51 +1380,7 @@
       }
     },
     {
-      "name": "syn-139",
-      "lhs": "(f32.copysign ?a -1.0)",
-      "rhs": "(f32.neg (f32.abs ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-140",
-      "lhs": "(f32.ceil (f32.nearest ?a))",
-      "rhs": "(f32.nearest ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-141",
-      "lhs": "(f32.ceil (f32.trunc ?a))",
-      "rhs": "(f32.trunc ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-142",
-      "lhs": "(f32.div ?a 1.0)",
-      "rhs": "?a",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-143",
+      "name": "syn-125",
       "lhs": "(f32.floor (f32.trunc ?a))",
       "rhs": "(f32.trunc ?a)",
       "signature": {
@@ -1589,150 +1391,7 @@
       }
     },
     {
-      "name": "syn-144",
-      "lhs": "(f32.add 1.0 ?a)",
-      "rhs": "(f32.sub ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-145",
-      "lhs": "(f32.copysign -1.0 ?a)",
-      "rhs": "(f32.copysign 1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-146",
-      "lhs": "(f32.nearest (f32.trunc ?a))",
-      "rhs": "(f32.trunc ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-147",
-      "lhs": "(f32.mul 2.0 ?a)",
-      "rhs": "(f32.mul ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-148",
-      "lhs": "(f32.ceil (f32.neg ?a))",
-      "rhs": "(f32.neg (f32.floor ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-149",
-      "lhs": "(f32.trunc (f32.ceil ?a))",
-      "rhs": "(f32.ceil ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-150",
-      "lhs": "(f32.max 1.0 ?a)",
-      "rhs": "(f32.max ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-151",
-      "lhs": "(f32.max -1.0 ?a)",
-      "rhs": "(f32.max ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-152",
-      "lhs": "(f32.mul -1.0 ?a)",
-      "rhs": "(f32.mul ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-153",
-      "lhs": "(f32.copysign ?a 0.0)",
-      "rhs": "(f32.abs ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-154",
-      "lhs": "(f32.floor (f32.floor ?a))",
-      "rhs": "(f32.floor ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-155",
-      "lhs": "(f32.min 1.0 ?a)",
-      "rhs": "(f32.min ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-156",
-      "lhs": "(f32.trunc (f32.trunc ?a))",
-      "rhs": "(f32.trunc ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-157",
+      "name": "syn-126",
       "lhs": "(f32.ceil (f32.floor ?a))",
       "rhs": "(f32.floor ?a)",
       "signature": {
@@ -1743,62 +1402,7 @@
       }
     },
     {
-      "name": "syn-158",
-      "lhs": "(f32.add ?a -1.0)",
-      "rhs": "(f32.sub ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-159",
-      "lhs": "(f32.add 0.0 ?a)",
-      "rhs": "(f32.add ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-160",
-      "lhs": "(f32.floor (f32.neg ?a))",
-      "rhs": "(f32.neg (f32.ceil ?a))",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-161",
-      "lhs": "(f32.nearest (f32.floor ?a))",
-      "rhs": "(f32.floor ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-162",
-      "lhs": "(f32.trunc (f32.nearest ?a))",
-      "rhs": "(f32.nearest ?a)",
-      "signature": {
-        "inputs": [
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-163",
+      "name": "syn-127",
       "lhs": "(f32.abs (f32.trunc ?a))",
       "rhs": "(f32.trunc (f32.abs ?a))",
       "signature": {
@@ -1809,7 +1413,7 @@
       }
     },
     {
-      "name": "syn-164",
+      "name": "syn-128",
       "lhs": "(f32.nearest (f32.ceil ?a))",
       "rhs": "(f32.ceil ?a)",
       "signature": {
@@ -1820,7 +1424,106 @@
       }
     },
     {
-      "name": "syn-165",
+      "name": "syn-129",
+      "lhs": "(f32.nearest (f32.trunc ?a))",
+      "rhs": "(f32.trunc ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-130",
+      "lhs": "(f32.floor (f32.neg ?a))",
+      "rhs": "(f32.neg (f32.ceil ?a))",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-131",
+      "lhs": "(f32.mul 1.0 ?a)",
+      "rhs": "?a",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-132",
+      "lhs": "(f32.trunc (f32.trunc ?a))",
+      "rhs": "(f32.trunc ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-133",
+      "lhs": "(f32.neg (f32.trunc ?a))",
+      "rhs": "(f32.trunc (f32.neg ?a))",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-134",
+      "lhs": "(f32.add 0.0 ?a)",
+      "rhs": "(f32.add ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-135",
+      "lhs": "(f32.copysign ?a 0.0)",
+      "rhs": "(f32.abs ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-136",
+      "lhs": "(f32.ceil (f32.trunc ?a))",
+      "rhs": "(f32.trunc ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-137",
+      "lhs": "(f32.trunc (f32.floor ?a))",
+      "rhs": "(f32.floor ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-138",
       "lhs": "(f32.div ?a -1.0)",
       "rhs": "(f32.mul ?a -1.0)",
       "signature": {
@@ -1831,7 +1534,40 @@
       }
     },
     {
-      "name": "syn-166",
+      "name": "syn-139",
+      "lhs": "(f32.mul -1.0 ?a)",
+      "rhs": "(f32.mul ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-140",
+      "lhs": "(f32.mul 2.0 ?a)",
+      "rhs": "(f32.mul ?a 2.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-141",
+      "lhs": "(f32.nearest (f32.nearest ?a))",
+      "rhs": "(f32.nearest ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-142",
       "lhs": "(f32.add ?a 1.0)",
       "rhs": "(f32.sub ?a -1.0)",
       "signature": {
@@ -1842,9 +1578,9 @@
       }
     },
     {
-      "name": "syn-167",
-      "lhs": "(f32.min -1.0 ?a)",
-      "rhs": "(f32.min ?a -1.0)",
+      "name": "syn-143",
+      "lhs": "(f32.trunc (f32.nearest ?a))",
+      "rhs": "(f32.nearest ?a)",
       "signature": {
         "inputs": [
           "F32"
@@ -1853,7 +1589,84 @@
       }
     },
     {
-      "name": "syn-168",
+      "name": "syn-144",
+      "lhs": "(f32.ceil (f32.nearest ?a))",
+      "rhs": "(f32.nearest ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-145",
+      "lhs": "(f32.max 1.0 ?a)",
+      "rhs": "(f32.max ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-146",
+      "lhs": "(f32.min 1.0 ?a)",
+      "rhs": "(f32.min ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-147",
+      "lhs": "(f32.ceil (f32.neg ?a))",
+      "rhs": "(f32.neg (f32.floor ?a))",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-148",
+      "lhs": "(f32.floor (f32.ceil ?a))",
+      "rhs": "(f32.ceil ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-149",
+      "lhs": "(f32.nearest (f32.floor ?a))",
+      "rhs": "(f32.floor ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-150",
+      "lhs": "(f32.abs (f32.nearest ?a))",
+      "rhs": "(f32.nearest (f32.abs ?a))",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-151",
       "lhs": "(f32.abs (f32.neg ?a))",
       "rhs": "(f32.abs ?a)",
       "signature": {
@@ -1864,117 +1677,172 @@
       }
     },
     {
-      "name": "syn-169",
-      "lhs": "(f64.eq 0.0 ?a)",
-      "rhs": "(f64.eq ?a 0.0)",
+      "name": "syn-152",
+      "lhs": "(f32.nearest (f32.neg ?a))",
+      "rhs": "(f32.neg (f32.nearest ?a))",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-170",
-      "lhs": "(f64.eq 2.0 ?a)",
-      "rhs": "(f64.eq ?a 2.0)",
+      "name": "syn-153",
+      "lhs": "(f32.max 2.0 ?a)",
+      "rhs": "(f32.max ?a 2.0)",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-171",
-      "lhs": "(f64.ge 1.0 ?a)",
-      "rhs": "(f64.le ?a 1.0)",
+      "name": "syn-154",
+      "lhs": "(f32.mul 0.0 ?a)",
+      "rhs": "(f32.mul ?a 0.0)",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-172",
-      "lhs": "(f64.eq -1.0 ?a)",
-      "rhs": "(f64.eq ?a -1.0)",
+      "name": "syn-155",
+      "lhs": "(f32.floor (f32.abs ?a))",
+      "rhs": "(f32.trunc (f32.abs ?a))",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-173",
-      "lhs": "(f64.ge 2.0 ?a)",
-      "rhs": "(f64.le ?a 2.0)",
+      "name": "syn-156",
+      "lhs": "(f32.add 2.0 ?a)",
+      "rhs": "(f32.add ?a 2.0)",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-174",
-      "lhs": "(f64.ne 2.0 ?a)",
-      "rhs": "(f64.ne ?a 2.0)",
+      "name": "syn-157",
+      "lhs": "(f32.neg (f32.neg ?a))",
+      "rhs": "?a",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-175",
-      "lhs": "(f64.ge ?a -1.0)",
-      "rhs": "(f64.le -1.0 ?a)",
+      "name": "syn-158",
+      "lhs": "(f32.copysign ?a 2.0)",
+      "rhs": "(f32.abs ?a)",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-176",
-      "lhs": "(f64.gt -1.0 ?a)",
-      "rhs": "(f64.lt ?a -1.0)",
+      "name": "syn-159",
+      "lhs": "(f32.floor (f32.sqrt ?a))",
+      "rhs": "(f32.trunc (f32.sqrt ?a))",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-177",
-      "lhs": "(f64.ne -1.0 ?a)",
-      "rhs": "(f64.ne ?a -1.0)",
+      "name": "syn-160",
+      "lhs": "(f32.abs (f32.abs ?a))",
+      "rhs": "(f32.abs ?a)",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-178",
-      "lhs": "(f64.ge -1.0 ?a)",
-      "rhs": "(f64.le ?a -1.0)",
+      "name": "syn-161",
+      "lhs": "(f32.floor (f32.floor ?a))",
+      "rhs": "(f32.floor ?a)",
       "signature": {
         "inputs": [
-          "F64"
+          "F32"
         ],
-        "output": "I32"
+        "output": "F32"
       }
     },
     {
-      "name": "syn-179",
+      "name": "syn-162",
+      "lhs": "(f32.max -1.0 ?a)",
+      "rhs": "(f32.max ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-163",
+      "lhs": "(f32.trunc (f32.ceil ?a))",
+      "rhs": "(f32.ceil ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-164",
+      "lhs": "(f32.sub ?a 0.0)",
+      "rhs": "?a",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-165",
+      "lhs": "(f32.copysign ?a 1.0)",
+      "rhs": "(f32.abs ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-166",
+      "lhs": "(f32.copysign -1.0 ?a)",
+      "rhs": "(f32.copysign 1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-167",
       "lhs": "(f64.gt 1.0 ?a)",
       "rhs": "(f64.lt ?a 1.0)",
       "signature": {
@@ -1985,9 +1853,9 @@
       }
     },
     {
-      "name": "syn-180",
-      "lhs": "(f64.le 2.0 ?a)",
-      "rhs": "(f64.lt 1.0 ?a)",
+      "name": "syn-168",
+      "lhs": "(f64.ne 2.0 ?a)",
+      "rhs": "(f64.ne ?a 2.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -1996,7 +1864,51 @@
       }
     },
     {
-      "name": "syn-181",
+      "name": "syn-169",
+      "lhs": "(f64.ge ?a -1.0)",
+      "rhs": "(f64.le -1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-170",
+      "lhs": "(f64.ge 1.0 ?a)",
+      "rhs": "(f64.le ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-171",
+      "lhs": "(f64.ge ?a 2.0)",
+      "rhs": "(f64.le 2.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-172",
+      "lhs": "(f64.ne 1.0 ?a)",
+      "rhs": "(f64.ne ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-173",
       "lhs": "(f64.gt ?a 1.0)",
       "rhs": "(f64.le 2.0 ?a)",
       "signature": {
@@ -2007,40 +1919,7 @@
       }
     },
     {
-      "name": "syn-182",
-      "lhs": "(f64.ge 0.0 ?a)",
-      "rhs": "(f64.le ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-183",
-      "lhs": "(f64.ge ?a 1.0)",
-      "rhs": "(f64.le 1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-184",
-      "lhs": "(f64.le ?a 1.0)",
-      "rhs": "(f64.lt ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-185",
+      "name": "syn-174",
       "lhs": "(f64.gt ?a 2.0)",
       "rhs": "(f64.lt 2.0 ?a)",
       "signature": {
@@ -2051,9 +1930,9 @@
       }
     },
     {
-      "name": "syn-186",
-      "lhs": "(f64.ne 0.0 ?a)",
-      "rhs": "(f64.ne ?a 0.0)",
+      "name": "syn-175",
+      "lhs": "(f64.le 2.0 ?a)",
+      "rhs": "(f64.lt 1.0 ?a)",
       "signature": {
         "inputs": [
           "F64"
@@ -2062,7 +1941,7 @@
       }
     },
     {
-      "name": "syn-187",
+      "name": "syn-176",
       "lhs": "(f64.gt 2.0 ?a)",
       "rhs": "(f64.le ?a 1.0)",
       "signature": {
@@ -2073,9 +1952,9 @@
       }
     },
     {
-      "name": "syn-188",
-      "lhs": "(f64.gt ?a -1.0)",
-      "rhs": "(f64.lt -1.0 ?a)",
+      "name": "syn-177",
+      "lhs": "(f64.gt -1.0 ?a)",
+      "rhs": "(f64.lt ?a -1.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -2084,7 +1963,117 @@
       }
     },
     {
-      "name": "syn-189",
+      "name": "syn-178",
+      "lhs": "(f64.ge 2.0 ?a)",
+      "rhs": "(f64.le ?a 2.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-179",
+      "lhs": "(f64.eq 1.0 ?a)",
+      "rhs": "(f64.eq ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-180",
+      "lhs": "(f64.gt 0.0 ?a)",
+      "rhs": "(f64.lt ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-181",
+      "lhs": "(f64.ge 0.0 ?a)",
+      "rhs": "(f64.le ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-182",
+      "lhs": "(f64.eq -1.0 ?a)",
+      "rhs": "(f64.eq ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-183",
+      "lhs": "(f64.ge -1.0 ?a)",
+      "rhs": "(f64.le ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-184",
+      "lhs": "(f64.ge ?a 1.0)",
+      "rhs": "(f64.le 1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-185",
+      "lhs": "(f64.ne 0.0 ?a)",
+      "rhs": "(f64.ne ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-186",
+      "lhs": "(f64.le ?a 1.0)",
+      "rhs": "(f64.lt ?a 2.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-187",
+      "lhs": "(f64.ne -1.0 ?a)",
+      "rhs": "(f64.ne ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-188",
       "lhs": "(f64.ge ?a 0.0)",
       "rhs": "(f64.le 0.0 ?a)",
       "signature": {
@@ -2095,9 +2084,20 @@
       }
     },
     {
+      "name": "syn-189",
+      "lhs": "(f64.gt ?a -1.0)",
+      "rhs": "(f64.lt -1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
       "name": "syn-190",
-      "lhs": "(f64.ne 1.0 ?a)",
-      "rhs": "(f64.ne ?a 1.0)",
+      "lhs": "(f64.eq 0.0 ?a)",
+      "rhs": "(f64.eq ?a 0.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -2118,8 +2118,8 @@
     },
     {
       "name": "syn-192",
-      "lhs": "(f64.eq 1.0 ?a)",
-      "rhs": "(f64.eq ?a 1.0)",
+      "lhs": "(f64.eq 2.0 ?a)",
+      "rhs": "(f64.eq ?a 2.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -2129,51 +2129,7 @@
     },
     {
       "name": "syn-193",
-      "lhs": "(f64.ge ?a 2.0)",
-      "rhs": "(f64.le 2.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-194",
-      "lhs": "(f64.gt 0.0 ?a)",
-      "rhs": "(f64.lt ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-195",
-      "lhs": "(f64.gt ?a 1.0)",
-      "rhs": "(f64.lt 1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-196",
-      "lhs": "(f64.ge ?a 2.0)",
-      "rhs": "(f64.lt 1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-197",
-      "lhs": "(f64.nearest (f64.floor ?a))",
+      "lhs": "(f64.floor (f64.floor ?a))",
       "rhs": "(f64.floor ?a)",
       "signature": {
         "inputs": [
@@ -2183,29 +2139,7 @@
       }
     },
     {
-      "name": "syn-198",
-      "lhs": "(f64.nearest (f64.nearest ?a))",
-      "rhs": "(f64.nearest ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-199",
-      "lhs": "(f64.neg (f64.trunc ?a))",
-      "rhs": "(f64.trunc (f64.neg ?a))",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-200",
+      "name": "syn-194",
       "lhs": "(f64.mul 1.0 ?a)",
       "rhs": "?a",
       "signature": {
@@ -2216,107 +2150,8 @@
       }
     },
     {
-      "name": "syn-201",
-      "lhs": "(f64.div ?a -1.0)",
-      "rhs": "(f64.mul ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-202",
-      "lhs": "(f64.max 1.0 ?a)",
-      "rhs": "(f64.max ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-203",
-      "lhs": "(f64.trunc (f64.floor ?a))",
-      "rhs": "(f64.floor ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-204",
-      "lhs": "(f64.ceil (f64.floor ?a))",
-      "rhs": "(f64.floor ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-205",
-      "lhs": "(f64.add 1.0 ?a)",
-      "rhs": "(f64.sub ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-206",
-      "lhs": "(f64.mul ?a 1.0)",
-      "rhs": "?a",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-207",
-      "lhs": "(f64.mul 0.0 ?a)",
-      "rhs": "(f64.mul ?a 0.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-208",
-      "lhs": "(f64.copysign -1.0 ?a)",
-      "rhs": "(f64.copysign 1.0 ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-209",
-      "lhs": "(f64.copysign ?a 0.0)",
-      "rhs": "(f64.abs ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-210",
-      "lhs": "(f64.nearest (f64.ceil ?a))",
+      "name": "syn-195",
+      "lhs": "(f64.trunc (f64.ceil ?a))",
       "rhs": "(f64.ceil ?a)",
       "signature": {
         "inputs": [
@@ -2326,62 +2161,7 @@
       }
     },
     {
-      "name": "syn-211",
-      "lhs": "(f64.ceil (f64.ceil ?a))",
-      "rhs": "(f64.ceil ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-212",
-      "lhs": "(f64.div ?a 1.0)",
-      "rhs": "?a",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-213",
-      "lhs": "(f64.add -1.0 ?a)",
-      "rhs": "(f64.sub ?a 1.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-214",
-      "lhs": "(f64.mul -1.0 ?a)",
-      "rhs": "(f64.mul ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-215",
-      "lhs": "(f64.floor (f64.sqrt ?a))",
-      "rhs": "(f64.trunc (f64.sqrt ?a))",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-216",
+      "name": "syn-196",
       "lhs": "(f64.copysign ?a 1.0)",
       "rhs": "(f64.abs ?a)",
       "signature": {
@@ -2392,9 +2172,9 @@
       }
     },
     {
-      "name": "syn-217",
-      "lhs": "(f64.add 0.0 ?a)",
-      "rhs": "(f64.add ?a 0.0)",
+      "name": "syn-197",
+      "lhs": "(f64.add ?a 1.0)",
+      "rhs": "(f64.sub ?a -1.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -2403,62 +2183,7 @@
       }
     },
     {
-      "name": "syn-218",
-      "lhs": "(f64.max -1.0 ?a)",
-      "rhs": "(f64.max ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-219",
-      "lhs": "(f64.copysign ?a -1.0)",
-      "rhs": "(f64.neg (f64.abs ?a))",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-220",
-      "lhs": "(f64.abs (f64.neg ?a))",
-      "rhs": "(f64.abs ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-221",
-      "lhs": "(f64.mul 2.0 ?a)",
-      "rhs": "(f64.mul ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-222",
-      "lhs": "(f64.floor (f64.nearest ?a))",
-      "rhs": "(f64.nearest ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-223",
+      "name": "syn-198",
       "lhs": "(f64.sub ?a 0.0)",
       "rhs": "?a",
       "signature": {
@@ -2469,9 +2194,9 @@
       }
     },
     {
-      "name": "syn-224",
-      "lhs": "(f64.ceil (f64.nearest ?a))",
-      "rhs": "(f64.nearest ?a)",
+      "name": "syn-199",
+      "lhs": "(f64.ceil (f64.floor ?a))",
+      "rhs": "(f64.floor ?a)",
       "signature": {
         "inputs": [
           "F64"
@@ -2480,9 +2205,9 @@
       }
     },
     {
-      "name": "syn-225",
-      "lhs": "(f64.ceil (f64.neg ?a))",
-      "rhs": "(f64.neg (f64.floor ?a))",
+      "name": "syn-200",
+      "lhs": "(f64.ceil (f64.ceil ?a))",
+      "rhs": "(f64.ceil ?a)",
       "signature": {
         "inputs": [
           "F64"
@@ -2491,7 +2216,7 @@
       }
     },
     {
-      "name": "syn-226",
+      "name": "syn-201",
       "lhs": "(f64.copysign ?a 2.0)",
       "rhs": "(f64.abs ?a)",
       "signature": {
@@ -2502,9 +2227,284 @@
       }
     },
     {
-      "name": "syn-227",
-      "lhs": "(f64.add ?a 1.0)",
+      "name": "syn-202",
+      "lhs": "(f64.nearest (f64.trunc ?a))",
+      "rhs": "(f64.trunc ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-203",
+      "lhs": "(f64.copysign ?a 0.0)",
+      "rhs": "(f64.abs ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-204",
+      "lhs": "(f64.max 1.0 ?a)",
+      "rhs": "(f64.max ?a 1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-205",
+      "lhs": "(f64.min -1.0 ?a)",
+      "rhs": "(f64.min ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-206",
+      "lhs": "(f64.div ?a 1.0)",
+      "rhs": "?a",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-207",
+      "lhs": "(f64.trunc (f64.floor ?a))",
+      "rhs": "(f64.floor ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-208",
+      "lhs": "(f64.mul -1.0 ?a)",
+      "rhs": "(f64.mul ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-209",
+      "lhs": "(f64.nearest (f64.floor ?a))",
+      "rhs": "(f64.floor ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-210",
+      "lhs": "(f64.mul ?a 1.0)",
+      "rhs": "?a",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-211",
+      "lhs": "(f64.add 2.0 ?a)",
+      "rhs": "(f64.add ?a 2.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-212",
+      "lhs": "(f64.add 1.0 ?a)",
       "rhs": "(f64.sub ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-213",
+      "lhs": "(f64.abs (f64.neg ?a))",
+      "rhs": "(f64.abs ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-214",
+      "lhs": "(f64.neg (f64.trunc ?a))",
+      "rhs": "(f64.trunc (f64.neg ?a))",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-215",
+      "lhs": "(f64.mul 2.0 ?a)",
+      "rhs": "(f64.mul ?a 2.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-216",
+      "lhs": "(f64.copysign -1.0 ?a)",
+      "rhs": "(f64.copysign 1.0 ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-217",
+      "lhs": "(f64.ceil (f64.neg ?a))",
+      "rhs": "(f64.neg (f64.floor ?a))",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-218",
+      "lhs": "(f64.ceil (f64.trunc ?a))",
+      "rhs": "(f64.trunc ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-219",
+      "lhs": "(f64.floor (f64.ceil ?a))",
+      "rhs": "(f64.ceil ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-220",
+      "lhs": "(f64.abs (f64.abs ?a))",
+      "rhs": "(f64.abs ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-221",
+      "lhs": "(f64.abs (f64.nearest ?a))",
+      "rhs": "(f64.nearest (f64.abs ?a))",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-222",
+      "lhs": "(f64.mul 0.0 ?a)",
+      "rhs": "(f64.mul ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-223",
+      "lhs": "(f64.div ?a -1.0)",
+      "rhs": "(f64.mul ?a -1.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-224",
+      "lhs": "(f64.nearest (f64.neg ?a))",
+      "rhs": "(f64.neg (f64.nearest ?a))",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-225",
+      "lhs": "(f64.neg (f64.neg ?a))",
+      "rhs": "?a",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-226",
+      "lhs": "(f64.copysign ?a -1.0)",
+      "rhs": "(f64.neg (f64.abs ?a))",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-227",
+      "lhs": "(f64.max 2.0 ?a)",
+      "rhs": "(f64.max ?a 2.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -2525,8 +2525,8 @@
     },
     {
       "name": "syn-229",
-      "lhs": "(f64.abs (f64.abs ?a))",
-      "rhs": "(f64.abs ?a)",
+      "lhs": "(f64.add -1.0 ?a)",
+      "rhs": "(f64.sub ?a 1.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -2536,8 +2536,8 @@
     },
     {
       "name": "syn-230",
-      "lhs": "(f64.trunc (f64.ceil ?a))",
-      "rhs": "(f64.ceil ?a)",
+      "lhs": "(f64.floor (f64.trunc ?a))",
+      "rhs": "(f64.trunc ?a)",
       "signature": {
         "inputs": [
           "F64"
@@ -2547,8 +2547,8 @@
     },
     {
       "name": "syn-231",
-      "lhs": "(f64.floor (f64.neg ?a))",
-      "rhs": "(f64.neg (f64.ceil ?a))",
+      "lhs": "(f64.max -1.0 ?a)",
+      "rhs": "(f64.max ?a -1.0)",
       "signature": {
         "inputs": [
           "F64"
@@ -2558,6 +2558,28 @@
     },
     {
       "name": "syn-232",
+      "lhs": "(f64.trunc (f64.trunc ?a))",
+      "rhs": "(f64.trunc ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-233",
+      "lhs": "(f64.add 0.0 ?a)",
+      "rhs": "(f64.add ?a 0.0)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-234",
       "lhs": "(f64.min 2.0 ?a)",
       "rhs": "(f64.min ?a 2.0)",
       "signature": {
@@ -2568,51 +2590,7 @@
       }
     },
     {
-      "name": "syn-233",
-      "lhs": "(f64.max 2.0 ?a)",
-      "rhs": "(f64.max ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-234",
-      "lhs": "(f64.trunc (f64.nearest ?a))",
-      "rhs": "(f64.nearest ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
       "name": "syn-235",
-      "lhs": "(f64.add 2.0 ?a)",
-      "rhs": "(f64.add ?a 2.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-236",
-      "lhs": "(f64.neg (f64.neg ?a))",
-      "rhs": "?a",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-237",
       "lhs": "(f64.add ?a -1.0)",
       "rhs": "(f64.sub ?a 1.0)",
       "signature": {
@@ -2623,40 +2601,29 @@
       }
     },
     {
+      "name": "syn-236",
+      "lhs": "(f64.floor (f64.neg ?a))",
+      "rhs": "(f64.neg (f64.ceil ?a))",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-237",
+      "lhs": "(f64.nearest (f64.ceil ?a))",
+      "rhs": "(f64.ceil ?a)",
+      "signature": {
+        "inputs": [
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
       "name": "syn-238",
-      "lhs": "(f64.min -1.0 ?a)",
-      "rhs": "(f64.min ?a -1.0)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-239",
-      "lhs": "(f64.abs (f64.trunc ?a))",
-      "rhs": "(f64.floor (f64.abs ?a))",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-240",
-      "lhs": "(f64.floor (f64.floor ?a))",
-      "rhs": "(f64.floor ?a)",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-241",
       "lhs": "(f64.floor (f64.abs ?a))",
       "rhs": "(f64.trunc (f64.abs ?a))",
       "signature": {
@@ -2667,9 +2634,9 @@
       }
     },
     {
-      "name": "syn-242",
-      "lhs": "(f64.floor (f64.ceil ?a))",
-      "rhs": "(f64.ceil ?a)",
+      "name": "syn-239",
+      "lhs": "(f64.abs (f64.trunc ?a))",
+      "rhs": "(f64.trunc (f64.abs ?a))",
       "signature": {
         "inputs": [
           "F64"
@@ -2678,65 +2645,7 @@
       }
     },
     {
-      "name": "syn-243",
-      "lhs": "(f64.nearest (f64.neg ?a))",
-      "rhs": "(f64.neg (f64.nearest ?a))",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-244",
-      "lhs": "(f64.abs (f64.nearest ?a))",
-      "rhs": "(f64.nearest (f64.abs ?a))",
-      "signature": {
-        "inputs": [
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-245",
-      "lhs": "(i32.add ?a ?b)",
-      "rhs": "(i32.add ?b ?a)",
-      "signature": {
-        "inputs": [
-          "I32",
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-246",
-      "lhs": "(i32.and ?a ?b)",
-      "rhs": "(i32.and ?b ?a)",
-      "signature": {
-        "inputs": [
-          "I32",
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-247",
-      "lhs": "(i32.xor ?a ?b)",
-      "rhs": "(i32.xor ?b ?a)",
-      "signature": {
-        "inputs": [
-          "I32",
-          "I32"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-248",
+      "name": "syn-240",
       "lhs": "(i32.or ?a ?b)",
       "rhs": "(i32.or ?b ?a)",
       "signature": {
@@ -2748,7 +2657,31 @@
       }
     },
     {
-      "name": "syn-249",
+      "name": "syn-241",
+      "lhs": "(i32.xor ?a ?b)",
+      "rhs": "(i32.xor ?b ?a)",
+      "signature": {
+        "inputs": [
+          "I32",
+          "I32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-242",
+      "lhs": "(i32.add ?a ?b)",
+      "rhs": "(i32.add ?b ?a)",
+      "signature": {
+        "inputs": [
+          "I32",
+          "I32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-243",
       "lhs": "(i32.mul ?a ?b)",
       "rhs": "(i32.mul ?b ?a)",
       "signature": {
@@ -2760,55 +2693,19 @@
       }
     },
     {
-      "name": "syn-250",
-      "lhs": "(i64.xor ?a ?b)",
-      "rhs": "(i64.xor ?b ?a)",
+      "name": "syn-244",
+      "lhs": "(i32.and ?a ?b)",
+      "rhs": "(i32.and ?b ?a)",
       "signature": {
         "inputs": [
-          "I64",
-          "I64"
+          "I32",
+          "I32"
         ],
-        "output": "I64"
+        "output": "I32"
       }
     },
     {
-      "name": "syn-251",
-      "lhs": "(i64.mul ?a ?b)",
-      "rhs": "(i64.mul ?b ?a)",
-      "signature": {
-        "inputs": [
-          "I64",
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-252",
-      "lhs": "(i64.and ?a ?b)",
-      "rhs": "(i64.and ?b ?a)",
-      "signature": {
-        "inputs": [
-          "I64",
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-253",
-      "lhs": "(i64.or ?a ?b)",
-      "rhs": "(i64.or ?b ?a)",
-      "signature": {
-        "inputs": [
-          "I64",
-          "I64"
-        ],
-        "output": "I64"
-      }
-    },
-    {
-      "name": "syn-254",
+      "name": "syn-245",
       "lhs": "(i64.add ?a ?b)",
       "rhs": "(i64.add ?b ?a)",
       "signature": {
@@ -2820,55 +2717,55 @@
       }
     },
     {
-      "name": "syn-255",
-      "lhs": "(f32.gt ?a ?b)",
-      "rhs": "(f32.lt ?b ?a)",
+      "name": "syn-246",
+      "lhs": "(i64.or ?a ?b)",
+      "rhs": "(i64.or ?b ?a)",
       "signature": {
         "inputs": [
-          "F32",
-          "F32"
+          "I64",
+          "I64"
         ],
-        "output": "I32"
+        "output": "I64"
       }
     },
     {
-      "name": "syn-256",
-      "lhs": "(f32.gt ?b ?a)",
-      "rhs": "(f32.lt ?a ?b)",
+      "name": "syn-247",
+      "lhs": "(i64.mul ?a ?b)",
+      "rhs": "(i64.mul ?b ?a)",
       "signature": {
         "inputs": [
-          "F32",
-          "F32"
+          "I64",
+          "I64"
         ],
-        "output": "I32"
+        "output": "I64"
       }
     },
     {
-      "name": "syn-257",
-      "lhs": "(f32.ge ?a ?b)",
-      "rhs": "(f32.le ?b ?a)",
+      "name": "syn-248",
+      "lhs": "(i64.xor ?a ?b)",
+      "rhs": "(i64.xor ?b ?a)",
       "signature": {
         "inputs": [
-          "F32",
-          "F32"
+          "I64",
+          "I64"
         ],
-        "output": "I32"
+        "output": "I64"
       }
     },
     {
-      "name": "syn-258",
-      "lhs": "(f32.eq ?a ?b)",
-      "rhs": "(f32.eq ?b ?a)",
+      "name": "syn-249",
+      "lhs": "(i64.and ?a ?b)",
+      "rhs": "(i64.and ?b ?a)",
       "signature": {
         "inputs": [
-          "F32",
-          "F32"
+          "I64",
+          "I64"
         ],
-        "output": "I32"
+        "output": "I64"
       }
     },
     {
-      "name": "syn-259",
+      "name": "syn-250",
       "lhs": "(f32.ge ?b ?a)",
       "rhs": "(f32.le ?a ?b)",
       "signature": {
@@ -2880,7 +2777,31 @@
       }
     },
     {
-      "name": "syn-260",
+      "name": "syn-251",
+      "lhs": "(f32.gt ?b ?a)",
+      "rhs": "(f32.lt ?a ?b)",
+      "signature": {
+        "inputs": [
+          "F32",
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-252",
+      "lhs": "(f32.ge ?a ?b)",
+      "rhs": "(f32.le ?b ?a)",
+      "signature": {
+        "inputs": [
+          "F32",
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-253",
       "lhs": "(f32.ne ?a ?b)",
       "rhs": "(f32.ne ?b ?a)",
       "signature": {
@@ -2892,7 +2813,31 @@
       }
     },
     {
-      "name": "syn-261",
+      "name": "syn-254",
+      "lhs": "(f32.gt ?a ?b)",
+      "rhs": "(f32.lt ?b ?a)",
+      "signature": {
+        "inputs": [
+          "F32",
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-255",
+      "lhs": "(f32.eq ?a ?b)",
+      "rhs": "(f32.eq ?b ?a)",
+      "signature": {
+        "inputs": [
+          "F32",
+          "F32"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-256",
       "lhs": "(f32.min ?a ?b)",
       "rhs": "(f32.min ?b ?a)",
       "signature": {
@@ -2904,19 +2849,7 @@
       }
     },
     {
-      "name": "syn-262",
-      "lhs": "(f32.max ?a ?b)",
-      "rhs": "(f32.max ?b ?a)",
-      "signature": {
-        "inputs": [
-          "F32",
-          "F32"
-        ],
-        "output": "F32"
-      }
-    },
-    {
-      "name": "syn-263",
+      "name": "syn-257",
       "lhs": "(f32.mul ?a ?b)",
       "rhs": "(f32.mul ?b ?a)",
       "signature": {
@@ -2928,7 +2861,7 @@
       }
     },
     {
-      "name": "syn-264",
+      "name": "syn-258",
       "lhs": "(f32.add ?a ?b)",
       "rhs": "(f32.add ?b ?a)",
       "signature": {
@@ -2940,7 +2873,19 @@
       }
     },
     {
-      "name": "syn-265",
+      "name": "syn-259",
+      "lhs": "(f32.max ?a ?b)",
+      "rhs": "(f32.max ?b ?a)",
+      "signature": {
+        "inputs": [
+          "F32",
+          "F32"
+        ],
+        "output": "F32"
+      }
+    },
+    {
+      "name": "syn-260",
       "lhs": "(f64.eq ?a ?b)",
       "rhs": "(f64.eq ?b ?a)",
       "signature": {
@@ -2952,43 +2897,7 @@
       }
     },
     {
-      "name": "syn-266",
-      "lhs": "(f64.gt ?b ?a)",
-      "rhs": "(f64.lt ?a ?b)",
-      "signature": {
-        "inputs": [
-          "F64",
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-267",
-      "lhs": "(f64.ge ?a ?b)",
-      "rhs": "(f64.le ?b ?a)",
-      "signature": {
-        "inputs": [
-          "F64",
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-268",
-      "lhs": "(f64.ge ?b ?a)",
-      "rhs": "(f64.le ?a ?b)",
-      "signature": {
-        "inputs": [
-          "F64",
-          "F64"
-        ],
-        "output": "I32"
-      }
-    },
-    {
-      "name": "syn-269",
+      "name": "syn-261",
       "lhs": "(f64.gt ?a ?b)",
       "rhs": "(f64.lt ?b ?a)",
       "signature": {
@@ -3000,7 +2909,43 @@
       }
     },
     {
-      "name": "syn-270",
+      "name": "syn-262",
+      "lhs": "(f64.gt ?b ?a)",
+      "rhs": "(f64.lt ?a ?b)",
+      "signature": {
+        "inputs": [
+          "F64",
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-263",
+      "lhs": "(f64.ge ?a ?b)",
+      "rhs": "(f64.le ?b ?a)",
+      "signature": {
+        "inputs": [
+          "F64",
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-264",
+      "lhs": "(f64.ge ?b ?a)",
+      "rhs": "(f64.le ?a ?b)",
+      "signature": {
+        "inputs": [
+          "F64",
+          "F64"
+        ],
+        "output": "I32"
+      }
+    },
+    {
+      "name": "syn-265",
       "lhs": "(f64.ne ?a ?b)",
       "rhs": "(f64.ne ?b ?a)",
       "signature": {
@@ -3012,31 +2957,7 @@
       }
     },
     {
-      "name": "syn-271",
-      "lhs": "(f64.mul ?a ?b)",
-      "rhs": "(f64.mul ?b ?a)",
-      "signature": {
-        "inputs": [
-          "F64",
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-272",
-      "lhs": "(f64.add ?a ?b)",
-      "rhs": "(f64.add ?b ?a)",
-      "signature": {
-        "inputs": [
-          "F64",
-          "F64"
-        ],
-        "output": "F64"
-      }
-    },
-    {
-      "name": "syn-273",
+      "name": "syn-266",
       "lhs": "(f64.min ?a ?b)",
       "rhs": "(f64.min ?b ?a)",
       "signature": {
@@ -3048,9 +2969,33 @@
       }
     },
     {
-      "name": "syn-274",
+      "name": "syn-267",
       "lhs": "(f64.max ?a ?b)",
       "rhs": "(f64.max ?b ?a)",
+      "signature": {
+        "inputs": [
+          "F64",
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-268",
+      "lhs": "(f64.add ?a ?b)",
+      "rhs": "(f64.add ?b ?a)",
+      "signature": {
+        "inputs": [
+          "F64",
+          "F64"
+        ],
+        "output": "F64"
+      }
+    },
+    {
+      "name": "syn-269",
+      "lhs": "(f64.mul ?a ?b)",
+      "rhs": "(f64.mul ?b ?a)",
       "signature": {
         "inputs": [
           "F64",
