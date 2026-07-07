@@ -75,7 +75,7 @@ struct Cli {
     #[arg(long, short = 'c', value_name = "PATH")]
     csv: Option<std::path::PathBuf>,
 
-    /// Number of parallel jobs for rule synthesis and segment optimization.
+    /// Number of parallel jobs for rule synthesis, segment optimization, and `--opt-locals`.
     #[arg(short = 'j', long = "jobs", default_value_t = 1)]
     jobs: usize,
 
@@ -91,6 +91,18 @@ struct Cli {
     /// (reads `combined_blocks.csv` from wasm-bench; requires WASM input for segment lookup).
     #[arg(long, value_name = "CSV", conflicts_with_all = ["synthesize_only", "segments_only", "print_semantics"])]
     classify_sat_gaps: Option<std::path::PathBuf>,
+
+    /// Optimize local variable allocation per function (MaxSAT, instruction-count objective).
+    #[arg(long, conflicts_with_all = ["synthesize_only", "segments_only", "print_semantics", "classify_sat_gaps", "sat_profile"])]
+    opt_locals: bool,
+
+    /// Per-function solver timeout for `--opt-locals` in milliseconds.
+    #[arg(long, default_value_t = optimize::locals::DEFAULT_LOCALS_TIMEOUT_MS)]
+    locals_timeout_ms: u32,
+
+    /// Maximum functions to optimize with `--opt-locals` (0 = all).
+    #[arg(long, default_value_t = optimize::locals::DEFAULT_LOCALS_FUNCTION_LIMIT)]
+    locals_limit: usize,
 
     /// Print CNF scale / timing profile for the given block id(s) (`function_N_block_M[_part]`).
     #[arg(
@@ -135,6 +147,11 @@ fn main() {
     }
 
     let path = cli.input.clone().expect("WASM path required");
+
+    if cli.opt_locals {
+        run_opt_locals(&path, &cli);
+        return;
+    }
 
     if let Some(csv_path) = &cli.classify_sat_gaps {
         run_classify_sat_gaps(&path, csv_path, &cli);
@@ -207,6 +224,23 @@ fn main() {
         eprintln!("wrote statistics to {}", csv_path.display());
     }
     let _ = io::stdout().flush();
+}
+
+fn run_opt_locals(path: &std::path::Path, cli: &Cli) {
+    use optimize::locals::{OptLocalsConfig, optimize_wasm_file, print_locals_summary};
+
+    let cfg = OptLocalsConfig {
+        timeout_ms: cli.locals_timeout_ms,
+        max_functions: cli.locals_limit,
+    };
+    let (module, results, stats) = optimize_wasm_file(path, &cfg, cli.jobs).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
+    for warning in &module.warnings {
+        eprintln!("warning: {warning}");
+    }
+    print_locals_summary(path, &results, &stats, cli.locals_limit);
 }
 
 fn search_config_from_cli(cli: &Cli) -> optimize::SearchConfig {

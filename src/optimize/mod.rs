@@ -1,5 +1,6 @@
 //! Phase 2: backward shortest-path search over straight-line Wasm segments (idea.md §2–§8).
 
+pub mod locals;
 mod canon;
 #[cfg(test)]
 pub(crate) mod fixtures;

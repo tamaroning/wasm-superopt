@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod bench_parse;
 mod deps;
+mod functions;
 mod materialize;
 mod parse;
 mod segment;
@@ -11,6 +12,10 @@ mod stack_analysis;
 mod superstack_disasm;
 
 pub use deps::{ops_respect_dependencies, storage_ops_preserved};
+pub use functions::{
+    FuncInstr, LocalValType, OtherInstr, WasmFunction, WasmModuleFunctions,
+    parse_wasm_functions, parse_wasm_functions_bytes,
+};
 pub use materialize::materialize_segments;
 #[cfg(test)]
 pub use parse::parse_wasm_bytes;
