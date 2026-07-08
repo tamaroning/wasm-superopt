@@ -3,6 +3,7 @@
 mod analysis;
 mod apply;
 mod encode;
+mod statistics;
 
 use crate::wasm::{WasmFunction, WasmModuleFunctions, parse_wasm_functions};
 use analysis::{Analysis, basic_block_count};
@@ -12,6 +13,8 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
+
+pub use statistics::{LocalsFunctionCsvRow, locals_function_csv_rows, write_locals_function_csv};
 
 pub const DEFAULT_LOCALS_TIMEOUT_MS: u32 = 30_000;
 /// Default cap on functions to optimize (0 = all).
@@ -113,6 +116,10 @@ fn format_problem_metrics(bb_count: usize, webs: usize, interferes: usize) -> St
 }
 
 impl FunctionOptResult {
+    pub fn h4_clauses(&self) -> usize {
+        solver_h4_clauses(self.webs, self.interferes)
+    }
+
     pub fn status_label(&self) -> &'static str {
         if self.skipped {
             if self

@@ -15,6 +15,9 @@ wasm-bench-run = "wasm_bench.run_benchmarks:cli"
 wasm-bench-merge = "wasm_bench.merge_raw_csvs:cli"
 wasm-bench-plot = "wasm_bench.plot_length_vs_time:cli"
 wasm-bench-classify-gaps = "wasm_bench.classify_sat_gaps:cli"
+wasm-locals-run = "wasm_bench.run_locals_benchmarks:cli"
+wasm-locals-merge = "wasm_bench.merge_locals_csvs:cli"
+wasm-locals-plot = "wasm_bench.plot_locals_reduction:cli"
 
 [build-system]
 requires = ["hatchling"]

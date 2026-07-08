@@ -227,7 +227,10 @@ fn main() {
 }
 
 fn run_opt_locals(path: &std::path::Path, cli: &Cli) {
-    use optimize::locals::{OptLocalsConfig, optimize_wasm_file, print_locals_summary};
+    use optimize::locals::{
+        OptLocalsConfig, locals_function_csv_rows, optimize_wasm_file, print_locals_summary,
+        write_locals_function_csv,
+    };
 
     let cfg = OptLocalsConfig {
         timeout_ms: cli.locals_timeout_ms,
@@ -241,6 +244,14 @@ fn run_opt_locals(path: &std::path::Path, cli: &Cli) {
         eprintln!("warning: {warning}");
     }
     print_locals_summary(path, &results, &stats, cli.locals_limit);
+    if let Some(csv_path) = &cli.csv {
+        let rows = locals_function_csv_rows(&results);
+        write_locals_function_csv(csv_path, &rows).unwrap_or_else(|e| {
+            eprintln!("error writing {}: {e}", csv_path.display());
+            std::process::exit(1);
+        });
+        eprintln!("wrote locals statistics to {}", csv_path.display());
+    }
 }
 
 fn search_config_from_cli(cli: &Cli) -> optimize::SearchConfig {
